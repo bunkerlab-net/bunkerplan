@@ -1,0 +1,45 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bunkerplan",
+  "main": "src/server.ts",
+  "compatibility_date": "2026-07-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": { "directory": "dist/client" },
+  // BETTER_AUTH_SECRET is a secret, never a var:
+  //   wrangler secret put BETTER_AUTH_SECRET
+  //
+  // NOTE: bindings are NOT inherited by named environments. If you add
+  // `[env.staging]`, repeat all three blocks below inside it — a missing
+  // binding fails at runtime, not at deploy time.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bunkerplan",
+      // Placeholder: valid enough for `--local` dev, refused by `bun run
+      // deploy`. Replace with the id printed by `wrangler d1 create bunkerplan`.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "drizzle/sqlite",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      // `wrangler r2 bucket create bunkerplan`
+      "bucket_name": "bunkerplan",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      // Placeholder: see the note on database_id above.
+      // `wrangler kv namespace create KV` prints the real id.
+      "id": "00000000000000000000000000000000",
+    },
+  ],
+  "vars": {
+    // REPLACE-ME before deploying. WebAuthn compares origins exactly, so
+    // shipping the localhost value makes every passkey ceremony fail.
+    "PUBLIC_BASE_URL": "http://localhost:3000",
+  },
+}
