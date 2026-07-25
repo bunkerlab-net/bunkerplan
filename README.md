@@ -60,4 +60,6 @@ Plans are served with `Content-Security-Policy: sandbox`, which puts each
 document in an opaque origin so it cannot reach the uploader's session.
 
 `GET /healthz` returns `200` when storage, the database and KV are all
-reachable, `503` naming the ones that are not.
+reachable, `503` naming the ones that are not. It is a self-hosting probe and
+`404`s on Cloudflare, where nothing polls it and an unauthenticated public
+request would otherwise cost three billable backend operations.

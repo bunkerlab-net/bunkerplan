@@ -231,6 +231,18 @@ exception never reaches the response body, because a driver error can embed the
 connection string and `/healthz` is unauthenticated. It is logged instead, where
 an operator can act on it.
 
+The probe is self-hosted only: on Cloudflare it returns `404`. Nothing there
+polls it — the platform reports Worker health — and because the route is
+unauthenticated, each call would turn one public request into three billable
+backend operations (a D1 query, a KV read, an R2 head), which anyone holding the
+URL could aim at your bill. On Workers the refusal is returned before any
+binding is touched.
+
+Note the limit of that fix: the Worker request itself is still billed, exactly
+as it is for any other path. Removing that cost too means a rate-limiting or
+WAF rule in front of the Worker, which lives in Cloudflare's own configuration
+rather than in this repo.
+
 Logs are sanitised on the way out. Every line passes through two filters before
 it leaves the process:
 

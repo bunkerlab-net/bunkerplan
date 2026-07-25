@@ -1,7 +1,13 @@
 import { createAuth } from "../auth/instance.ts";
 import { loadConfig } from "../config.ts";
 import { createLogger } from "../log.ts";
-import type { Db, KvStore, PlanStorage, Services } from "../services/types.ts";
+import type {
+  Db,
+  KvStore,
+  PlanStorage,
+  RuntimeTarget,
+  Services,
+} from "../services/types.ts";
 
 /**
  * Node/Bun wiring. Structurally matches src/runtime/cloudflare.ts.
@@ -11,6 +17,8 @@ import type { Db, KvStore, PlanStorage, Services } from "../services/types.ts";
  * chose SQLite, or `bun:sqlite` when running under plain Node, would fail at
  * module scope for a driver that is never used.
  */
+
+export const runtime: RuntimeTarget = "node";
 
 let services: Promise<Services> | undefined;
 

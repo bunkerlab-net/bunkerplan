@@ -4,7 +4,7 @@ import { loadConfig } from "../config.ts";
 import { createD1Db } from "../db/d1.ts";
 import { createWorkersKv } from "../kv/workers-kv.ts";
 import { createLogger } from "../log.ts";
-import type { Services } from "../services/types.ts";
+import type { RuntimeTarget, Services } from "../services/types.ts";
 import { createR2Storage } from "../storage/r2.ts";
 
 /**
@@ -19,6 +19,8 @@ import { createR2Storage } from "../storage/r2.ts";
  * wrangler.jsonc; never hand-write the binding interface, or it drifts from the
  * bindings that actually exist.
  */
+
+export const runtime: RuntimeTarget = "cloudflare";
 
 let services: Promise<Services> | undefined;
 
