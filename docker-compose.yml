@@ -1,0 +1,101 @@
+# Exercises every non-Cloudflare driver at once: Postgres + Valkey + MinIO.
+# Passing here means the same code that runs on Workers also runs self-hosted.
+services:
+  postgres:
+    image: docker.io/postgres:18-alpine
+    environment:
+      POSTGRES_USER: bunkerplan
+      POSTGRES_PASSWORD: bunkerplan
+      POSTGRES_DB: bunkerplan
+    volumes:
+      # Postgres 18+ images want a single mount at /var/lib/postgresql and
+      # place the cluster in a major-version subdirectory beneath it.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bunkerplan -d bunkerplan"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: docker.io/valkey/valkey:9-alpine
+    command: ["valkey-server", "--save", "60", "1"]
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: docker.io/minio/minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: bunkerplan
+      MINIO_ROOT_PASSWORD: bunkerplan-secret
+    ports:
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: docker.io/minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 bunkerplan bunkerplan-secret &&
+      mc mb --ignore-existing local/bunkerplan
+      "
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://bunkerplan:bunkerplan@postgres:5432/bunkerplan
+
+  app:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      DB_DRIVER: postgres
+      DATABASE_URL: postgres://bunkerplan:bunkerplan@postgres:5432/bunkerplan
+      KV_DRIVER: valkey
+      VALKEY_URL: redis://valkey:6379
+      STORAGE_DRIVER: s3
+      S3_BUCKET: bunkerplan
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_FORCE_PATH_STYLE: "true"
+      # MinIO has no credential provider chain, so explicit keys are correct
+      # HERE ONLY. A real AWS deployment MUST omit S3_ACCESS_KEY_ID,
+      # S3_SECRET_ACCESS_KEY and S3_ENDPOINT and attach an IAM role instead —
+      # the SDK then resolves and rotates credentials automatically.
+      S3_ACCESS_KEY_ID: bunkerplan
+      S3_SECRET_ACCESS_KEY: bunkerplan-secret
+
+volumes:
+  postgres-data:
+  valkey-data:
+  minio-data:

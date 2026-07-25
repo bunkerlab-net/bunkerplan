@@ -1,0 +1,17 @@
+.git
+.github
+.wrangler
+.tanstack
+.output
+dist
+node_modules
+data
+docs
+fixtures
+tests
+*.md
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+worker-configuration.d.ts
