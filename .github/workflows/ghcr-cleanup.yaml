@@ -1,0 +1,52 @@
+name: GHCR Cleanup
+
+# The build pushes one image per architecture as `sha-<sha>-<arch>` so that the
+# publish job has something to join into a single index. Those tags are
+# scaffolding - once the index exists nothing should ever pull them again, but
+# they stay in the package listing and bury the tags that matter.
+#
+# Nothing else is named `sha-*`. Published tags carry the commit as a suffix
+# (`master-a1b2c3d`), so this pattern cannot reach a release.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Log what would be deleted without deleting it
+        required: false
+        default: true
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  # The action is documented as unsafe to run twice against one package.
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Prune per-architecture build tags
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          owner: ${{ github.repository_owner }}
+          packages: bunkerplan,bunkerplan-migrate
+          delete-tags: sha-*
+          # Publishing a new index leaves the previous one unreferenced once its
+          # tags move, along with the platform images beneath it.
+          delete-untagged: true
+          # Applies to every rule above. A build that has pushed both
+          # architectures but not yet stitched the index is otherwise a valid
+          # deletion target while it is still running.
+          older-than: 7 days
+          # Warns if any multi-arch image is left missing a platform child.
+          validate: true
+          # Scheduled runs delete. A human pressing "Run workflow" gets a
+          # preview unless they deliberately ask for the real thing.
+          dry-run: ${{ inputs.dry-run || false }}
