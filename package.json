@@ -10,6 +10,7 @@
     "build:node": "BUILD_TARGET=node vite build",
     "cf-typegen": "wrangler types",
     "check": "biome check",
+    "clean": "rm -rf .output .tanstack .wrangler dist node_modules",
     "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts",
     "db:migrate:pg": "drizzle-kit migrate --config drizzle.pg.config.ts",
     "db:migrate:sqlite": "drizzle-kit migrate --config drizzle.sqlite.config.ts",
