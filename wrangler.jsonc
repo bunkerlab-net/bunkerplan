@@ -10,6 +10,18 @@
   "assets": {
     "directory": "dist/client",
   },
+  // Without this, `wrangler deploy` DROPS the custom domain configured in the
+  // dashboard and the Worker stops answering on plan.bunkerlab.net. Deploy
+  // treats this file as the source of truth for routes, not the dashboard.
+  //
+  // `zone_name` is not valid alongside `custom_domain` — the schema forbids
+  // it and Cloudflare infers the zone from the hostname.
+  "routes": [
+    {
+      "pattern": "plan.bunkerlab.net",
+      "custom_domain": true,
+    },
+  ],
   // BETTER_AUTH_SECRET is a secret, never a var:
   //   wrangler secret put BETTER_AUTH_SECRET
   //
@@ -34,12 +46,25 @@
   "kv_namespaces": [
     {
       "binding": "KV",
-      // Placeholder: see the note on database_id above.
       // `wrangler kv namespace create KV` prints the real id.
       "id": "a28cd77677104536b3641ce51776e20d",
     },
   ],
   "vars": {
     "PUBLIC_BASE_URL": "https://plan.bunkerlab.net",
+    // DO NOT REMOVE OR CHANGE once anyone has registered. This is the WebAuthn
+    // relying-party id; every stored credential is bound to it. While a
+    // different value is in place no existing passkey can be used, and since
+    // there is no password there is no other way in — restoring this exact
+    // value is the only fix. Migrating away deliberately means every user
+    // re-registers from scratch.
+    //
+    // It is set explicitly because the default is the hostname of
+    // PUBLIC_BASE_URL, which would be `plan.bunkerlab.net`. The parent domain
+    // scopes credentials to bunkerlab.net instead. That alone does NOT let
+    // other subdomains run ceremonies — `origin` in src/auth/options.ts is
+    // pinned to PUBLIC_BASE_URL — but it keeps that possible later without
+    // invalidating anything already registered.
+    "RP_ID": "bunkerlab.net",
   },
 }

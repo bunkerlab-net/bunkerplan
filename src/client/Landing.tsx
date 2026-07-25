@@ -13,7 +13,8 @@ function Hero() {
         BunkerPlan hosts self-contained documents — reports, dashboards,
         one-page briefs — at short public URLs. No build step and no framework.
         Uploads must be <a href="#standalone">genuinely standalone</a>: a
-        document that references anything external is refused.
+        document that statically loads an external resource is refused, though
+        links out are fine.
       </p>
     </div>
   );
@@ -77,8 +78,8 @@ function Features() {
         <h2 className="card-title">Served in a sandbox</h2>
         <p>
           Plans are returned in an opaque origin. Scripts inside a document
-          still run, but they are not same-origin with this site, so they can
-          reach neither your session cookie nor the API.
+          still run, but they are not same-origin with this site, so they cannot
+          read your session or act as you.
         </p>
       </section>
       <section className="card">
