@@ -36,12 +36,10 @@
       "binding": "KV",
       // Placeholder: see the note on database_id above.
       // `wrangler kv namespace create KV` prints the real id.
-      "id": "00000000000000000000000000000000",
+      "id": "a28cd77677104536b3641ce51776e20d",
     },
   ],
   "vars": {
-    // REPLACE-ME before deploying. WebAuthn compares origins exactly, so
-    // shipping the localhost value makes every passkey ceremony fail.
-    "PUBLIC_BASE_URL": "http://localhost:3000",
+    "PUBLIC_BASE_URL": "https://plan.bunkerlab.net",
   },
 }
