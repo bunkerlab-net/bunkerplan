@@ -13,6 +13,7 @@ Upload a standalone HTML document, get a public URL at `https://{host}/{id}`.
 ## Develop
 
 ```sh
+git clone https://github.com/bunkerlab-net/bunkerplan.git && cd bunkerplan
 bun install
 cp .env.example .env                              # set BETTER_AUTH_SECRET
 bunx wrangler d1 migrations apply bunkerplan --local

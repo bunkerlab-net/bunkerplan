@@ -15,6 +15,7 @@ The provided stack exercises all three swaps at once (Postgres + Valkey +
 MinIO):
 
 ```sh
+git clone https://github.com/bunkerlab-net/bunkerplan.git && cd bunkerplan
 cp .env.example .env      # set BETTER_AUTH_SECRET
 docker compose up --build -d
 curl -s localhost:3000/healthz

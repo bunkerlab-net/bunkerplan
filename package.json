@@ -1,6 +1,7 @@
 {
   "name": "bunkerplan",
   "private": true,
+  "repository": "https://github.com/bunkerlab-net/bunkerplan",
   "type": "module",
   "module": "src/server.ts",
   "scripts": {
