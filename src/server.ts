@@ -14,7 +14,7 @@ import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
  * theatre, so the directives below are limited to the ones that harden real
  * attack surface without touching scripts.
  *
- * `/{planId}` sets its own `Content-Security-Policy: sandbox` — the control
+ * `/p/{planId}` sets its own `Content-Security-Policy: sandbox` — the control
  * that stops an uploaded plan acting on its uploader's session. Every header
  * below is only applied when absent, so that route's deliberate values win.
  */

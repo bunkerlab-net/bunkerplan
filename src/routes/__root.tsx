@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getRequestUrl } from "@tanstack/react-start/server";
+import { NotFound } from "../client/NotFound.tsx";
 import appCss from "../styles.css?url";
 
 const TITLE = "BunkerPlan";
@@ -68,6 +69,7 @@ export const Route = createRootRoute({
     };
   },
   component: RootDocument,
+  notFoundComponent: NotFound,
 });
 
 function RootDocument() {

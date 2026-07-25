@@ -10,28 +10,19 @@ import { customAlphabet } from "nanoid";
 const planAlphabet =
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-const generate = customAlphabet(planAlphabet);
+/**
+ * Plans are served from `/p/{id}` (src/routes/p.$planId.tsx), never from the
+ * root, so no reserved-word list is needed: an id cannot collide with an app
+ * route, and a route added later cannot shadow an already-published plan.
+ *
+ * That holds only while `/p/` stays exclusively the plan namespace. A static
+ * route declared under it — `/p/new` — would out-rank `/p/$planId` and shadow
+ * that id, which is the very failure this move exists to remove. Put app
+ * routes anywhere else.
+ */
+export const newPlanId = customAlphabet(planAlphabet);
 
 /** No 0/1/i/l/o lookalikes — handles get read aloud and retyped. */
 const handleAlphabet = "23456789abcdefghjkmnpqrstuvwxyz";
 
 export const newUserHandle = customAlphabet(handleAlphabet, 10);
-
-/**
- * Static routes out-rank the `$planId` route, so an id colliding with one would
- * be silently unreachable. At the default length this branch is never taken,
- * but PLAN_ID_LENGTH can be lowered far enough to make short ids plausible.
- */
-const RESERVED: Record<string, true> = {
-  api: true,
-  assets: true,
-  docs: true,
-  healthz: true,
-  favicon: true,
-};
-
-export function newPlanId(length: number): string {
-  let id = generate(length);
-  while (RESERVED[id.toLowerCase()] === true) id = generate(length);
-  return id;
-}

@@ -172,7 +172,7 @@ confusing 403 much later.
   linger in another region until the database fallback catches it. Sessions are
   stored in the database as well as KV precisely so a KV miss degrades to a
   database read rather than logging the user out.
-- **Do not remove the `Content-Security-Policy: sandbox` header on `/{id}`.**
+- **Do not remove the `Content-Security-Policy: sandbox` header on `/p/{id}`.**
   Plans are untrusted HTML served from the same origin as the session cookie.
   Without the sandbox, a plan's inline script could issue credentialed
   same-origin requests to `/api/*` and take over the uploader's account.
@@ -204,7 +204,7 @@ curl -X PUT https://plans.example.com/api/plans \
   -H "x-api-key: bkp_..." \
   -H "content-type: text/html" \
   --data-binary @plan.html
-# 201 {"id":"...","url":"https://plans.example.com/..."}
+# 201 {"id":"...","url":"https://plans.example.com/p/..."}
 
 # Delete
 curl -X DELETE https://plans.example.com/api/plans/<id> -H "x-api-key: bkp_..."
@@ -222,6 +222,12 @@ boundary. Inline `<style>`, inline `<script>`,
 
 Note that this is a static check. A plan's inline script can still call `fetch`
 at runtime; the CSP sandbox is what contains it.
+
+Plans are served from `GET /p/{id}`, and `/p/` is reserved for them alone.
+Routing anything else under that prefix would out-rank the plan route and
+silently shadow any plan holding that id, which is exactly the collision the
+prefix exists to prevent. App routes go anywhere else; because they do, plan
+ids need no reserved-word list.
 
 ## Health
 

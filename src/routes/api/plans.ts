@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getServices } from "#runtime";
 import { validateStandaloneHtml } from "../../html/validate.ts";
+import { planUrl } from "../../http/plan-url.ts";
 import { checkRateLimit } from "../../http/rate-limit.ts";
 import {
   resolveSessionUserId,
@@ -97,7 +98,7 @@ async function createPlan(request: Request): Promise<Response> {
     return problem(502, "storage unavailable");
   }
 
-  const url = `${config.publicBaseUrl}/${id}`;
+  const url = planUrl(config.publicBaseUrl, id);
   return Response.json(
     { id, url },
     { status: 201, headers: { location: url } },
@@ -114,7 +115,7 @@ async function listPlans(request: Request): Promise<Response> {
   return Response.json({
     plans: rows.map((row) => ({
       id: row.id,
-      url: `${config.publicBaseUrl}/${row.id}`,
+      url: planUrl(config.publicBaseUrl, row.id),
       size: row.size,
       createdAt: row.createdAt.toISOString(),
     })),

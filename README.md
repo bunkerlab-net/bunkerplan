@@ -1,6 +1,6 @@
 # BunkerPlan
 
-Upload a standalone HTML document, get a public URL at `https://{host}/{id}`.
+Upload a standalone HTML document, get a public URL at `https://{host}/p/{id}`.
 
 - **Passkeys only.** No email, no username, no password, no OAuth. A brand-new
   visitor registers with nothing but a passkey, and one WebAuthn prompt signs
@@ -44,7 +44,7 @@ Valkey and MinIO.
 curl -X PUT https://plans.example.com/api/plans \
   -H "x-api-key: bkp_..." -H "content-type: text/html" \
   --data-binary @plan.html
-# 201 {"id":"...","url":"https://plans.example.com/..."}
+# 201 {"id":"...","url":"https://plans.example.com/p/..."}
 
 curl -X DELETE https://plans.example.com/api/plans/<id> -H "x-api-key: bkp_..."
 # 204

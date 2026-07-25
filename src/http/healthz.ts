@@ -15,8 +15,7 @@ const CHECKS = ["storage", "db", "kv"] as const;
  * Worker health itself — while every call fans one unauthenticated public
  * request out into three billable backend operations: a D1 query, a KV read and
  * an R2 head. That is an amplifier anyone holding the URL can point at the
- * account's bill, so the route refuses outright and reports the same 404 as any
- * other path that does not exist.
+ * account's bill, so the route refuses outright with a plain `404`.
  *
  * `services` is a getter rather than a value so the refusal returns before any
  * service lookup, not merely before the probes.

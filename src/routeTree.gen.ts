@@ -8,180 +8,180 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as PlanIdRouteImport } from './routes/$planId'
-import { Route as HealthzRouteImport } from './routes/healthz'
-import { Route as ApiPlansRouteImport } from './routes/api/plans'
-import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as ApiPlansIdRouteImport } from './routes/api/plans.$id'
+import { Route as rootRouteImport } from "./routes/__root";
+import { Route as IndexRouteImport } from "./routes/index";
+import { Route as HealthzRouteImport } from "./routes/healthz";
+import { Route as ApiPlansRouteImport } from "./routes/api/plans";
+import { Route as PPlanIdRouteImport } from "./routes/p.$planId";
+import { Route as ApiAuthSplatRouteImport } from "./routes/api/auth/$";
+import { Route as ApiPlansIdRouteImport } from "./routes/api/plans.$id";
 
 const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+  id: "/",
+  path: "/",
   getParentRoute: () => rootRouteImport,
-} as any)
-const PlanIdRoute = PlanIdRouteImport.update({
-  id: '/$planId',
-  path: '/$planId',
-  getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const HealthzRoute = HealthzRouteImport.update({
-  id: '/healthz',
-  path: '/healthz',
+  id: "/healthz",
+  path: "/healthz",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ApiPlansRoute = ApiPlansRouteImport.update({
-  id: '/api/plans',
-  path: '/api/plans',
+  id: "/api/plans",
+  path: "/api/plans",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
+const PPlanIdRoute = PPlanIdRouteImport.update({
+  id: "/p/$planId",
+  path: "/p/$planId",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
-  id: '/api/auth/$',
-  path: '/api/auth/$',
+  id: "/api/auth/$",
+  path: "/api/auth/$",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ApiPlansIdRoute = ApiPlansIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
+  id: "/$id",
+  path: "/$id",
   getParentRoute: () => ApiPlansRoute,
-} as any)
+} as any);
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/$planId': typeof PlanIdRoute
-  '/healthz': typeof HealthzRoute
-  '/api/plans': typeof ApiPlansRouteWithChildren
-  '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/plans/$id': typeof ApiPlansIdRoute
+  "/": typeof IndexRoute;
+  "/healthz": typeof HealthzRoute;
+  "/api/plans": typeof ApiPlansRouteWithChildren;
+  "/p/$planId": typeof PPlanIdRoute;
+  "/api/auth/$": typeof ApiAuthSplatRoute;
+  "/api/plans/$id": typeof ApiPlansIdRoute;
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/$planId': typeof PlanIdRoute
-  '/healthz': typeof HealthzRoute
-  '/api/plans': typeof ApiPlansRouteWithChildren
-  '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/plans/$id': typeof ApiPlansIdRoute
+  "/": typeof IndexRoute;
+  "/healthz": typeof HealthzRoute;
+  "/api/plans": typeof ApiPlansRouteWithChildren;
+  "/p/$planId": typeof PPlanIdRoute;
+  "/api/auth/$": typeof ApiAuthSplatRoute;
+  "/api/plans/$id": typeof ApiPlansIdRoute;
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/$planId': typeof PlanIdRoute
-  '/healthz': typeof HealthzRoute
-  '/api/plans': typeof ApiPlansRouteWithChildren
-  '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/plans/$id': typeof ApiPlansIdRoute
+  __root__: typeof rootRouteImport;
+  "/": typeof IndexRoute;
+  "/healthz": typeof HealthzRoute;
+  "/api/plans": typeof ApiPlansRouteWithChildren;
+  "/p/$planId": typeof PPlanIdRoute;
+  "/api/auth/$": typeof ApiAuthSplatRoute;
+  "/api/plans/$id": typeof ApiPlansIdRoute;
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
+  fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
-    | '/'
-    | '/$planId'
-    | '/healthz'
-    | '/api/plans'
-    | '/api/auth/$'
-    | '/api/plans/$id'
-  fileRoutesByTo: FileRoutesByTo
+    | "/"
+    | "/healthz"
+    | "/api/plans"
+    | "/p/$planId"
+    | "/api/auth/$"
+    | "/api/plans/$id";
+  fileRoutesByTo: FileRoutesByTo;
   to:
-    | '/'
-    | '/$planId'
-    | '/healthz'
-    | '/api/plans'
-    | '/api/auth/$'
-    | '/api/plans/$id'
+    | "/"
+    | "/healthz"
+    | "/api/plans"
+    | "/p/$planId"
+    | "/api/auth/$"
+    | "/api/plans/$id";
   id:
-    | '__root__'
-    | '/'
-    | '/$planId'
-    | '/healthz'
-    | '/api/plans'
-    | '/api/auth/$'
-    | '/api/plans/$id'
-  fileRoutesById: FileRoutesById
+    | "__root__"
+    | "/"
+    | "/healthz"
+    | "/api/plans"
+    | "/p/$planId"
+    | "/api/auth/$"
+    | "/api/plans/$id";
+  fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  PlanIdRoute: typeof PlanIdRoute
-  HealthzRoute: typeof HealthzRoute
-  ApiPlansRoute: typeof ApiPlansRouteWithChildren
-  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  IndexRoute: typeof IndexRoute;
+  HealthzRoute: typeof HealthzRoute;
+  ApiPlansRoute: typeof ApiPlansRouteWithChildren;
+  PPlanIdRoute: typeof PPlanIdRoute;
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute;
 }
 
-declare module '@tanstack/react-router' {
+declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/$planId': {
-      id: '/$planId'
-      path: '/$planId'
-      fullPath: '/$planId'
-      preLoaderRoute: typeof PlanIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/healthz': {
-      id: '/healthz'
-      path: '/healthz'
-      fullPath: '/healthz'
-      preLoaderRoute: typeof HealthzRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/plans': {
-      id: '/api/plans'
-      path: '/api/plans'
-      fullPath: '/api/plans'
-      preLoaderRoute: typeof ApiPlansRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/$': {
-      id: '/api/auth/$'
-      path: '/api/auth/$'
-      fullPath: '/api/auth/$'
-      preLoaderRoute: typeof ApiAuthSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/plans/$id': {
-      id: '/api/plans/$id'
-      path: '/$id'
-      fullPath: '/api/plans/$id'
-      preLoaderRoute: typeof ApiPlansIdRouteImport
-      parentRoute: typeof ApiPlansRoute
-    }
+    "/": {
+      id: "/";
+      path: "/";
+      fullPath: "/";
+      preLoaderRoute: typeof IndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/healthz": {
+      id: "/healthz";
+      path: "/healthz";
+      fullPath: "/healthz";
+      preLoaderRoute: typeof HealthzRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/api/plans": {
+      id: "/api/plans";
+      path: "/api/plans";
+      fullPath: "/api/plans";
+      preLoaderRoute: typeof ApiPlansRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/p/$planId": {
+      id: "/p/$planId";
+      path: "/p/$planId";
+      fullPath: "/p/$planId";
+      preLoaderRoute: typeof PPlanIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/api/auth/$": {
+      id: "/api/auth/$";
+      path: "/api/auth/$";
+      fullPath: "/api/auth/$";
+      preLoaderRoute: typeof ApiAuthSplatRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/api/plans/$id": {
+      id: "/api/plans/$id";
+      path: "/$id";
+      fullPath: "/api/plans/$id";
+      preLoaderRoute: typeof ApiPlansIdRouteImport;
+      parentRoute: typeof ApiPlansRoute;
+    };
   }
 }
 
 interface ApiPlansRouteChildren {
-  ApiPlansIdRoute: typeof ApiPlansIdRoute
+  ApiPlansIdRoute: typeof ApiPlansIdRoute;
 }
 
 const ApiPlansRouteChildren: ApiPlansRouteChildren = {
   ApiPlansIdRoute: ApiPlansIdRoute,
-}
+};
 
 const ApiPlansRouteWithChildren = ApiPlansRoute._addFileChildren(
   ApiPlansRouteChildren,
-)
+);
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  PlanIdRoute: PlanIdRoute,
   HealthzRoute: HealthzRoute,
   ApiPlansRoute: ApiPlansRouteWithChildren,
+  PPlanIdRoute: PPlanIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-}
+};
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+  ._addFileTypes<FileRouteTypes>();
 
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
+import type { getRouter } from "./router.tsx";
+import type { createStart } from "@tanstack/react-start";
+declare module "@tanstack/react-start" {
   interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
+    ssr: true;
+    router: Awaited<ReturnType<typeof getRouter>>;
   }
 }

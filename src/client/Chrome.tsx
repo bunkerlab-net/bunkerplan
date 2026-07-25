@@ -1,45 +1,52 @@
 import { authClient } from "./auth.ts";
 
 interface NavProps {
-  handle: string | null;
-  busy: boolean;
-  onSignIn: () => void;
+  handle?: string | null;
+  busy?: boolean;
+  /**
+   * Omitted on pages rendered without an auth context, such as the 404 served
+   * from the plan path. The nav then carries the wordmark alone, which is
+   * better than a sign-in button that cannot run a ceremony.
+   */
+  onSignIn?: () => void;
 }
 
-export function SiteNav({ handle, busy, onSignIn }: NavProps) {
+export function SiteNav({ handle = null, busy = false, onSignIn }: NavProps) {
   return (
     <nav className="nav">
       <div className="shell nav-inner">
         <a className="wordmark" href="/">
           BunkerPlan
         </a>
-        <div className="nav-right">
-          {handle === null ? (
-            <button
-              type="button"
-              className="btn-text"
-              disabled={busy}
-              onClick={onSignIn}
-            >
-              Sign in
-            </button>
-          ) : (
-            <>
-              <span className="nav-handle">{handle}</span>
+        {onSignIn !== undefined && (
+          <div className="nav-right">
+            {handle === null ? (
               <button
                 type="button"
                 className="btn-text"
-                onClick={() =>
-                  void authClient()
-                    .signOut()
-                    .then(() => window.location.reload())
-                }
+                disabled={busy}
+                onClick={onSignIn}
               >
-                Sign out
+                Sign in
               </button>
-            </>
-          )}
-        </div>
+            ) : (
+              <>
+                <span className="nav-handle">{handle}</span>
+                <button
+                  type="button"
+                  className="btn-text"
+                  onClick={() =>
+                    void authClient()
+                      .signOut()
+                      .then(() => window.location.reload())
+                  }
+                >
+                  Sign out
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </nav>
   );
@@ -62,7 +69,7 @@ export function SiteFooter() {
             <ul>
               <li className="mono">PUT /api/plans</li>
               <li className="mono">DELETE /api/plans/:id</li>
-              <li className="mono">GET /:id</li>
+              <li className="mono">GET /p/:id</li>
             </ul>
           </div>
           <div>
