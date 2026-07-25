@@ -230,3 +230,55 @@ jobs:
           docker buildx imagetools create "${args[@]}" \
             "${IMAGE}:sha-${SHA}-amd64" \
             "${IMAGE}:sha-${SHA}-arm64"
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: [check]
+    # Tag pushes publish images. Only master ships the Worker.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    environment:
+      name: production
+      url: https://plan.bunkerlab.net
+    # Serialise deploys across runs. The workflow-level group is per-ref and
+    # deliberately does not cancel pushes, so two quick merges to master would
+    # otherwise race to be the last writer.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install: true
+          cache: true
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.bun/cache
+            node_modules
+          key: ${{ runner.os }}-${{ runner.arch }}-bun-${{ hashFiles('**/bun.lock') }}
+      - run: bun install --frozen-lockfile
+
+      # Schema first: the reverse order puts the new Worker in front of a table
+      # it expects to exist. Wrangler skips its confirmation when it detects CI,
+      # captures a backup, and rolls a failed migration back to the previous one.
+      - name: Apply D1 migrations
+        run: bun wrangler d1 migrations apply bunkerplan --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # `bun run deploy` is the path a local deploy already takes: refuse the
+      # dev placeholders, build, then deploy the generated config rather than
+      # wrangler.jsonc. Calling wrangler directly here would be a second
+      # mechanism, free to drift from the one people run by hand.
+      - name: Deploy Worker
+        run: bun run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
