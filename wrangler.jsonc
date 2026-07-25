@@ -20,8 +20,21 @@
     {
       "pattern": "plan.bunkerlab.net",
       "custom_domain": true,
+      "enabled": true,
+      "previews_enabled": false,
     },
   ],
+  // plan.bunkerlab.net is the ONLY origin this app can authenticate on:
+  // `origin` in src/auth/options.ts is pinned to PUBLIC_BASE_URL, so a
+  // *.workers.dev or preview URL would serve a mirror where every passkey
+  // ceremony fails, plus a second public URL for uploaded plans.
+  //
+  // Both are stated outright because they are not simply defaults. Defining
+  // `routes` already forces workers_dev to false, and leaving that implicit
+  // hides a real change from whoever reads this next. Set both to true to
+  // restore the fallback URLs.
+  "workers_dev": false,
+  "preview_urls": false,
   // BETTER_AUTH_SECRET is a secret, never a var:
   //   wrangler secret put BETTER_AUTH_SECRET
   //
