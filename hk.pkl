@@ -10,15 +10,17 @@ import "package://github.com/jdx/hk/releases/download/v1.53.0/hk@1.53.0#/Builtin
 // is reproducible, but reformatting them would put the working copy out of
 // step with the recorded hashes.
 //
-// The other two are generated: `worker-configuration.d.ts` by `wrangler
-// types` and `src/routeTree.gen.ts` by the router plugin. Both are tracked so
-// a fresh clone typechecks, and both are overwritten wholesale on the next
-// run, so formatting them achieves nothing.
+// The rest are generated: `worker-configuration.d.ts` by `wrangler types`,
+// `src/routeTree.gen.ts` by the router plugin, and `drizzle/` by
+// `drizzle-kit generate`. All are tracked so a fresh clone typechecks and
+// migrates, and all are overwritten wholesale on the next run, so formatting
+// them only guarantees the hook fails again after every regeneration.
 local vendored =
   List(
     ".agents/skills/**",
     "worker-configuration.d.ts",
     "src/routeTree.gen.ts",
+    "drizzle/**",
   )
 
 local linters = new Mapping<String, Step> {
