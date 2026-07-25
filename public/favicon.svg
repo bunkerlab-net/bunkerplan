@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="BunkerPlan">
+  <path d="M7 3 H20 L26 9 V28 A1 1 0 0 1 25 29 H7 A1 1 0 0 1 6 28 V4 A1 1 0 0 1 7 3 Z" fill="#f5e3c7"/>
+  <path d="M20 3 L26 9 H21 A1 1 0 0 1 20 8 Z" fill="#87867f"/>
+  <text x="16" y="24" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#141413">B</text>
+</svg>
