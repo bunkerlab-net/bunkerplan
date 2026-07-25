@@ -1,0 +1,78 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.5/schema.json",
+  "vcs": {
+    "enabled": false,
+    "clientKind": "git",
+    "useIgnoreFile": false
+  },
+  "files": {
+    "ignoreUnknown": false,
+    "includes": [
+      "**",
+      "!.claude",
+      "!.zed/settings.json",
+      "!**/tsconfig.json",
+      "!**/dist",
+      "!**/dev-dist",
+      "!**/coverage",
+      "!packages/sdks/*/src",
+      "!**/routeTree.gen.ts",
+      "!**/worker-configuration.d.ts",
+      "!**/.tanstack",
+      "!**/.nitro",
+      "!**/.output",
+      "!**/.wrangler",
+      "!**/wrangler.jsonc",
+      "!poc/tanstack/android",
+      "!poc/tanstack/ios",
+      "!mono",
+      "!.design_handoff_didx_products",
+      "!fixtures/too-big.html"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        "noExcessiveLinesPerFunction": "error",
+        "useLiteralKeys": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/tests/**",
+        "src/client/**",
+        "packages/ui/**",
+        "apps/me/**",
+        "apps/creds/**"
+      ],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveLinesPerFunction": "off"
+          }
+        }
+      }
+    }
+  ]
+}

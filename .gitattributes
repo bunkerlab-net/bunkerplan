@@ -1,0 +1,5 @@
+drizzle/**/meta/** linguist-generated=true
+src/routeTree.gen.ts linguist-generated=true
+bun.lock linguist-generated=true
+skills-lock.json linguist-generated=true
+worker-configuration.d.ts linguist-generated=true

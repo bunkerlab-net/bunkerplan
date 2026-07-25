@@ -1,0 +1,76 @@
+// https://hk.jdx.dev
+amends "package://github.com/jdx/hk/releases/download/v1.53.0/hk@1.53.0#/Config.pkl"
+
+import "package://github.com/jdx/hk/releases/download/v1.53.0/hk@1.53.0#/Builtins.pkl"
+
+// Files the formatting steps must leave byte-for-byte alone.
+//
+// Skills under `.agents/skills` are fetched from upstream repositories and
+// hash-locked in `skills-lock.json`. They are tracked so the agent toolchain
+// is reproducible, but reformatting them would put the working copy out of
+// step with the recorded hashes.
+//
+// The other two are generated: `worker-configuration.d.ts` by `wrangler
+// types` and `src/routeTree.gen.ts` by the router plugin. Both are tracked so
+// a fresh clone typechecks, and both are overwritten wholesale on the next
+// run, so formatting them achieves nothing.
+local vendored =
+  List(
+    ".agents/skills/**",
+    "worker-configuration.d.ts",
+    "src/routeTree.gen.ts",
+  )
+
+local linters = new Mapping<String, Step> {
+  // https://hk.jdx.dev/builtins.html
+  // Lint JS/TS Files
+  ["biome"] = (Builtins.biome) {
+    exclude = List(".vscode/*.json", ".zed/*.json") + vendored
+    check = "bun biome check --error-on-warnings --no-errors-on-unmatched {{ files }}"
+    fix = "bun biome check --write --error-on-warnings --no-errors-on-unmatched {{ files }}"
+  }
+  // Detect accidentally committed private keys. Deliberately NOT excluded
+  // from `.agents/skills` — vendored content still gets scanned.
+  ["detect_private_key"] = Builtins.detect_private_key
+  // Check Mise files
+  ["mise"] = Builtins.mise
+  // Ensure all files end with LF (*nix) not CRLF (DOS)
+  ["mixed_line_ending"] = (Builtins.mixed_line_ending) {
+    exclude = vendored
+  }
+  // Ensure all files end in a new line
+  ["newlines"] = (Builtins.newlines) {
+    exclude = vendored
+  }
+  // Format Pickle files
+  ["pkl_format"] = Builtins.pkl_format
+  // Lint Pickle files
+  ["pkl_lint"] = Builtins.pkl
+  // Format Shell files
+  // Ensure `package.json` keys are sorted alphabetically
+  ["sort_package_json"] = (Builtins.sort_package_json) {
+    check = "bun sort-package-json --check {{ files }}"
+    fix = "bun sort-package-json {{ files }}"
+  }
+  // No trailing whitespace allowed
+  ["trailing_whitespace"] = (Builtins.trailing_whitespace) {
+    exclude = vendored
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    steps = linters
+    stash = "git"
+  }
+
+  // "fix" and "check" are special steps for `hk fix` and `hk check` commands
+  ["fix"] {
+    fix = true
+    steps = linters
+  }
+
+  ["check"] {
+    steps = linters
+  }
+}
