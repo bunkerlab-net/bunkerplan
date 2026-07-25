@@ -65,14 +65,6 @@ export function SiteFooter() {
               <li className="mono">GET /:id</li>
             </ul>
           </div>
-          <div>
-            <h2>Service</h2>
-            <ul>
-              <li>
-                <a href="/healthz">Health check</a>
-              </li>
-            </ul>
-          </div>
         </div>
         <p className="footer-bottom caption">
           Plans are public to anyone holding the URL and unlisted otherwise.
