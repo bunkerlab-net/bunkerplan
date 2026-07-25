@@ -26,6 +26,9 @@ function RootDocument() {
         <HeadContent />
       </head>
       <body>
+        <a className="skip-link" href="#main">
+          Skip to content
+        </a>
         <Outlet />
         <Scripts />
       </body>

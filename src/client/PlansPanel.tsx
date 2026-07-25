@@ -7,6 +7,36 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(2)} MiB`;
 }
 
+interface RowProps {
+  plan: PlanSummary;
+  busy: boolean;
+  onDelete: (id: string) => void;
+}
+
+function PlanRow({ plan, busy, onDelete }: RowProps) {
+  return (
+    <tr>
+      <td>
+        <a className="mono" href={plan.url}>
+          {plan.id}
+        </a>
+      </td>
+      <td>{formatBytes(plan.size)}</td>
+      <td>{new Date(plan.createdAt).toLocaleString()}</td>
+      <td className="actions">
+        <button
+          type="button"
+          className="btn-text"
+          disabled={busy}
+          onClick={() => onDelete(plan.id)}
+        >
+          Delete
+        </button>
+      </td>
+    </tr>
+  );
+}
+
 export function PlansPanel() {
   const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -25,10 +55,10 @@ export function PlansPanel() {
     void refresh();
   }, [refresh]);
 
-  const onUpload = async (file: File) => {
+  const guard = async (work: () => Promise<unknown>) => {
     setBusy(true);
     try {
-      await uploadPlan(file);
+      await work();
       setError(null);
       await refresh();
     } catch (cause) {
@@ -40,38 +70,35 @@ export function PlansPanel() {
     }
   };
 
-  const onDelete = async (id: string) => {
-    setBusy(true);
-    try {
-      await deletePlan(id);
-      setError(null);
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <section>
-      <h2>Plans</h2>
-      <div className="row">
+    <section className="card">
+      <h2 className="card-title">Plans</h2>
+      <p className="muted">
+        Upload a standalone HTML document. External scripts, stylesheets,
+        images, fonts and iframes are all refused.
+      </p>
+      <div className="row" style={{ marginTop: "16px" }}>
+        <label className="btn-ivory" htmlFor="plan-file">
+          Choose a file
+        </label>
         <input
+          id="plan-file"
+          className="file-input"
           type="file"
           accept=".html,.htm,text/html"
           disabled={busy}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
-            if (file) void onUpload(file);
+            if (file) void guard(() => uploadPlan(file));
           }}
         />
-        <span className="muted">Standalone HTML only.</span>
       </div>
       {error !== null && <p className="error">{error}</p>}
       {plans.length === 0 ? (
-        <p className="empty">No plans yet.</p>
+        <p className="empty" style={{ marginTop: "24px" }}>
+          No plans yet.
+        </p>
       ) : (
         <table>
           <thead>
@@ -84,25 +111,12 @@ export function PlansPanel() {
           </thead>
           <tbody>
             {plans.map((item) => (
-              <tr key={item.id}>
-                <td>
-                  <a className="mono" href={item.url}>
-                    {item.id}
-                  </a>
-                </td>
-                <td>{formatBytes(item.size)}</td>
-                <td>{new Date(item.createdAt).toLocaleString()}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="destructive"
-                    disabled={busy}
-                    onClick={() => void onDelete(item.id)}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
+              <PlanRow
+                key={item.id}
+                plan={item}
+                busy={busy}
+                onDelete={(id) => void guard(() => deletePlan(id))}
+              />
             ))}
           </tbody>
         </table>

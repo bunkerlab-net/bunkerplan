@@ -1,12 +1,52 @@
+/*
+ * Anthropic-style editorial system: warm parchment surfaces, serif voice,
+ * sans chrome, one clay accent reserved for a single action per page.
+ *
+ * Three deliberate departures from the reference, each forced by this being an
+ * application rather than a marketing page:
+ *
+ *   1. `--text-muted` resolves to Slate Medium, not Cloud Medium. Cloud Medium
+ *      on the ivory canvas is 1.9:1, well under the 4.5:1 floor. It is used as
+ *      specified inside the dark footer, where it reaches ~7:1.
+ *   2. Clay buttons take Slate Dark text. White on clay is 3.0:1 and fails;
+ *      the reference's own prompt guide specifies #141413, which is 7.0:1.
+ *   3. `--text-title` is an added rung. The reference scale jumps 24px -> 61px,
+ *      which has no room for an in-app page heading.
+ */
+
 :root {
-  color-scheme: dark;
-  --bg: #0d1117;
-  --panel: #161b22;
-  --border: #30363d;
-  --fg: #e6edf3;
-  --muted: #8b949e;
-  --accent: #2f81f7;
-  --danger: #f85149;
+  color-scheme: light;
+
+  --slate-dark: #141413;
+  --slate-medium: #3d3d3a;
+  --ivory-medium: #f0eee6;
+  --ivory-light: #faf9f5;
+  --cloud-medium: #b0aea5;
+  --cloud-dark: #87867f;
+  --stone: #cccbc8;
+  --oat-warm: #e3dacc;
+  --manilla: #f5e3c7;
+  --clay: #d97757;
+  --clay-deep: #c6613f;
+
+  --text-muted: var(--slate-medium);
+
+  --serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --text-caption: 12px;
+  --text-body-sm: 16px;
+  --text-body: 20px;
+  --text-subheading: 24px;
+  --text-title: clamp(32px, 5vw, 44px);
+  --text-heading: clamp(36px, 7vw, 61px);
+  --text-display: clamp(34px, 6vw, 68px);
+
+  --page-max: 1280px;
+  --radius-card: 24px;
 }
 
 * {
@@ -15,143 +55,519 @@
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font:
-    15px / 1.5 ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
+  background: var(--ivory-medium);
+  color: var(--slate-dark);
+  font-family: var(--serif);
+  font-size: var(--text-body);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Sans is chrome only; the serif above carries every piece of prose. */
+button,
+input,
+select,
+label,
+table,
+nav,
+.caption,
+.eyebrow {
+  font-family: var(--sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--slate-dark);
+  outline-offset: 2px;
+}
+
+/* --- Layout ------------------------------------------------------------- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.shell {
+  width: 100%;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 0 24px;
 }
 
 main {
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: 2rem 1.25rem 5rem;
+  flex: 1;
+  padding-bottom: 100px;
 }
 
-h1 {
-  font-size: 1.5rem;
-  margin: 0 0 0.25rem;
+.stack > * + * {
+  margin-top: 24px;
 }
 
-h2 {
-  font-size: 1.1rem;
-  margin: 0 0 0.75rem;
+/* --- Navigation --------------------------------------------------------- */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--ivory-medium);
+  border-bottom: 1px solid var(--stone);
 }
 
-p.lede {
-  color: var(--muted);
-  margin: 0 0 2rem;
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
 }
 
-section {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.25rem;
-  margin-bottom: 1.25rem;
+.wordmark {
+  font-family: var(--sans);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--slate-dark);
+  text-decoration: none;
 }
 
-section.danger {
-  border-color: var(--danger);
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.nav-handle {
+  font-family: var(--mono);
+  font-size: var(--text-caption);
+  color: var(--text-muted);
+}
+
+/* --- Type --------------------------------------------------------------- */
+
+.hero-title {
+  font-family: var(--sans);
+  font-size: var(--text-heading);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.012em;
+  margin: 0;
+}
+
+.page-title {
+  font-family: var(--serif);
+  font-size: var(--text-title);
+  font-weight: 400;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.card-title {
+  font-family: var(--sans);
+  font-size: var(--text-subheading);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.002em;
+  margin: 0 0 12px;
+}
+
+.feature-title {
+  font-family: var(--serif);
+  font-size: var(--text-display);
+  font-weight: 400;
+  line-height: 1.1;
+  margin: 0 0 16px;
+}
+
+.eyebrow {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 16px;
+}
+
+.lede {
+  font-size: var(--text-body);
+  margin: 0;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.caption {
+  font-size: var(--text-caption);
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+  color: var(--text-muted);
+}
+
+.empty {
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0;
+}
+
+p {
+  margin: 0 0 16px;
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+/* Persistent underline: print convention, not reveal-on-hover. */
+a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: 0.85em;
+}
+
+/* --- Hero --------------------------------------------------------------- */
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 32px 76px;
+  align-items: end;
+  padding: 100px 0 76px;
+}
+
+/* --- Cards -------------------------------------------------------------- */
+
+.card {
+  background: var(--ivory-light);
+  border: 1px solid var(--stone);
+  border-radius: var(--radius-card);
+  padding: 32px;
+}
+
+.card-feature {
+  background: var(--manilla);
+  border: none;
+  padding: 48px;
+}
+
+.card-dark {
+  background: var(--slate-dark);
+  border: none;
+  color: var(--ivory-light);
+}
+
+/* Cloud Medium is unreadable on ivory but reaches ~7:1 on either dark band. */
+.card-dark .caption,
+.card-dark .muted,
+.footer .caption,
+.footer .muted {
+  color: var(--cloud-medium);
+}
+
+.card-grid {
+  display: grid;
+  /* minmax(0, …), not 1fr: plain `1fr` floors at max-content, so the code
+     snippet inside a card widens its track past the viewport. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.card-grid > *,
+.hero > *,
+.footer-grid > * {
+  min-width: 0;
+}
+
+.section {
+  padding-top: 80px;
+}
+
+/* --- Buttons ------------------------------------------------------------ */
 
 button {
-  font: inherit;
-  padding: 0.4rem 0.9rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: #21262d;
-  color: var(--fg);
+  font-size: var(--text-body-sm);
+  letter-spacing: -0.005em;
   cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border: none;
+  background: none;
+  color: inherit;
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+/* The single chromatic CTA. One per page. */
+.btn-clay {
+  background: var(--clay);
+  color: var(--slate-dark);
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 12px 31px;
 }
 
-button.destructive {
-  border-color: var(--danger);
-  color: var(--danger);
+.btn-clay:hover:not(:disabled) {
+  background: var(--clay-deep);
 }
+
+/*
+ * Bottom-only radius is the reference's signature. The hairline is an
+ * addition: an unbordered #faf9f5 fill is invisible against a #faf9f5 card.
+ */
+.btn-ivory {
+  background: var(--ivory-light);
+  color: var(--slate-dark);
+  border: 1px solid var(--stone);
+  border-radius: 0 0 8px 8px;
+  padding: 12px 24px;
+  /* Also worn by the upload <label>, which gets neither for free. */
+  display: inline-block;
+  font-size: var(--text-body-sm);
+  cursor: pointer;
+}
+
+.btn-ivory:hover:not(:disabled) {
+  border-color: var(--cloud-dark);
+}
+
+/* Text that happens to be clickable, not a container. */
+.btn-text {
+  padding: 8px 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--cloud-dark);
+}
+
+.btn-text:hover:not(:disabled) {
+  text-decoration-color: var(--slate-dark);
+}
+
+.btn-outline-dark {
+  background: none;
+  color: var(--ivory-light);
+  border: 1px solid var(--cloud-dark);
+  border-radius: 12px;
+  padding: 8px 16px;
+}
+
+.btn-outline-dark:hover:not(:disabled) {
+  border-color: var(--ivory-light);
+}
+
+/* --- Forms -------------------------------------------------------------- */
 
 input,
 select {
-  font: inherit;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: #0d1117;
-  color: var(--fg);
+  font-size: var(--text-body-sm);
+  padding: 10px 12px;
+  border: 1px solid var(--stone);
+  border-radius: 8px;
+  background: var(--ivory-light);
+  color: var(--slate-dark);
 }
+
+.card-dark input {
+  background: var(--slate-medium);
+  border-color: var(--cloud-dark);
+  color: var(--ivory-light);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --- Tables ------------------------------------------------------------- */
 
 table {
   width: 100%;
   border-collapse: collapse;
+  margin-top: 24px;
 }
 
 th,
 td {
   text-align: left;
-  padding: 0.45rem 0.5rem;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.9rem;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--stone);
+  font-size: var(--text-body-sm);
+  vertical-align: middle;
 }
 
 th {
-  color: var(--muted);
-  font-weight: 500;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
-a {
-  color: var(--accent);
+tr:last-child td {
+  border-bottom: none;
 }
 
-code,
-.mono {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.85em;
+td.actions {
+  text-align: right;
+  white-space: nowrap;
 }
 
-.row {
-  display: flex;
-  gap: 0.6rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
+/* --- Signals ------------------------------------------------------------ */
 
+/*
+ * The palette has no error colour and forbids inventing one, so the signal is
+ * a clay rule against a warmer surface rather than red text.
+ */
 .error {
-  color: var(--danger);
+  background: var(--oat-warm);
+  /* Pinned, not inherited: inside .card-dark the ambient colour is ivory. */
+  color: var(--slate-dark);
+  border-left: 4px solid var(--clay-deep);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  margin: 16px 0 0;
+  font-size: var(--text-body-sm);
   white-space: pre-wrap;
 }
 
 .notice {
-  background: #0d1117;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 0.75rem;
-  margin-top: 0.75rem;
+  background: var(--manilla);
+  border-left: 4px solid var(--clay-deep);
+  border-radius: 0 8px 8px 0;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.notice code {
   word-break: break-all;
 }
 
-.muted {
-  color: var(--muted);
+.snippet {
+  display: block;
+  background: var(--oat-warm);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  /* Scroll rather than wrap: a broken URL mid-token is not copy-pasteable. */
+  white-space: pre;
+  overflow-x: auto;
 }
 
-.empty {
-  color: var(--muted);
-  font-style: italic;
+/* --- Footer ------------------------------------------------------------- */
+
+.footer {
+  background: var(--slate-dark);
+  color: var(--ivory-light);
+  padding: 76px 0 32px;
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 32px;
+}
+
+.footer h2 {
+  font-family: var(--sans);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 16px;
+}
+
+.footer ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.footer li,
+.footer a {
+  font-family: var(--sans);
+  font-size: var(--text-caption);
+  color: var(--cloud-medium);
+}
+
+.footer-bottom {
+  margin-top: 76px;
+  padding-top: 24px;
+  border-top: 1px solid var(--slate-medium);
+  color: var(--cloud-medium);
+}
+
+/* --- Skip link ---------------------------------------------------------- */
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 20;
+  background: var(--ivory-light);
+  color: var(--slate-dark);
+  padding: 12px 16px;
+}
+
+.skip-link:focus {
+  left: 8px;
+  top: 8px;
+}
+
+/* --- Responsive --------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: 1fr;
+    align-items: start;
+    padding: 48px 0;
+  }
+
+  .card-grid,
+  .footer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card-feature {
+    padding: 32px;
+  }
+
+  .section {
+    padding-top: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button,
+  a {
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      text-decoration-color 120ms ease;
+  }
 }

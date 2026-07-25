@@ -14,11 +14,40 @@ const DAY_SECONDS = 86_400;
 /** Values are `expiresIn` in SECONDS; the plugin's min/max are in days. */
 const EXPIRY_CHOICES: ReadonlyArray<{ label: string; seconds: number | null }> =
   [
-    { label: "Never", seconds: null },
+    { label: "Never expires", seconds: null },
     { label: "30 days", seconds: 30 * DAY_SECONDS },
     { label: "90 days", seconds: 90 * DAY_SECONDS },
     { label: "365 days", seconds: 365 * DAY_SECONDS },
   ];
+
+function Reveal({
+  value,
+  onDismiss,
+}: {
+  value: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="notice">
+      <p>
+        <strong>Copy this now — you will not see it again.</strong>
+      </p>
+      <div className="row">
+        <code>{value}</code>
+        <button
+          type="button"
+          className="btn-text"
+          onClick={() => void navigator.clipboard.writeText(value)}
+        >
+          Copy
+        </button>
+        <button type="button" className="btn-text" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function ApiKeysPanel() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
@@ -80,13 +109,13 @@ export function ApiKeysPanel() {
   };
 
   return (
-    <section>
-      <h2>API keys</h2>
+    <section className="card">
+      <h2 className="card-title">API keys</h2>
       <p className="muted">
-        A key authorises upload and delete for your own plans. Send it as{" "}
-        <code>x-api-key</code>.
+        A key authorises upload and delete for your own plans, and nothing else.
+        Send it as <code>x-api-key</code>.
       </p>
-      <div className="row">
+      <div className="row" style={{ marginTop: "16px" }}>
         <input
           type="text"
           placeholder="Key name"
@@ -105,7 +134,7 @@ export function ApiKeysPanel() {
         </select>
         <button
           type="button"
-          className="primary"
+          className="btn-ivory"
           disabled={busy}
           onClick={() => void onCreate()}
         >
@@ -113,25 +142,13 @@ export function ApiKeysPanel() {
         </button>
       </div>
       {plaintext !== null && (
-        <div className="notice">
-          <strong>Copy this now — you will not see it again.</strong>
-          <div className="row">
-            <code>{plaintext}</code>
-            <button
-              type="button"
-              onClick={() => void navigator.clipboard.writeText(plaintext)}
-            >
-              Copy
-            </button>
-            <button type="button" onClick={() => setPlaintext(null)}>
-              Dismiss
-            </button>
-          </div>
-        </div>
+        <Reveal value={plaintext} onDismiss={() => setPlaintext(null)} />
       )}
       {error !== null && <p className="error">{error}</p>}
       {keys.length === 0 ? (
-        <p className="empty">No API keys.</p>
+        <p className="empty" style={{ marginTop: "24px" }}>
+          No API keys.
+        </p>
       ) : (
         <table>
           <thead>
@@ -154,10 +171,10 @@ export function ApiKeysPanel() {
                     ? "Never"
                     : new Date(item.expiresAt).toLocaleString()}
                 </td>
-                <td>
+                <td className="actions">
                   <button
                     type="button"
-                    className="destructive"
+                    className="btn-text"
                     disabled={busy}
                     onClick={() => void onRevoke(item.id)}
                   >

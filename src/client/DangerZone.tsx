@@ -37,16 +37,21 @@ export function DangerZone({ handle }: DangerZoneProps) {
   };
 
   return (
-    <section className="danger">
-      <h2>Danger zone</h2>
+    /*
+     * The palette has no danger colour and forbids inventing one, so gravity
+     * comes from the system's only inversion surface plus the typed
+     * confirmation, rather than from red.
+     */
+    <section className="card card-dark">
+      <h2 className="card-title">Delete this account</h2>
       <p>
-        Deleting your account removes the account itself, every plan you have
-        uploaded (their public URLs stop working immediately), every API key and
-        every passkey. This cannot be undone.
+        This removes the account itself, every plan you have uploaded — their
+        public URLs stop working immediately — every API key and every passkey.
+        It cannot be undone.
       </p>
-      <div className="row">
-        <label htmlFor="confirm-handle">
-          Type <code>{handle}</code> to confirm:
+      <div className="row" style={{ marginTop: "24px" }}>
+        <label htmlFor="confirm-handle" className="caption">
+          Type <code>{handle}</code> to confirm
         </label>
         <input
           id="confirm-handle"
@@ -57,7 +62,7 @@ export function DangerZone({ handle }: DangerZoneProps) {
         />
         <button
           type="button"
-          className="destructive"
+          className="btn-outline-dark"
           disabled={busy || typed !== handle}
           onClick={() => void onDelete()}
         >

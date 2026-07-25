@@ -58,21 +58,30 @@ export function PasskeysPanel() {
     }
   };
 
+  const onlyOne = passkeys.length === 1;
+
   return (
-    <section>
-      <h2>Passkeys</h2>
+    <section className="card">
+      <h2 className="card-title">Passkeys</h2>
       <p className="muted">
         Passkeys are the only way into this account. Keep at least two if you
         use more than one device.
       </p>
-      <div className="row">
-        <button type="button" disabled={busy} onClick={() => void onAdd()}>
+      <div className="row" style={{ marginTop: "16px" }}>
+        <button
+          type="button"
+          className="btn-ivory"
+          disabled={busy}
+          onClick={() => void onAdd()}
+        >
           Add a passkey
         </button>
       </div>
       {error !== null && <p className="error">{error}</p>}
       {passkeys.length === 0 ? (
-        <p className="empty">No passkeys.</p>
+        <p className="empty" style={{ marginTop: "24px" }}>
+          No passkeys.
+        </p>
       ) : (
         <table>
           <thead>
@@ -91,13 +100,13 @@ export function PasskeysPanel() {
                     ? new Date(item.createdAt).toLocaleString()
                     : "—"}
                 </td>
-                <td>
+                <td className="actions">
                   <button
                     type="button"
-                    className="destructive"
-                    disabled={busy || passkeys.length === 1}
+                    className="btn-text"
+                    disabled={busy || onlyOne}
                     title={
-                      passkeys.length === 1
+                      onlyOne
                         ? "Deleting your only passkey would lock you out"
                         : undefined
                     }
