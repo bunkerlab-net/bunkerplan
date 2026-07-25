@@ -50,7 +50,7 @@ export function DangerZone({ handle }: DangerZoneProps) {
         can survive for up to five minutes. It cannot be undone.
       </p>
       <div className="row" style={{ marginTop: "24px" }}>
-        <label htmlFor="confirm-handle" className="caption">
+        <label htmlFor="confirm-handle" className="confirm-label">
           Type <code>{handle}</code> to confirm
         </label>
         <input

@@ -230,7 +230,27 @@ a {
 code,
 .mono {
   font-family: var(--mono);
+  /* Relative on purpose: mono glyphs run large beside serif at the same
+     nominal size. Anywhere a literal must be read character by character,
+     set an absolute size instead of inheriting this. */
   font-size: 0.85em;
+}
+
+/*
+ * Transcribed by hand to arm an irreversible action: mono at the 16px the
+ * scale specifies rather than the 0.85em above, which rendered it near 10px
+ * inside the 12px caption this used to be, plus tracking to separate l/1 and
+ * O/0. Clay is the palette's only red.
+ */
+.confirm-label {
+  font-size: var(--text-body-sm);
+  color: var(--ivory-light);
+}
+
+.confirm-label code {
+  font-size: var(--text-body-sm);
+  letter-spacing: 0.08em;
+  color: var(--clay);
 }
 
 /* --- Hero --------------------------------------------------------------- */
