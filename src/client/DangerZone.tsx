@@ -1,0 +1,70 @@
+import { useState } from "react";
+import { authClient } from "./auth.ts";
+
+interface DangerZoneProps {
+  handle: string;
+}
+
+export function DangerZone({ handle }: DangerZoneProps) {
+  const [typed, setTyped] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onDelete = async () => {
+    setBusy(true);
+    try {
+      let result = await authClient().deleteUser();
+      // Deleting an account requires a FRESH session (default freshAge 24h)
+      // and there is no password to re-enter, so a returning user routinely
+      // hits SESSION_EXPIRED. Re-run the WebAuthn ceremony — which mints a new
+      // session — and retry once.
+      if (result.error?.code === "SESSION_EXPIRED") {
+        const reauth = await authClient().signIn.passkey();
+        if (reauth?.error) {
+          setError(reauth.error.message ?? "re-authentication failed");
+          return;
+        }
+        result = await authClient().deleteUser();
+      }
+      if (result.error) {
+        setError(result.error.message ?? "could not delete the account");
+        return;
+      }
+      window.location.assign("/");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="danger">
+      <h2>Danger zone</h2>
+      <p>
+        Deleting your account removes the account itself, every plan you have
+        uploaded (their public URLs stop working immediately), every API key and
+        every passkey. This cannot be undone.
+      </p>
+      <div className="row">
+        <label htmlFor="confirm-handle">
+          Type <code>{handle}</code> to confirm:
+        </label>
+        <input
+          id="confirm-handle"
+          type="text"
+          value={typed}
+          autoComplete="off"
+          onChange={(event) => setTyped(event.target.value)}
+        />
+        <button
+          type="button"
+          className="destructive"
+          disabled={busy || typed !== handle}
+          onClick={() => void onDelete()}
+        >
+          Delete account
+        </button>
+      </div>
+      {error !== null && <p className="error">{error}</p>}
+    </section>
+  );
+}
