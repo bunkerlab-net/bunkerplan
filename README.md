@@ -28,7 +28,7 @@ bun run dev
 | `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - **re-apply the hand patch noted at the top of each generated file** |
-| `bun test`                             | Unit tests                                                                                              |
+| `bun test`                             | Unit tests, plus an end-to-end suite that builds the Worker and serves it on Miniflare                  |
 | `bun run check`                        | Biome lint and format                                                                                   |
 | `bun run typecheck`                    | `tsc --noEmit`                                                                                          |
 

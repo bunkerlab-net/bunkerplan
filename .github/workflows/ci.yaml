@@ -53,13 +53,11 @@ jobs:
         run: hk check --all
       - name: Typecheck
         run: bun run typecheck
+      # The end-to-end suite serves the real Workers bundle on Miniflare, so it
+      # builds one first. That covers what a separate build step used to: a
+      # bundle that does not build fails here, before anything is published.
       - name: Test
         run: bun test
-      # The Workers bundle is the primary deployment target and nothing else in
-      # this workflow builds it - the images are the Node build. Without this it
-      # would only break at deploy time.
-      - name: Build Workers bundle
-        run: bun run build
 
   build:
     name: Build (${{ matrix.arch }})

@@ -20,6 +20,7 @@ const logger = pino({ level: "silent" });
 interface Written {
   objects: { key: string; size: number }[];
   sizes: number[];
+  removed: string[];
 }
 
 function fakes(
@@ -31,7 +32,7 @@ function fakes(
   } = {},
 ) {
   const owner = options.owner === undefined ? OWNER : options.owner;
-  const written: Written = { objects: [], sizes: [] };
+  const written: Written = { objects: [], sizes: [], removed: [] };
 
   const storage: PlanStorage = {
     put: async (key, body) => {
@@ -39,7 +40,9 @@ function fakes(
       written.objects.push({ key, size: body.byteLength });
     },
     get: async () => null,
-    delete: async () => {},
+    delete: async (key) => {
+      written.removed.push(key);
+    },
     probe: async () => {},
   };
 
@@ -103,7 +106,7 @@ describe("replacePlan", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(written).toEqual({ objects: [], sizes: [] });
+    expect(written).toEqual({ objects: [], sizes: [], removed: [] });
   });
 
   test("404s for an unknown id", async () => {
@@ -122,7 +125,7 @@ describe("replacePlan", () => {
     expect(written.objects).toEqual([]);
   });
 
-  test("writes nothing when the row goes away before the size update", async () => {
+  test("takes the object back out when the row goes away underneath it", async () => {
     const { storage, plans, written } = fakes({ rowVanishes: true });
     const response = await replacePlan(
       storage,
@@ -135,7 +138,11 @@ describe("replacePlan", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(written.objects).toEqual([]);
+    expect(written.sizes).toEqual([]);
+    // The invariant the ordering exists for: never leave a publicly served
+    // object that no row owns. The write happened, so it has to be undone.
+    expect(written.objects).toEqual([{ key: ID, size: HTML.length }]);
+    expect(written.removed).toEqual([ID]);
   });
 
   test("422s a document that is not standalone, leaving the plan alone", async () => {
@@ -153,11 +160,11 @@ describe("replacePlan", () => {
     );
 
     expect(response.status).toBe(422);
-    expect(written).toEqual({ objects: [], sizes: [] });
+    expect(written).toEqual({ objects: [], sizes: [], removed: [] });
   });
 
-  test("502s when the object write fails", async () => {
-    const { storage, plans } = fakes({ storageFails: true });
+  test("502s when the object write fails, leaving the row untouched", async () => {
+    const { storage, plans, written } = fakes({ storageFails: true });
     const response = await replacePlan(
       storage,
       plans,
@@ -169,5 +176,8 @@ describe("replacePlan", () => {
     );
 
     expect(response.status).toBe(502);
+    // Nothing was written, so nothing has to be undone: the plan still serves
+    // its previous document at its previous recorded size.
+    expect(written).toEqual({ objects: [], sizes: [], removed: [] });
   });
 });
