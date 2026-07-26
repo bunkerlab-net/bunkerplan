@@ -1,5 +1,6 @@
 import type { Logger } from "../log.ts";
 import type { PlanRepo, PlanStorage } from "../services/types.ts";
+import { problem } from "./problem.ts";
 
 /**
  * Object first, row second - the mirror of the upload path.
@@ -22,20 +23,20 @@ export async function deletePlan(
   // belonging to another account exists.
   const owner = await plans.findOwner(id);
   if (owner !== userId) {
-    return Response.json({ error: "not found" }, { status: 404 });
+    return problem(404, "not found");
   }
 
   try {
     await storage.delete(id);
   } catch (error) {
     logger.error({ err: error, planId: id }, "plan object delete failed");
-    return Response.json({ error: "storage unavailable" }, { status: 502 });
+    return problem(502, "storage unavailable");
   }
 
   // `deleteOwned` re-checks ownership, so a concurrent change between the
   // lookup above and here can never delete another account's row.
   if (!(await plans.deleteOwned(id, userId))) {
-    return Response.json({ error: "not found" }, { status: 404 });
+    return problem(404, "not found");
   }
 
   // Sweep again now the row is gone. A replacement running concurrently can

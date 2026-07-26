@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "hono/jsx";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import {
   deletePlan,
@@ -8,6 +8,7 @@ import {
   replacePlan,
   uploadPlan,
 } from "./api.ts";
+import { inputOf } from "./dom.ts";
 
 function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -68,10 +69,10 @@ function PlanRow({ plan, busy, onRelabel, onReplace, onDelete }: RowProps) {
           maxLength={MAX_PLAN_LABEL_LENGTH}
           value={draft}
           disabled={busy}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event: Event) => setDraft(inputOf(event).value)}
           onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
+          onKeyDown={(event: KeyboardEvent) => {
+            if (event.key === "Enter") inputOf(event).blur();
             if (event.key === "Escape") setDraft(stored);
           }}
         />
@@ -101,9 +102,10 @@ function PlanRow({ plan, busy, onRelabel, onReplace, onDelete }: RowProps) {
           accept=".html,.htm,text/html"
           tabIndex={-1}
           aria-hidden="true"
-          onChange={(event) => {
-            onReplace(plan.id, event.target.files);
-            event.target.value = "";
+          onChange={(event: Event) => {
+            const input = inputOf(event);
+            onReplace(plan.id, input.files);
+            input.value = "";
           }}
         />
         <button
@@ -212,23 +214,29 @@ export function PlansPanel() {
       <label
         className={dragging ? "dropzone is-dragging" : "dropzone"}
         htmlFor="plan-file"
-        onDragOver={(event) => {
+        onDragOver={(event: DragEvent) => {
           event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
+          if (event.dataTransfer !== null)
+            event.dataTransfer.dropEffect = "copy";
           if (!busy) setDragging(true);
         }}
-        onDragLeave={(event) => {
+        onDragLeave={(event: DragEvent) => {
           // Children fire their own dragleave as the pointer crosses them; only
           // a departure from the zone itself counts.
           const next = event.relatedTarget;
-          if (next instanceof Node && event.currentTarget.contains(next))
+          const zone = event.currentTarget;
+          if (
+            next instanceof Node &&
+            zone instanceof Node &&
+            zone.contains(next)
+          )
             return;
           setDragging(false);
         }}
-        onDrop={(event) => {
+        onDrop={(event: DragEvent) => {
           event.preventDefault();
           setDragging(false);
-          if (!busy) submit(event.dataTransfer.files);
+          if (!busy) submit(event.dataTransfer?.files ?? null);
         }}
       >
         <span className="btn-ivory">Choose a file</span>
@@ -239,12 +247,13 @@ export function PlansPanel() {
           type="file"
           accept=".html,.htm,text/html"
           disabled={busy}
-          onChange={(event) => {
+          onChange={(event: Event) => {
             // Consume before clearing: `files` is the input's live FileList and
             // `value = ""` empties it. The reset still has to happen, or
             // re-picking the same file fires no second change event.
-            submit(event.target.files);
-            event.target.value = "";
+            const input = inputOf(event);
+            submit(input.files);
+            input.value = "";
           }}
         />
       </label>

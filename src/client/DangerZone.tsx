@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
+import { controlValue } from "./dom.ts";
 
 interface DangerZoneProps {
   handle: string;
@@ -58,7 +59,7 @@ export function DangerZone({ handle }: DangerZoneProps) {
           type="text"
           value={typed}
           autoComplete="off"
-          onChange={(event) => setTyped(event.target.value)}
+          onChange={(event: Event) => setTyped(controlValue(event))}
         />
         <button
           type="button"

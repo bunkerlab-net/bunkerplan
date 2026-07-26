@@ -1,5 +1,6 @@
 import type { Config } from "../config.ts";
 import type { RateLimitRepo } from "../services/types.ts";
+import { problem } from "./problem.ts";
 
 /**
  * Counts one upload against the caller's allowance. Null means proceed;
@@ -23,8 +24,7 @@ export async function checkUploadRate(
   );
   if (limit.allowed) return null;
 
-  return Response.json(
-    { error: "rate limit exceeded" },
-    { status: 429, headers: { "retry-after": String(limit.retryAfter) } },
-  );
+  return problem(429, "rate limit exceeded", {
+    "retry-after": String(limit.retryAfter),
+  });
 }

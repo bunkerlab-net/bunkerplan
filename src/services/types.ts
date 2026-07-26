@@ -3,8 +3,8 @@ import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
 
 /**
- * Which wiring the `#runtime` alias resolved to at build time. Exported by
- * both src/runtime/cloudflare.ts and src/runtime/node.ts.
+ * Which wiring the entry point chose. Exported by both
+ * src/runtime/cloudflare.ts and src/runtime/node.ts.
  */
 export type RuntimeTarget = "cloudflare" | "node";
 

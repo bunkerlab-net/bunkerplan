@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 
 type Outcome = { error?: unknown } | undefined;
@@ -35,10 +35,10 @@ export function usePasskeyAction() {
         return;
       }
       // Both ceremonies end on the dashboard, and by a full document load
-      // rather than a router navigation: registration signs the user in via a
-      // Set-Cookie on the verify-registration response, but `addPasskey` does
-      // not notify the client's session store (it normally runs with a session
-      // already present), so a client-side navigation would arrive still
+      // rather than a client-side transition: registration signs the user in
+      // via a Set-Cookie on the verify-registration response, but `addPasskey`
+      // does not notify the client's session store (it normally runs with a
+      // session already present), so an in-page transition would arrive still
       // believing it is signed out and bounce straight back off the guard.
       window.location.assign("/dashboard");
     } catch (cause) {

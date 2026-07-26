@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { validate } from "@scalar/openapi-parser";
+import { DOCS_PAGE, SCALAR_SCRIPT_PATH } from "../../src/api/docs-page.ts";
+import { ErrorBody, PlanCreated, PlanReplaced } from "../../src/api/schemas.ts";
 import { PLAN_CSP } from "../../src/http/security-headers.ts";
 import {
   type FetchResponse,
@@ -14,7 +17,7 @@ import {
 let app: Harness;
 
 /**
- * `startWorker()` runs a full Vite build before it boots Miniflare, which is
+ * `startWorker()` runs a full build before it boots Miniflare, which is
  * nowhere near the 5 second default for a hook. Tests run one process per file
  * (see tests/drivers/plan-storage.r2.test.ts for why), so on a four-core
  * runner this build competes with twenty-odd other files and takes far longer
@@ -165,8 +168,9 @@ describe("plan lifecycle over HTTP", () => {
       "/api/plans/nosuchplanid",
       upload(key, html("nobody")),
     );
-    // The JSON body is the point: an unrouted PUT would also be a 404, but an
-    // HTML one, and this test would pass with the handler missing entirely.
+    // Route existence is held by tests/openapi.test.ts, which compares Hono's
+    // routing table against the published document - an unrouted PUT is a 404
+    // with this same body now, so it could not fail here.
     expect(response.status).toBe(404);
     expect(await jsonBody(response)).toEqual({ error: "not found" });
   });
@@ -344,5 +348,108 @@ describe("server-rendered document head", () => {
 
     expect(body).toContain(`content="${PUBLIC_BASE_URL}/dashboard"`);
     expect(body).not.toContain(ATTACKER);
+  });
+});
+
+/**
+ * The document is only worth publishing if it describes what the Worker
+ * actually sends. These parse real responses with the very schemas
+ * src/api/openapi.ts is built from, so a handler that drifts fails here even
+ * where `satisfies` cannot see it - a route returning the wrong shape at
+ * runtime, or a field the type says is a string and the driver returns as a
+ * number.
+ */
+describe("the published document describes the real responses", () => {
+  test("serves a spec that validates as OpenAPI 3.1", async () => {
+    const response = await app.fetch("/api/openapi.json");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toStartWith(
+      "application/json",
+    );
+
+    const spec = (await response.json()) as {
+      servers: Array<{ url: string }>;
+    };
+    const result = await validate(spec);
+    expect(result.errors ?? []).toEqual([]);
+    expect(result.version).toBe("3.1");
+    expect(spec.servers[0]?.url).toBe(PUBLIC_BASE_URL);
+  });
+
+  test("an upload matches PlanCreated", async () => {
+    const key = await app.account();
+    const response = await app.fetch(
+      "/api/plans?label=documented",
+      upload(key, html("documented")),
+    );
+
+    expect(response.status).toBe(201);
+    const body = PlanCreated.parse(await response.json());
+    expect(response.headers.get("location")).toBe(body.url);
+  });
+
+  test("a replacement matches PlanReplaced", async () => {
+    const key = await app.account();
+    const created = await createPlan(key, html("first"));
+    const response = await app.fetch(
+      `/api/plans/${created.id}`,
+      upload(key, html("second")),
+    );
+
+    expect(response.status).toBe(200);
+    expect(PlanReplaced.parse(await response.json()).id).toBe(created.id);
+  });
+
+  test("a listing matches PlanList", async () => {
+    // Session-only, so an API key gets the documented 401 rather than a page.
+    const response = await app.fetch("/api/plans", {
+      headers: { "x-api-key": await app.account() },
+    });
+
+    expect(response.status).toBe(401);
+    expect(ErrorBody.parse(await response.json()).error).toBe(
+      "authentication required",
+    );
+  });
+
+  test("a refusal matches Error", async () => {
+    const key = await app.account();
+    const response = await app.fetch("/api/plans", {
+      method: "PUT",
+      headers: { "x-api-key": key, "content-type": "text/plain" },
+      body: "not html",
+    });
+
+    expect(response.status).toBe(415);
+    expect(ErrorBody.parse(await response.json())).toEqual({
+      error: "content-type must be text/html",
+    });
+  });
+});
+
+describe("the reference UI", () => {
+  test("serves a page that loads the vendored bundle", async () => {
+    const response = await app.fetch("/api/docs");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toStartWith("text/html");
+    expect(await response.text()).toBe(DOCS_PAGE);
+  });
+
+  /**
+   * Fetched from the build output rather than through the Worker: static
+   * assets are served by Cloudflare in front of the script, and the Miniflare
+   * harness does not emulate that layer - `/og-v2.png` 404s here too. What
+   * this can still prove is that the URL the page asks for names a file the
+   * deployed bundle actually contains.
+   */
+  test("the bundle the page asks for is in the client build", async () => {
+    const built = Bun.file(
+      `${import.meta.dir}/../../dist/client${SCALAR_SCRIPT_PATH}`,
+    );
+
+    expect(await built.exists()).toBe(true);
+    expect(await built.text()).toContain("window.Scalar={");
   });
 });

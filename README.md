@@ -23,15 +23,39 @@ bun run dev
 
 | Script                                 | What it does                                                                                            |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `bun run dev`                          | Vite dev server on the Workers runtime (Miniflare)                                                      |
-| `bun run build` / `bun run build:node` | Build for Workers / Node                                                                                |
+| `bun run dev`                          | `wrangler dev` on the Workers runtime, plus a client rebuild-on-save watcher                            |
+| `bun run dev:node`                     | The same, against the self-hosted Bun entry instead                                                     |
+| `bun run build`                        | Bundles the browser entry, the asset manifest, and the self-hosted server into `dist/`                  |
 | `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - **re-apply the hand patch noted at the top of each generated file** |
-| `bun run test`                         | The whole suite. Skips the container-backed backends unless they are up - see Tests                     |
+| `bun run test`                         | Builds, then the whole suite. Skips the container-backed backends unless they are up - see Tests        |
 | `bun run test:backends`                | Postgres, Valkey, and MinIO on localhost, so nothing skips                                              |
 | `bun run check`                        | Biome lint and format                                                                                   |
-| `bun run typecheck`                    | `tsc --noEmit`                                                                                          |
+| `bun run typecheck`                    | Builds, then `tsc --noEmit`                                                                             |
+
+`build` comes first in three of those because it writes
+`src/server/manifest.generated.ts` - the hashed filenames of the browser
+bundle, which the server renders into `<link>` and `<script>`. It takes about
+300ms.
+
+## Stack
+
+[Hono](https://hono.dev) on Web-standard `Request`/`Response`, which is what
+lets one source tree serve workerd and Bun without an adapter. `src/worker.ts`
+and `src/node.ts` name their own runtime wiring; everything in `src/http/` is a
+plain `(Request) => Response` function that neither Hono nor the tests need a
+server to exercise.
+
+Pages are `hono/jsx` on the server and `hono/jsx/dom` in the browser - the same
+components, server-rendered and then hydrated, so the landing copy is in the
+HTML for crawlers rather than swapped in after boot. `scripts/build.ts` is the
+whole build: it replaces Vite, so asset hashing, the `public/` copy, and the
+manifest are project-owned rather than plugin behaviour. The Worker itself is
+bundled by `wrangler deploy`, which is the thing that understands
+`nodejs_compat`.
+
+There is no HMR. Save a file and `bun run dev` rebuilds; reload the tab.
 
 ## Tests
 
@@ -81,6 +105,16 @@ the driver swap matrices, AWS credential guidance, and the operational warnings.
 Valkey, and MinIO.
 
 ## API
+
+Browse it at `/api/docs` - a [Scalar](https://scalar.com) reference over
+`/api/openapi.json`. The document is built from the Zod schemas the handlers
+answer with (`src/api/schemas.ts`), so a response shape that drifts from the
+published spec fails `tsc`, and `tests/openapi.test.ts` fails a route that
+ships undescribed. `servers` and the upload cap come from the running
+deployment, not from this repository's defaults.
+
+Scalar's browser bundle is copied out of a devDependency into `public/scalar/`
+on `postinstall`, so the page loads nothing off-origin and nothing from a CDN.
 
 ```sh
 curl -X PUT "https://plans.example.com/api/plans?label=Q3%20rollout" \

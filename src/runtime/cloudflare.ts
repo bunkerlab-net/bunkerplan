@@ -8,8 +8,8 @@ import type { RuntimeTarget, Services } from "../services/types.ts";
 import { createR2Storage } from "../storage/r2.ts";
 
 /**
- * Cloudflare Workers wiring. This module is the type-level source of truth for
- * the `#runtime` alias; src/runtime/node.ts must match it structurally.
+ * Cloudflare Workers wiring, named directly by src/worker.ts.
+ * src/runtime/node.ts is its counterpart and must match it structurally.
  *
  * NOTHING reachable from here may import `pg`, `ioredis`, or `bun:sqlite` - the
  * Workers bundle would fail to resolve them.

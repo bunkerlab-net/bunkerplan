@@ -1,13 +1,15 @@
+import type { PlanRelabelled } from "../api/schemas.ts";
 import type { PlanRepo } from "../services/types.ts";
 import { readBoundedBody } from "./bounded-body.ts";
 import { parsePlanLabel } from "./plan-label.ts";
+import { problem } from "./problem.ts";
 
 /**
  * A label is capped at 100 characters, so the document carrying one has no
  * business being large. Without a bound this endpoint parses whatever it is
  * sent before the cap is ever consulted, and it is not rate limited.
  */
-const MAX_LABEL_BODY_BYTES = 4096;
+export const MAX_LABEL_BODY_BYTES = 4096;
 
 /**
  * Relabels a plan the caller owns. Nothing outside the row changes: the object
@@ -26,39 +28,33 @@ export async function relabelPlan(
 ): Promise<Response> {
   const encoded = await readBoundedBody(request, MAX_LABEL_BODY_BYTES);
   if (encoded === null) {
-    return Response.json(
-      { error: `body exceeds ${MAX_LABEL_BODY_BYTES} bytes` },
-      { status: 413 },
-    );
+    return problem(413, `body exceeds ${MAX_LABEL_BODY_BYTES} bytes`);
   }
 
   let body: unknown;
   try {
     body = JSON.parse(new TextDecoder().decode(encoded));
   } catch {
-    return Response.json({ error: "body must be JSON" }, { status: 400 });
+    return problem(400, "body must be JSON");
   }
 
   if (typeof body !== "object" || body === null || !("label" in body)) {
-    return Response.json({ error: "label is required" }, { status: 400 });
+    return problem(400, "label is required");
   }
 
   const raw = body.label;
   if (raw !== null && typeof raw !== "string") {
-    return Response.json(
-      { error: "label must be a string or null" },
-      { status: 400 },
-    );
+    return problem(400, "label must be a string or null");
   }
 
   const parsed = parsePlanLabel(raw);
   if (!parsed.ok) {
-    return Response.json({ error: parsed.reason }, { status: 400 });
+    return problem(400, parsed.reason);
   }
 
   if (!(await plans.relabel(id, userId, parsed.label))) {
-    return Response.json({ error: "not found" }, { status: 404 });
+    return problem(404, "not found");
   }
 
-  return Response.json({ id, label: parsed.label });
+  return Response.json({ id, label: parsed.label } satisfies PlanRelabelled);
 }

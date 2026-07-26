@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
+import { controlValue } from "./dom.ts";
 
 interface KeyRow {
   id: string;
@@ -120,11 +121,13 @@ export function ApiKeysPanel() {
           type="text"
           placeholder="Key name"
           value={name}
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event: Event) => setName(controlValue(event))}
         />
         <select
           value={expiryIndex}
-          onChange={(event) => setExpiryIndex(Number(event.target.value))}
+          onChange={(event: Event) =>
+            setExpiryIndex(Number(controlValue(event)))
+          }
         >
           {EXPIRY_CHOICES.map((choice, index) => (
             <option key={choice.label} value={index}>

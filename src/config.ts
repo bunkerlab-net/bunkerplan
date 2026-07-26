@@ -322,19 +322,6 @@ function parseLimits(env: Env, problems: string[]): Limits {
 }
 
 /**
- * The configured public origin, readable without awaiting the services.
- *
- * Server-side rendering needs an absolute origin for the Open Graph tags, and
- * taking it from the request means whatever `Host` reached the process. The
- * value is set here because this is the one place that parses it.
- */
-let canonicalOrigin: string | undefined;
-
-export function publicOrigin(): string | undefined {
-  return canonicalOrigin;
-}
-
-/**
  * The relying-party id scopes a passkey. A value the served hostname is not
  * equal to or a subdomain of makes every ceremony fail in the browser with an
  * opaque error, and a parent-domain value widens the credential to every
@@ -396,9 +383,6 @@ export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
         "See docs/self-hosting.md for the full environment contract.",
     );
   }
-
-  canonicalOrigin = publicBaseUrl;
-
   return {
     ...drivers,
     secret,

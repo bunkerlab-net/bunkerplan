@@ -14,10 +14,10 @@ import "package://github.com/jdx/hk/releases/download/v1.53.0/hk@1.53.0#/Builtin
 // clone migrates. It is overwritten wholesale on the next run, so formatting
 // it only guarantees the hook fails again after every regeneration.
 //
-// `worker-configuration.d.ts` and `src/routeTree.gen.ts` are deliberately NOT
-// here: they are formatted, and excluded from the linter in biome.json
-// instead. `src/routeTree.gen.ts` is rewritten by the router plugin on every
-// `bun run dev`, so expect to re-run the formatter after regenerating it.
+// `worker-configuration.d.ts` is deliberately NOT here: it is formatted, and
+// excluded from the linter in biome.json instead.
+// `src/server/manifest.generated.ts` is written by `scripts/build.ts` on every
+// build and is excluded from biome entirely.
 local vendored =
   List(
     ".agents/skills/**",
