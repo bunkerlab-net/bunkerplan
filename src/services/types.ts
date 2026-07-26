@@ -26,9 +26,29 @@ export interface KvStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttlSeconds?: number): Promise<void>;
   delete(key: string): Promise<void>;
-  /** Returns null when the backend has no atomic increment (Workers KV). */
-  increment(key: string, ttlSeconds: number): Promise<number | null>;
   probe(): Promise<void>;
+}
+
+export interface RateLimitResult {
+  allowed: boolean;
+  /** Seconds remaining in the current window. */
+  retryAfter: number;
+}
+
+export interface RateLimitRepo {
+  /**
+   * Counts one request against `key` and says whether it is allowed.
+   *
+   * The whole decision is one conditional upsert, so concurrent callers
+   * cannot each read a stale count and all pass. A caller is allowed when the
+   * window has rolled over or the count is still below `max`; anything else
+   * matches no row and is refused.
+   */
+  consume(
+    key: string,
+    max: number,
+    windowSeconds: number,
+  ): Promise<RateLimitResult>;
 }
 
 export interface PlanRow {
@@ -56,6 +76,7 @@ export interface Db {
   /** Drizzle provider name for the adapter. */
   provider: "sqlite" | "pg";
   plans: PlanRepo;
+  uploadRateLimits: RateLimitRepo;
   probe(): Promise<void>;
 }
 

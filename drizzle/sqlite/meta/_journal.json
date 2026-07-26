@@ -15,6 +15,13 @@
       "when": 1785024026529,
       "tag": "0001_eager_natasha_romanoff",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785025992737,
+      "tag": "0002_tidy_lightspeed",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getServices } from "#runtime";
 import { validateStandaloneHtml } from "../../html/validate.ts";
 import { planUrl } from "../../http/plan-url.ts";
-import { checkRateLimit } from "../../http/rate-limit.ts";
 import {
   resolveSessionUserId,
   resolveWriteUserId,
@@ -59,13 +58,14 @@ async function readUploadBody(
 }
 
 async function createPlan(request: Request): Promise<Response> {
-  const { auth, config, db, kv, logger, storage } = await getServices();
+  const { auth, config, db, logger, storage } = await getServices();
 
   const userId = await resolveWriteUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
 
-  const limit = await checkRateLimit(
-    kv,
+  // Per user, not per credential: an API key and the dashboard session share
+  // one allowance, and creating more keys does not buy more uploads.
+  const limit = await db.uploadRateLimits.consume(
     userId,
     config.uploadRateMax,
     config.uploadRateWindowSec,

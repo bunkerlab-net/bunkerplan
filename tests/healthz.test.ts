@@ -34,7 +34,6 @@ function fakes(fails: string[] = []): Fakes {
     get: async () => null,
     set: async () => {},
     delete: async () => {},
-    increment: async () => null,
     probe: probe("kv"),
   } satisfies KvStore;
 
@@ -46,6 +45,9 @@ function fakes(fails: string[] = []): Fakes {
       listByUser: async () => [],
       findOwner: async () => null,
       deleteOwned: async () => false,
+    },
+    uploadRateLimits: {
+      consume: async () => ({ allowed: true, retryAfter: 60 }),
     },
     probe: probe("db"),
   } satisfies Db;

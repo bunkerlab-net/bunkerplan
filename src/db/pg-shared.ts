@@ -1,6 +1,7 @@
 import * as authSchema from "./schema/auth.pg.ts";
 import * as planSchema from "./schema/plan.pg.ts";
+import * as rateLimitSchema from "./schema/rate-limit.pg.ts";
 
-export const pgSchema = { ...authSchema, ...planSchema };
+export const pgSchema = { ...authSchema, ...planSchema, ...rateLimitSchema };
 
 export type PgSchema = typeof pgSchema;

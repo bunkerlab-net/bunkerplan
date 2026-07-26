@@ -26,13 +26,6 @@ export function createWorkersKv(namespace: KVNamespace): KvStore {
       await namespace.delete(key);
     },
 
-    // Workers KV has no atomic increment: concurrent writes to one key are
-    // last-write-wins. Returning null tells the rate limiter to fall back to
-    // best-effort read-modify-write.
-    async increment() {
-      return null;
-    },
-
     async probe() {
       await namespace.get("__healthz__", "text");
     },

@@ -58,7 +58,8 @@ export interface LoadConfigOptions {
   workers?: boolean;
 }
 
-type Env = Record<string, string | undefined>;
+/** Values are whatever the runtime supplies; `str` coerces them to text. */
+type Env = Record<string, unknown>;
 
 const MIN_SECRET_LENGTH = 32;
 /** Workers KV rejects `expirationTtl` below 60 seconds. */
@@ -74,8 +75,12 @@ const MIN_PLAN_ID_LENGTH = 8;
 
 function str(env: Env, key: string): string | undefined {
   const raw = env[key];
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
+  if (raw === undefined || raw === null) return undefined;
+  // Coerced, not required to be a string: `vars` in wrangler.jsonc is JSON, so
+  // an unquoted `"UPLOAD_RATE_MAX": 30` reaches the Worker as a number. Every
+  // parser below works from text, and silently ignoring a var an operator
+  // plainly set is worse than accepting either spelling.
+  const trimmed = String(raw).trim();
   return trimmed === "" ? undefined : trimmed;
 }
 

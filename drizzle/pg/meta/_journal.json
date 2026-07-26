@@ -15,6 +15,13 @@
       "when": 1785024026904,
       "tag": "0001_known_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785025993097,
+      "tag": "0002_striped_selene",
+      "breakpoints": true
     }
   ]
 }

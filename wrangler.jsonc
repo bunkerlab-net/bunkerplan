@@ -79,5 +79,7 @@
     // pinned to PUBLIC_BASE_URL — but it keeps that possible later without
     // invalidating anything already registered.
     "RP_ID": "bunkerlab.net",
+    "UPLOAD_RATE_MAX": 30,
+    "UPLOAD_RATE_WINDOW_SEC": 60,
   },
 }

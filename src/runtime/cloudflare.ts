@@ -30,11 +30,15 @@ export function getServices(): Promise<Services> {
 }
 
 async function initialise(): Promise<Services> {
-  // `env` carries the bindings alongside string vars and secrets. Only the
-  // string-valued members are configuration; loadConfig ignores the rest.
-  const settings: Record<string, string | undefined> = {};
+  // `env` carries the bindings alongside vars and secrets. Bindings are
+  // objects and are not configuration; everything primitive is, including the
+  // numbers and booleans that `vars` in wrangler.jsonc is free to contain.
+  const settings: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (typeof value === "string") settings[key] = value;
+    const kind = typeof value;
+    if (kind === "string" || kind === "number" || kind === "boolean") {
+      settings[key] = value;
+    }
   }
   const config = loadConfig(settings, { workers: true });
 

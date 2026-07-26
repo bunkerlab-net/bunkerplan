@@ -44,3 +44,35 @@ describe("clientIpHeader", () => {
     );
   });
 });
+
+/**
+ * `vars` in wrangler.jsonc is JSON, so `"UPLOAD_RATE_MAX": 30` unquoted
+ * reaches the Worker as a number. Requiring a string made the Worker runtime
+ * drop it, which looked like configuration but silently kept the default.
+ */
+describe("non-string environment values", () => {
+  test("a numeric var is honoured, not ignored", () => {
+    const config = loadConfig(
+      { ...REQUIRED, UPLOAD_RATE_MAX: 100, UPLOAD_RATE_WINDOW_SEC: 120 },
+      { workers: true },
+    );
+    expect(config.uploadRateMax).toBe(100);
+    expect(config.uploadRateWindowSec).toBe(120);
+  });
+
+  test("a boolean var is honoured", () => {
+    const config = loadConfig(
+      { ...REQUIRED, LOG_COLOR: true },
+      { workers: true },
+    );
+    expect(config.logColor).toBe(true);
+  });
+
+  test("a quoted number still works", () => {
+    const config = loadConfig(
+      { ...REQUIRED, UPLOAD_RATE_MAX: "100" },
+      { workers: true },
+    );
+    expect(config.uploadRateMax).toBe(100);
+  });
+});

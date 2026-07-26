@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import type { Db } from "../services/types.ts";
 import { createSqlitePlanRepo } from "./plans.sqlite.ts";
+import { createSqliteRateLimitRepo } from "./rate-limits.sqlite.ts";
 import { sqliteSchema } from "./sqlite-shared.ts";
 
 /**
@@ -22,6 +23,7 @@ export function createBunSqliteDb(path: string): Db {
     adapter: db,
     provider: "sqlite",
     plans: createSqlitePlanRepo(db),
+    uploadRateLimits: createSqliteRateLimitRepo(db),
     async probe() {
       await db.run(sql`select 1`);
     },

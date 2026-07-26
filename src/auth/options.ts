@@ -83,9 +83,13 @@ function passkeyPlugin(input: AuthOptionsInput) {
 function apiKeyPlugin() {
   return apiKey({
     defaultPrefix: "bkp_",
-    // MANDATORY. The plugin defaults to 10 requests per key per day, which
-    // would break uploads immediately. All rate limiting lives in
-    // src/http/rate-limit.ts instead — one mechanism, one place.
+    // Off because it is the wrong boundary, not because it is unconfigurable
+    // — `timeWindow`/`maxRequests` would take our upload numbers happily. It
+    // counts per KEY and only runs inside `verifyApiKey`, so it would let a
+    // user lift their own ceiling by creating more keys and would not see the
+    // dashboard's session uploads at all. `src/db/rate-limits.*.ts` counts per
+    // USER across both credential types, which is the policy we actually want.
+    // (Its own default, 10 per key per day, would also break uploads.)
     rateLimit: { enabled: false },
     // `defaultExpiresIn: null` gives the required optional expiry: omit
     // `expiresIn` on create and the key never expires. min/max are in DAYS

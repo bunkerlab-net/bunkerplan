@@ -25,14 +25,6 @@ export function createValkeyKv(url: string): KvStore {
       await client.del(key);
     },
 
-    // Genuinely atomic here. `EXPIRE … NX` only sets the TTL on the first
-    // increment of a window, so the window does not slide forward.
-    async increment(key, ttlSeconds) {
-      const count = await client.incr(key);
-      await client.expire(key, ttlSeconds, "NX");
-      return count;
-    },
-
     async probe() {
       await client.ping();
     },

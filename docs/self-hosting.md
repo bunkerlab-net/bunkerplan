@@ -2,8 +2,8 @@
 
 BunkerPlan runs from one source tree on two targets:
 
-- **Cloudflare Workers** — R2 (objects), D1 (database), Workers KV (session
-  cache and rate limits). Built with `bun run build`.
+- **Cloudflare Workers** — R2 (objects), D1 (database and rate-limit counters),
+  Workers KV (session cache). Built with `bun run build`.
 - **Node/Bun** — any S3-compatible store, Postgres or SQLite, Valkey. Built with
   `bun run build:node` and shipped in the provided `Dockerfile`.
 
@@ -83,8 +83,8 @@ on the first request.
 | Role                        | Cloudflare                                | Self-hosted                                      |
 | --------------------------- | ----------------------------------------- | ------------------------------------------------ |
 | Objects                     | R2 binding `BUCKET` (`STORAGE_DRIVER=r2`) | any S3-compatible store (`STORAGE_DRIVER=s3`)    |
-| Database                    | D1 binding `DB` (`DB_DRIVER=d1`)          | Postgres (`postgres`) or local SQLite (`sqlite`) |
-| Session cache + rate limits | KV binding `KV` (`KV_DRIVER=kv`)          | Valkey/Redis (`KV_DRIVER=valkey`)                |
+| Database + rate limits      | D1 binding `DB` (`DB_DRIVER=d1`)          | Postgres (`postgres`) or local SQLite (`sqlite`) |
+| Session cache               | KV binding `KV` (`KV_DRIVER=kv`)          | Valkey/Redis (`KV_DRIVER=valkey`)                |
 
 `d1`, `r2` and `kv` are Workers-only; `sqlite`, `postgres`, `s3` and `valkey`
 are Node/Bun-only. Choosing a driver that does not exist on the current runtime
@@ -172,10 +172,17 @@ confusing 403 much later.
   image runs Bun, so it works there. Running the Nitro output under plain Node
   means using `postgres`. Postgres is the recommended self-hosted driver
   regardless: SQLite is single-node.
-- **The upload rate-limit counter is best-effort on Workers KV.** KV has no
-  atomic increment and concurrent writes to one key are last-write-wins, so a
-  client can exceed the limit under concurrency. Valkey deployments count
-  exactly via `INCR`.
+- **Rate limit counters live in the database, never in KV.** Workers KV
+  throttles a single key to one write per second and takes up to 60s to
+  propagate, which is the opposite of what a counter needs. Both limiters —
+  Better Auth's per-IP one on `/api/auth/*` and the per-user upload one on
+  `PUT /api/plans` — decide inside a single conditional SQL statement, so a
+  concurrent burst cannot exceed the limit.
+- **The upload limit is per user, not per credential.** An API key and the
+  dashboard session draw on the same `UPLOAD_RATE_MAX` allowance, so creating
+  more keys does not buy more uploads. The api-key plugin's own per-key limiter
+  is deliberately disabled: it only runs when a key is verified, so it would
+  miss dashboard uploads entirely.
 - **KV propagation is up to 60 seconds across regions.** A revoked session can
   linger in another region until the database fallback catches it. Sessions are
   stored in the database as well as KV precisely so a KV miss degrades to a
