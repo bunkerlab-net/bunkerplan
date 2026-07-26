@@ -56,7 +56,7 @@ function stores() {
   };
 
   const plans: PlanRepo = {
-    insert: async () => true,
+    insert: async () => "created",
     listByUser: async () => [],
     findOwner: async (id) => rows.get(id)?.userId ?? null,
     relabel: async () => false,

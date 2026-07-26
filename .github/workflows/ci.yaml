@@ -31,6 +31,25 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    # The Postgres repo holds its per-account plan ceiling with an advisory
+    # lock, because unlike SQLite it evaluates the count inside the claiming
+    # statement against a snapshot. That lock only exists against a real
+    # server, so without this service `tests/plans-pg.test.ts` skips and the
+    # concurrent path ships unexercised.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,9 +60,7 @@ jobs:
           cache: true
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ~/.bun/cache
-            node_modules
+          path: ~/.bun/cache
           key: ${{ runner.os }}-${{ runner.arch }}-bun-${{ hashFiles('**/bun.lock') }}
       - run: bun install --frozen-lockfile
       # `hk` is the same gate the pre-commit hook runs, so CI cannot disagree
@@ -58,6 +75,8 @@ jobs:
       # bundle that does not build fails here, before anything is published.
       - name: Test
         run: bun test
+        env:
+          TEST_DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
 
   build:
     name: Build (${{ matrix.arch }})

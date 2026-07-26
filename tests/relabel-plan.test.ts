@@ -15,7 +15,7 @@ function fakes() {
   const stored: { label: string | null } = { label: null };
 
   const plans: PlanRepo = {
-    insert: async () => true,
+    insert: async () => "created",
     listByUser: async () => [],
     findOwner: async () => OWNER,
     relabel: async (id, userId, label) => {

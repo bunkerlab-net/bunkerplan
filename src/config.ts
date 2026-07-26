@@ -34,6 +34,12 @@ export interface Config {
   clientIpHeader: string;
   maxUploadBytes: number;
   planIdLength: number;
+  /**
+   * Per-account ceiling on stored plans. Bounds total storage at this times
+   * `maxUploadBytes`, which the upload rate limit alone cannot do - that caps
+   * how fast an account writes, never how much it keeps.
+   */
+  maxPlansPerUser: number;
   uploadRateMax: number;
   uploadRateWindowSec: number;
   logFormat: LogFormat;
@@ -269,6 +275,7 @@ function parseLogging(env: Env, problems: string[]): LogSettings {
 interface Limits {
   maxUploadBytes: number;
   planIdLength: number;
+  maxPlansPerUser: number;
   uploadRateMax: number;
   uploadRateWindowSec: number;
 }
@@ -289,6 +296,7 @@ function parseLimits(env: Env, problems: string[]): Limits {
       MIN_PLAN_ID_LENGTH,
       problems,
     ),
+    maxPlansPerUser: int(env, "MAX_PLANS_PER_USER", 250, 1, problems),
     uploadRateMax: int(env, "UPLOAD_RATE_MAX", 30, 1, problems),
     uploadRateWindowSec: Math.max(
       MIN_RATE_WINDOW_SEC,

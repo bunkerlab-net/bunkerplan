@@ -64,15 +64,35 @@ export interface PlanRow {
   createdAt: Date;
 }
 
+/**
+ * Why `insert` reports three outcomes rather than a boolean: a refusal has two
+ * causes that need opposite handling. A duplicate id is retried with a fresh
+ * one; a full account must not be.
+ */
+export type PlanInsert = "created" | "duplicate" | "quota";
+
 export interface PlanRepo {
-  /** False means the id already existed - regenerate and retry. */
-  insert(row: {
-    id: string;
-    userId: string;
-    label: string | null;
-    size: number;
-  }): Promise<boolean>;
-  listByUser(userId: string): Promise<PlanRow[]>;
+  /**
+   * Claims an id, refusing once the account already holds `maxPlans`.
+   *
+   * The ceiling is part of this statement rather than a count the caller
+   * checks first, because two concurrent uploads would both read the same
+   * count and both pass it.
+   */
+  insert(
+    row: {
+      id: string;
+      userId: string;
+      label: string | null;
+      size: number;
+    },
+    maxPlans: number,
+  ): Promise<PlanInsert>;
+  /**
+   * Most recent first, capped at `limit`. Bounded because the result is
+   * serialised whole into one response body.
+   */
+  listByUser(userId: string, limit: number): Promise<PlanRow[]>;
   findOwner(id: string): Promise<string | null>;
   /** False means not found or not owned by `userId`. */
   relabel(id: string, userId: string, label: string | null): Promise<boolean>;

@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type { PlanRepo } from "../services/types.ts";
 import { plan } from "./schema/plan.sqlite.ts";
@@ -28,21 +28,32 @@ async function updateOwned(
 
 export function createSqlitePlanRepo(db: SqliteDb): PlanRepo {
   return {
-    async insert(row) {
-      const inserted = await db
-        .insert(plan)
-        .values({
-          id: row.id,
-          userId: row.userId,
-          label: row.label,
-          size: row.size,
-        })
-        .onConflictDoNothing()
-        .returning({ id: plan.id });
-      return inserted.length > 0;
+    async insert(row, maxPlans) {
+      // One statement decides both questions. `select ... where` makes the
+      // quota part of the claim rather than something read beforehand, which
+      // two concurrent uploads would both pass at the boundary; `on conflict
+      // do nothing` keeps the id collision behaviour.
+      const claimed = await db.all<{ id: string }>(sql`
+        insert into ${plan} (id, user_id, label, size)
+        select ${row.id}, ${row.userId}, ${row.label}, ${row.size}
+        where (
+          select count(*) from ${plan} where user_id = ${row.userId}
+        ) < ${maxPlans}
+        on conflict do nothing
+        returning id
+      `);
+      if (claimed.length > 0) return "created";
+
+      // Nothing was written, and the two causes need opposite handling. The
+      // count is only read here, on the path that has already failed.
+      const rows = await db
+        .select({ total: count() })
+        .from(plan)
+        .where(eq(plan.userId, row.userId));
+      return (rows[0]?.total ?? 0) >= maxPlans ? "quota" : "duplicate";
     },
 
-    async listByUser(userId) {
+    async listByUser(userId, limit) {
       return await db
         .select({
           id: plan.id,
@@ -52,7 +63,8 @@ export function createSqlitePlanRepo(db: SqliteDb): PlanRepo {
         })
         .from(plan)
         .where(eq(plan.userId, userId))
-        .orderBy(desc(plan.createdAt));
+        .orderBy(desc(plan.createdAt))
+        .limit(limit);
     },
 
     async findOwner(id) {

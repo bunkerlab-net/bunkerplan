@@ -33,7 +33,7 @@ export function createAuth(input: {
       // concurrent subrequests and trip the Workers subrequest limit. A throw
       // aborts the account deletion, which beats stranding public objects.
       onBeforeDeleteUser: async (userId) => {
-        const plans = await db.plans.listByUser(userId);
+        const plans = await db.plans.listByUser(userId, config.maxPlansPerUser);
         logger.info(
           { userId, planCount: plans.length },
           "deleting plan objects before account deletion",

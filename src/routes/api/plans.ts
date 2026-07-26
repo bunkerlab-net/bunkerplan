@@ -17,17 +17,23 @@ function problem(status: number, error: string, headers?: HeadersInit) {
   return Response.json({ error }, { status, ...(headers ? { headers } : {}) });
 }
 
-/** Claims a free id by inserting the row first - see the ordering note below. */
+/**
+ * Claims a free id, retrying only a collision. A full account is refused by
+ * the same statement and must not be retried into.
+ */
 async function claimId(
   plans: PlanRepo,
   userId: string,
   label: string | null,
   size: number,
   length: number,
-): Promise<string | null> {
+  maxPlans: number,
+): Promise<string | "quota" | null> {
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
     const id = newPlanId(length);
-    if (await plans.insert({ id, userId, label, size })) return id;
+    const claimed = await plans.insert({ id, userId, label, size }, maxPlans);
+    if (claimed === "created") return id;
+    if (claimed === "quota") return "quota";
   }
   return null;
 }
@@ -58,7 +64,14 @@ async function createPlan(request: Request): Promise<Response> {
     parsed.label,
     body.byteLength,
     config.planIdLength,
+    config.maxPlansPerUser,
   );
+  if (id === "quota") {
+    return problem(
+      409,
+      `plan limit reached (${config.maxPlansPerUser}); delete one first`,
+    );
+  }
   if (id === null) return problem(500, "could not allocate a plan id");
 
   try {
@@ -82,7 +95,9 @@ async function listPlans(request: Request): Promise<Response> {
   const userId = await resolveSessionUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
 
-  const rows = await db.plans.listByUser(userId);
+  // The quota caps how many rows can exist, so this returns every plan the
+  // account has; the limit is a ceiling on the response, not pagination.
+  const rows = await db.plans.listByUser(userId, config.maxPlansPerUser);
   return Response.json({
     plans: rows.map((row) => ({
       id: row.id,

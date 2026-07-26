@@ -24,6 +24,9 @@ const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 export const UPLOAD_RATE_MAX = 5;
 export const UPLOAD_RATE_WINDOW_SEC = 60;
 
+/** Below `UPLOAD_RATE_MAX`, so the quota is what refuses and not the limiter. */
+export const MAX_PLANS_PER_USER = 3;
+
 export const PUBLIC_BASE_URL = "http://localhost";
 
 /**
@@ -89,6 +92,7 @@ export async function startWorker(): Promise<Harness> {
           RP_ID: "localhost",
           UPLOAD_RATE_MAX,
           UPLOAD_RATE_WINDOW_SEC,
+          MAX_PLANS_PER_USER,
         },
         secrets: {
           // Not a real secret, and never used against real data: this stack is

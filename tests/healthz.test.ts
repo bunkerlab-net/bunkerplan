@@ -41,7 +41,7 @@ function fakes(fails: string[] = []): Fakes {
     adapter: {},
     provider: "pg",
     plans: {
-      insert: async () => true,
+      insert: async () => "created",
       listByUser: async () => [],
       findOwner: async () => null,
       relabel: async () => false,

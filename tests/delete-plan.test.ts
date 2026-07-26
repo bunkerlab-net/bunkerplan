@@ -40,7 +40,7 @@ function fakes(
   };
 
   const plans: PlanRepo = {
-    insert: async () => true,
+    insert: async () => "created",
     listByUser: async () => [],
     findOwner: async () => owner,
     relabel: async () => false,

@@ -4,6 +4,7 @@ import {
   type FetchResponse,
   type Harness,
   html,
+  MAX_PLANS_PER_USER,
   PUBLIC_BASE_URL,
   startWorker,
   UPLOAD_RATE_MAX,
@@ -251,5 +252,46 @@ describe("plan lifecycle over HTTP", () => {
     expect(await app.bucket.head(`plans/${created.id}`)).not.toBeNull();
     // Nothing at the bare id: the prefix is the only place a plan lives.
     expect(await app.bucket.head(created.id)).toBeNull();
+  });
+
+  test("refuses an upload once the account is at its plan ceiling", async () => {
+    const key = await app.account();
+    const mine: Created[] = [];
+    for (let i = 0; i < MAX_PLANS_PER_USER; i += 1) {
+      mine.push(await createPlan(key, html(`quota ${i}`)));
+    }
+
+    const refused = await app.fetch("/api/plans", upload(key, html("over")));
+    expect(refused.status).toBe(409);
+    expect((await jsonBody(refused))["error"]).toContain("plan limit reached");
+
+    // Deleting one frees exactly one slot, so the ceiling is a ceiling and
+    // not a lifetime total.
+    await app.fetch(`/api/plans/${mine[0]?.id}`, {
+      method: "DELETE",
+      headers: { "x-api-key": key },
+    });
+    expect(
+      (await app.fetch("/api/plans", upload(key, html("again")))).status,
+    ).toBe(201);
+  });
+
+  /**
+   * The ceiling has to hold under concurrency, which is why it lives in the
+   * claiming statement rather than in a count the handler reads first: two
+   * uploads that both read `MAX_PLANS_PER_USER - 1` would both have passed.
+   */
+  test("holds the ceiling when uploads race", async () => {
+    const key = await app.account();
+    const attempts = await Promise.all(
+      Array.from({ length: MAX_PLANS_PER_USER + 2 }, (_, i) =>
+        app.fetch("/api/plans", upload(key, html(`race ${i}`))),
+      ),
+    );
+
+    const created = attempts.filter((r) => r.status === 201).length;
+    const refused = attempts.filter((r) => r.status === 409).length;
+    expect(created).toBe(MAX_PLANS_PER_USER);
+    expect(refused).toBe(2);
   });
 });
