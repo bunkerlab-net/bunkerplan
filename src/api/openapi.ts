@@ -9,6 +9,7 @@
 import type { ZodType } from "zod";
 import type { Config } from "../config.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
+import { MAX_LABEL_BODY_BYTES } from "../http/relabel-plan.ts";
 import { PLAN_PAGE_SIZE } from "../services/types.ts";
 import {
   componentSchemas,
@@ -236,7 +237,7 @@ const RELABEL_PLAN_OPERATION = {
       400: "The body is not JSON, or `label` is missing or unusable.",
       401: UNAUTHORISED,
       404: NOT_FOUND,
-      413: "The body exceeds 4096 bytes.",
+      413: `The body exceeds ${MAX_LABEL_BODY_BYTES} bytes.`,
     }),
   },
 };

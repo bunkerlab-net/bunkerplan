@@ -9,7 +9,7 @@ import { problem } from "./problem.ts";
  * business being large. Without a bound this endpoint parses whatever it is
  * sent before the cap is ever consulted, and it is not rate limited.
  */
-const MAX_LABEL_BODY_BYTES = 4096;
+export const MAX_LABEL_BODY_BYTES = 4096;
 
 /**
  * Relabels a plan the caller owns. Nothing outside the row changes: the object
