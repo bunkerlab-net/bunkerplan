@@ -305,6 +305,60 @@ function parseLimits(env: Env, problems: string[]): Limits {
   };
 }
 
+/**
+ * The configured public origin, readable without awaiting the services.
+ *
+ * Server-side rendering needs an absolute origin for the Open Graph tags, and
+ * taking it from the request means whatever `Host` reached the process. The
+ * value is set here because this is the one place that parses it.
+ */
+let canonicalOrigin: string | undefined;
+
+export function publicOrigin(): string | undefined {
+  return canonicalOrigin;
+}
+
+/**
+ * The relying-party id scopes a passkey. A value the served hostname is not
+ * equal to or a subdomain of makes every ceremony fail in the browser with an
+ * opaque error, and a parent-domain value widens the credential to every
+ * sibling subdomain. Better to refuse at boot than to debug it later.
+ */
+function checkRpId(rpId: string, hostname: string, problems: string[]): void {
+  if (hostname === "" || rpId === hostname || hostname.endsWith(`.${rpId}`)) {
+    return;
+  }
+  problems.push(
+    `RP_ID "${rpId}" is not "${hostname}" or a parent of it, so no passkey ceremony can succeed`,
+  );
+}
+
+/**
+ * Better Auth reads the client IP from exactly one header and, with no trusted
+ * proxy list, believes a single-valued one verbatim. On Workers that header is
+ * `cf-connecting-ip`, which the edge overwrites. Everywhere else the right
+ * value depends on the deployment, and guessing `x-forwarded-for` guesses
+ * wrong in both directions: with no proxy the client sets it and mints itself
+ * a fresh rate-limit bucket per request, and behind a proxy that appends, the
+ * header arrives with two entries, resolves to nothing, and drops every caller
+ * into one shared bucket that a single client can exhaust.
+ */
+function parseClientIpHeader(
+  env: Env,
+  workers: boolean,
+  problems: string[],
+): string {
+  const configured = str(env, "CLIENT_IP_HEADER");
+  if (configured !== undefined) return configured.toLowerCase();
+  if (workers) return "cf-connecting-ip";
+  problems.push(
+    "CLIENT_IP_HEADER is required off Cloudflare: name the header your proxy " +
+      "overwrites (commonly x-forwarded-for), or auth rate limiting is either " +
+      "spoofable or shared by every caller",
+  );
+  return "";
+}
+
 export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
   const problems: string[] = [];
   const workers = options.workers === true;
@@ -316,6 +370,9 @@ export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
   const limits = parseLimits(env, problems);
   const s3ForcePathStyle = bool(env, "S3_FORCE_PATH_STYLE", true, problems);
   const logging = parseLogging(env, problems);
+  const rpId = str(env, "RP_ID") ?? baseHostname;
+  checkRpId(rpId, baseHostname, problems);
+  const clientIpHeader = parseClientIpHeader(env, workers, problems);
 
   if (problems.length > 0) {
     throw new Error(
@@ -324,19 +381,15 @@ export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
     );
   }
 
+  canonicalOrigin = publicBaseUrl;
+
   return {
     ...drivers,
     secret,
     publicBaseUrl,
-    rpId: str(env, "RP_ID") ?? baseHostname,
+    rpId,
     rpName: str(env, "RP_NAME") ?? "BunkerPlan",
-    // Cloudflare overwrites `cf-connecting-ip` at the Worker, so it cannot be
-    // spoofed there; elsewhere Better Auth's own `x-forwarded-for` default
-    // applies. See CLIENT_IP_HEADER in docs/self-hosting.md.
-    clientIpHeader: (
-      str(env, "CLIENT_IP_HEADER") ??
-      (workers ? "cf-connecting-ip" : "x-forwarded-for")
-    ).toLowerCase(),
+    clientIpHeader,
     ...limits,
     s3Endpoint: str(env, "S3_ENDPOINT"),
     s3Region: str(env, "S3_REGION") ?? "us-east-1",

@@ -8,6 +8,7 @@ import {
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getRequestUrl } from "@tanstack/react-start/server";
 import { NotFound } from "../client/NotFound.tsx";
+import { publicOrigin } from "../config.ts";
 import appCss from "../styles.css?url";
 
 const TITLE = "BunkerPlan";
@@ -17,15 +18,24 @@ const IMAGE_ALT = "BunkerPlan - one HTML file in, one public URL out.";
 
 /**
  * Open Graph requires absolute URLs and crawlers do not run JavaScript, so the
- * origin has to be resolved while rendering on the server rather than read from
- * `window`. `createIsomorphicFn` is what keeps `getRequestUrl` - and the
+ * origin has to be resolved while rendering on the server rather than read
+ * from `window`. `createIsomorphicFn` is what keeps `getRequestUrl` - and the
  * `node:async_hooks` it stands on - out of the client bundle.
  *
- * Taken from the request rather than PUBLIC_BASE_URL so the tags stay correct
- * on whatever host actually served the page.
+ * The origin comes from the configured public base URL, not from the request:
+ * `Host` is whatever reached the process, so behind a proxy that forwards it
+ * unchanged a crawler could be handed tags pointing at someone else's
+ * hostname. Only the path is taken from the request. The client branch can
+ * use `location` safely - a browser knows its own origin.
  */
 const currentUrl = createIsomorphicFn()
-  .server(() => getRequestUrl().href)
+  .server(() => {
+    const requested = getRequestUrl();
+    const canonical = publicOrigin();
+    return canonical === undefined || canonical === ""
+      ? requested.href
+      : new URL(requested.pathname + requested.search, canonical).href;
+  })
   .client(() => window.location.href);
 
 export const Route = createRootRoute({

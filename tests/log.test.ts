@@ -87,6 +87,8 @@ const BASE_ENV = {
   DATABASE_URL: "postgres://x",
   KV_DRIVER: "valkey",
   VALKEY_URL: "redis://x",
+  // Required off Workers; the logger does not read it, but `loadConfig` does.
+  CLIENT_IP_HEADER: "x-forwarded-for",
 };
 
 /** Captures what the logger actually writes to the console. */
