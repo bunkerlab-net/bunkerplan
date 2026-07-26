@@ -13,13 +13,13 @@ import appCss from "../styles.css?url";
 const TITLE = "BunkerPlan";
 const DESCRIPTION =
   "Standalone HTML documents at short public URLs. Passkeys only.";
-const IMAGE_ALT = "BunkerPlan — one HTML file in, one public URL out.";
+const IMAGE_ALT = "BunkerPlan - one HTML file in, one public URL out.";
 
 /**
  * Open Graph requires absolute URLs and crawlers do not run JavaScript, so the
  * origin has to be resolved while rendering on the server rather than read from
- * `window`. `createIsomorphicFn` is what keeps `getRequestUrl` — and the
- * `node:async_hooks` it stands on — out of the client bundle.
+ * `window`. `createIsomorphicFn` is what keeps `getRequestUrl` - and the
+ * `node:async_hooks` it stands on - out of the client bundle.
  *
  * Taken from the request rather than PUBLIC_BASE_URL so the tags stay correct
  * on whatever host actually served the page.

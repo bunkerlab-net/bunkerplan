@@ -2,7 +2,7 @@ import type { Logger } from "../log.ts";
 import type { PlanRepo, PlanStorage } from "../services/types.ts";
 
 /**
- * Object first, row second — the mirror of the upload path.
+ * Object first, row second - the mirror of the upload path.
  *
  * The public GET never consults the database, so an object whose row is gone
  * would be served forever with no owner and no way to remove it. Deleting the

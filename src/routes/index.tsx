@@ -14,7 +14,7 @@ export const Route = createFileRoute("/")({
 
 /**
  * The landing page is the root for everyone. A signed-in visitor is not
- * redirected to the dashboard — the copy here is what documents the API — but
+ * redirected to the dashboard - the copy here is what documents the API - but
  * the sign-in card gives way to a route through to it, because the ceremony
  * buttons would only add a second passkey to a live session.
  */

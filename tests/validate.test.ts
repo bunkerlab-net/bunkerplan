@@ -33,7 +33,7 @@ describe("validateStandaloneHtml", () => {
     ).toEqual({ ok: false, reason: "external reference: script[src]" });
   });
 
-  test("rejects a relative stylesheet — relative counts as external", () => {
+  test("rejects a relative stylesheet - relative counts as external", () => {
     expect(check(DOC(`<link rel="stylesheet" href="./a.css">`))).toEqual({
       ok: false,
       reason: "external reference: link[href]",
@@ -60,7 +60,7 @@ describe("validateStandaloneHtml", () => {
     expect(check(DOC(`<img src="${png}">`))).toEqual({ ok: true });
   });
 
-  test("accepts an external link — user-initiated navigation", () => {
+  test("accepts an external link - user-initiated navigation", () => {
     expect(check(DOC(`<a href="https://example.com">out</a>`))).toEqual({
       ok: true,
     });

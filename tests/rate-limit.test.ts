@@ -14,7 +14,7 @@ let repo: RateLimitRepo;
 beforeEach(() => {
   handle = new Database(":memory:");
   // Foreign keys are OFF by default per connection, so without this the
-  // cascade below would silently do nothing — exactly the bug being guarded.
+  // cascade below would silently do nothing - exactly the bug being guarded.
   handle.exec("PRAGMA foreign_keys = ON");
   handle.exec(`CREATE TABLE user (
     id TEXT PRIMARY KEY NOT NULL,

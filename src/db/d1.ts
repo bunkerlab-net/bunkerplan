@@ -1,5 +1,5 @@
 // D1Database is an ambient global from the generated
-// worker-configuration.d.ts — see `bun run cf-typegen`.
+// worker-configuration.d.ts - see `bun run cf-typegen`.
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Db } from "../services/types.ts";

@@ -92,7 +92,7 @@ export function SiteFrame({
 
 /**
  * The auth client reads `window.location.origin`, so anything touching a
- * session renders only after hydration — nothing inside `children` runs during
+ * session renders only after hydration - nothing inside `children` runs during
  * SSR. The frame around it does, so the nav and footer reach the markup.
  */
 export function Hydrated({ children }: { children: ReactNode }) {

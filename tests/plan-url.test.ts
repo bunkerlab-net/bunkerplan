@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { planUrl } from "../src/http/plan-url.ts";
 
 describe("planUrl", () => {
-  // The public URL shape is the product: it is pasted into chat, mail and
+  // The public URL shape is the product: it is pasted into chat, mail, and
   // documents, and every one of those copies breaks if the prefix moves. This
   // asserts the contract so a change to it has to be deliberate.
   test("puts plans under /p", () => {

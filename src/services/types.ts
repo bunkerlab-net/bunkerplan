@@ -58,7 +58,7 @@ export interface PlanRow {
 }
 
 export interface PlanRepo {
-  /** False means the id already existed — regenerate and retry. */
+  /** False means the id already existed - regenerate and retry. */
   insert(row: { id: string; userId: string; size: number }): Promise<boolean>;
   listByUser(userId: string): Promise<PlanRow[]>;
   findOwner(id: string): Promise<string | null>;
@@ -69,7 +69,7 @@ export interface PlanRepo {
 export interface Db {
   /**
    * The value handed to `drizzleAdapter()`. `unknown` because the D1,
-   * bun-sqlite and node-postgres drizzle instances are structurally different
+   * bun-sqlite, and node-postgres drizzle instances are structurally different
    * types; `src/auth/instance.ts` holds the single cast.
    */
   adapter: unknown;

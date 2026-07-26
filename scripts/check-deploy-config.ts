@@ -9,15 +9,15 @@
 const PLACEHOLDERS: ReadonlyArray<{ needle: string; fix: string }> = [
   {
     needle: '"database_id": "00000000-0000-0000-0000-000000000000"',
-    fix: "d1_databases[0].database_id — run `wrangler d1 create bunkerplan`",
+    fix: "d1_databases[0].database_id - run `wrangler d1 create bunkerplan`",
   },
   {
     needle: '"id": "00000000000000000000000000000000"',
-    fix: "kv_namespaces[0].id — run `wrangler kv namespace create KV`",
+    fix: "kv_namespaces[0].id - run `wrangler kv namespace create KV`",
   },
   {
     needle: '"PUBLIC_BASE_URL": "http://localhost:3000"',
-    fix: "vars.PUBLIC_BASE_URL — set the real origin, e.g. https://plans.example.com",
+    fix: "vars.PUBLIC_BASE_URL - set the real origin, e.g. https://plans.example.com",
   },
 ];
 

@@ -16,7 +16,7 @@ export type AuthClient = ReturnType<typeof makeClient>;
 let client: AuthClient | undefined;
 
 /**
- * Constructed lazily and only in the browser — `window` is undefined under SSR.
+ * Constructed lazily and only in the browser - `window` is undefined under SSR.
  */
 export function authClient(): AuthClient {
   if (typeof window === "undefined") {

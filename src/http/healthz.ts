@@ -8,13 +8,13 @@ const CHECKS = ["storage", "db", "kv"] as const;
 /**
  * `/healthz` is a self-hosting feature. Its only caller is the Dockerfile
  * HEALTHCHECK, which needs an unauthenticated readiness signal because a
- * container orchestrator has no other way to see that Postgres, Valkey and the
+ * container orchestrator has no other way to see that Postgres, Valkey, and the
  * S3 endpoint are reachable from inside the container.
  *
- * On Workers it is a liability instead. Nothing polls it — Cloudflare reports
- * Worker health itself — while every call fans one unauthenticated public
- * request out into three billable backend operations: a D1 query, a KV read and
- * an R2 head. That is an amplifier anyone holding the URL can point at the
+ * On Workers it is a liability instead. Nothing polls it - Cloudflare reports
+ * Worker health itself - while every call fans one unauthenticated public
+ * request out into three billable backend operations: a D1 query, a KV read,
+ * and an R2 head. That is an amplifier anyone holding the URL can point at the
  * account's bill, so the route refuses outright with a plain `404`.
  *
  * `services` is a getter rather than a value so the refusal returns before any

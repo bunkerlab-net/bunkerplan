@@ -16,7 +16,7 @@ export function createAuth(input: {
   const { config, db, kv, storage, logger } = input;
   return betterAuth(
     buildAuthOptions({
-      // The single cast in the codebase: the D1, bun-sqlite and node-postgres
+      // The single cast in the codebase: the D1, bun-sqlite, and node-postgres
       // drizzle instances are structurally different types that drizzleAdapter
       // accepts at runtime but cannot be unified statically.
       database: drizzleAdapter(db.adapter as never, {

@@ -15,7 +15,7 @@ function problem(status: number, error: string, headers?: HeadersInit) {
   return Response.json({ error }, { status, ...(headers ? { headers } : {}) });
 }
 
-/** Claims a free id by inserting the row first — see the ordering note below. */
+/** Claims a free id by inserting the row first - see the ordering note below. */
 async function claimId(
   plans: PlanRepo,
   userId: string,

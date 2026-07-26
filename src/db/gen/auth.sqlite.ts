@@ -1,7 +1,7 @@
 /**
  * CLI-only config for `auth generate`. Never imported at runtime.
  *
- * Deliberately passes no `secondaryStorage` so the `session` table IS emitted —
+ * Deliberately passes no `secondaryStorage` so the `session` table IS emitted -
  * that is what `session.storeSessionInDatabase: true` needs at runtime. The
  * `rateLimit` table comes from `rateLimit.storage: "database"` in
  * buildAuthOptions and is required.

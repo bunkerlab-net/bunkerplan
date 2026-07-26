@@ -8,7 +8,7 @@ import { createPgRateLimitRepo } from "./rate-limits.pg.ts";
 
 /**
  * Postgres always enforces foreign keys, so the ON DELETE CASCADE constraints
- * are live. `pg` is Node-only — this module MUST NOT be reachable from
+ * are live. `pg` is Node-only - this module MUST NOT be reachable from
  * src/runtime/cloudflare.ts.
  */
 export function createPostgresDb(connectionString: string): Db {

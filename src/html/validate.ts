@@ -2,7 +2,7 @@
  * Standalone-HTML gate for uploads.
  *
  * WHAT THIS CANNOT DO: runtime `fetch`, `XMLHttpRequest`, `WebSocket`,
- * `EventSource` and dynamic `import()` inside inline scripts are invisible to
+ * `EventSource`, and dynamic `import()` inside inline scripts are invisible to
  * static parsing. This check enforces "no static subresources", not "no network
  * access". The `Content-Security-Policy: sandbox` header on GET /{id} is the
  * runtime control, and it is what actually protects the uploader's session.
@@ -51,7 +51,7 @@ const SRCSET_ATTRS: Record<string, true> = { srcset: true };
 
 /**
  * Allowed: nothing to fetch, or the bytes travel inside the document.
- * Rejected: every scheme, protocol-relative `//host`, AND every relative path —
+ * Rejected: every scheme, protocol-relative `//host`, AND every relative path -
  * a standalone file has no siblings to resolve against.
  */
 function isExternalRef(raw: string): boolean {
@@ -133,7 +133,7 @@ function checkElement(node: Node): string | null {
 
   // `srcdoc` carries a whole nested document whose own subresources would load
   // automatically. Its value is HTML-entity encoded, and ultrahtml does not
-  // decode attribute entities — validating it recursively would mean writing an
+  // decode attribute entities - validating it recursively would mean writing an
   // entity decoder and trusting it as a security boundary. A standalone
   // document gains nothing from `srcdoc`, so it is rejected outright.
   if (tag === "iframe" && (attributes["srcdoc"] ?? "").trim() !== "") {
@@ -157,7 +157,7 @@ function checkElement(node: Node): string | null {
   return null;
 }
 
-/** Strip a BOM, leading whitespace and leading comments before the shape test. */
+/** Strip a BOM, leading whitespace, and leading comments before the shape test. */
 function stripPreamble(text: string): string {
   let rest = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   for (;;) {

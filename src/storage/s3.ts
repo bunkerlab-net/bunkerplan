@@ -30,7 +30,7 @@ function isNotFound(error: unknown): boolean {
 /**
  * `credentials` is omitted entirely unless BOTH keys were explicitly
  * configured. Omitting it is what lets the SDK resolve env vars, shared config,
- * SSO, web identity (EKS IRSA), ECS/EKS task roles and EC2 IMDS in its
+ * SSO, web identity (EKS IRSA), ECS/EKS task roles, and EC2 IMDS in its
  * documented order. Never default credentials in code.
  */
 function makeClient(config: Config): S3Client {

@@ -21,7 +21,7 @@ function htmlRequest(body: string, contentLength?: number): Request {
     headers: {
       "content-type": "text/html",
       // Bun's Request does not synthesise this, so the pre-read check only
-      // fires when a test declares it — as a real HTTP client would.
+      // fires when a test declares it - as a real HTTP client would.
       ...(contentLength === undefined
         ? {}
         : { "content-length": String(contentLength) }),

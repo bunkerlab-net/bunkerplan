@@ -8,7 +8,7 @@ import { newUserHandle } from "../ids.ts";
 /**
  * Marks the provisional identity returned by `resolveUser`. A signed-in user
  * adding a second passkey takes the session branch inside the plugin, so
- * `resolveUser` is never called and this prefix is absent — that is how
+ * `resolveUser` is never called and this prefix is absent - that is how
  * `afterVerification` distinguishes "new signup" from "add a passkey".
  */
 const PENDING = "pending:";
@@ -29,14 +29,14 @@ export interface AuthOptionsInput {
   /**
    * Runs before Better Auth deletes anything, while the user's plan rows still
    * exist. Objects live outside the database, so no foreign key can clean them
-   * up — this hook is the only chance. Throwing aborts the deletion.
+   * up - this hook is the only chance. Throwing aborts the deletion.
    */
   onBeforeDeleteUser?: ((userId: string) => Promise<void>) | undefined;
 }
 
 /**
  * Passkey-only signup. Better Auth's `user` table requires a unique non-null
- * email and a non-null name, and the passkey plugin never creates users — so
+ * email and a non-null name, and the passkey plugin never creates users - so
  * we synthesise both and create the user ourselves inside the plugin's hooks.
  */
 function passkeyPlugin(input: AuthOptionsInput) {
@@ -48,7 +48,7 @@ function passkeyPlugin(input: AuthOptionsInput) {
       // Lets `generate-register-options` skip freshSessionMiddleware, so a
       // brand-new visitor can register with nothing but a passkey.
       requireSession: false,
-      // Provisional identity only — no DB write. An abandoned WebAuthn
+      // Provisional identity only - no DB write. An abandoned WebAuthn
       // ceremony must not leave an orphan user row behind.
       resolveUser: async () => {
         const handle = newUserHandle();
@@ -67,7 +67,7 @@ function passkeyPlugin(input: AuthOptionsInput) {
           emailVerified: false,
         });
         // Registration signs the user straight in. Without this the browser
-        // would need a second WebAuthn ceremony immediately afterwards — two
+        // would need a second WebAuthn ceremony immediately afterwards - two
         // biometric prompts to sign up.
         const session = await ctx.context.internalAdapter.createSession(
           created.id,
@@ -84,7 +84,7 @@ function apiKeyPlugin() {
   return apiKey({
     defaultPrefix: "bkp_",
     // Off because it is the wrong boundary, not because it is unconfigurable
-    // — `timeWindow`/`maxRequests` would take our upload numbers happily. It
+    // - `timeWindow`/`maxRequests` would take our upload numbers happily. It
     // counts per KEY and only runs inside `verifyApiKey`, so it would let a
     // user lift their own ceiling by creating more keys and would not see the
     // dashboard's session uploads at all. `src/db/rate-limits.*.ts` counts per

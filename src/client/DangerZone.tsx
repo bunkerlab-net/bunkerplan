@@ -16,8 +16,8 @@ export function DangerZone({ handle }: DangerZoneProps) {
       let result = await authClient().deleteUser();
       // Deleting an account requires a FRESH session (default freshAge 24h)
       // and there is no password to re-enter, so a returning user routinely
-      // hits SESSION_EXPIRED. Re-run the WebAuthn ceremony — which mints a new
-      // session — and retry once.
+      // hits SESSION_EXPIRED. Re-run the WebAuthn ceremony - which mints a new
+      // session - and retry once.
       if (result.error?.code === "SESSION_EXPIRED") {
         const reauth = await authClient().signIn.passkey();
         if (reauth?.error) {
@@ -46,7 +46,7 @@ export function DangerZone({ handle }: DangerZoneProps) {
       <h2 className="card-title">Delete this account</h2>
       <p>
         This removes the account itself, every plan you have uploaded, every API
-        key and every passkey. Public URLs stop resolving, though a cached copy
+        key, and every passkey. Public URLs stop resolving, though a cached copy
         can survive for up to five minutes. It cannot be undone.
       </p>
       <div className="row" style={{ marginTop: "24px" }}>

@@ -8,7 +8,7 @@ import { sqliteSchema } from "./sqlite-shared.ts";
 
 /**
  * Local-file SQLite. `drizzle-orm/bun-sqlite` statically imports `bun:sqlite`,
- * so this module MUST NOT be reachable from src/runtime/cloudflare.ts — that is
+ * so this module MUST NOT be reachable from src/runtime/cloudflare.ts - that is
  * why the D1 driver lives in its own file. It also requires the Bun runtime;
  * self-hosters on plain Node must use DB_DRIVER=postgres.
  */

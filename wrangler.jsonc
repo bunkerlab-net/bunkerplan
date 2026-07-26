@@ -14,7 +14,7 @@
   // dashboard and the Worker stops answering on plan.bunkerlab.net. Deploy
   // treats this file as the source of truth for routes, not the dashboard.
   //
-  // `zone_name` is not valid alongside `custom_domain` — the schema forbids
+  // `zone_name` is not valid alongside `custom_domain` - the schema forbids
   // it and Cloudflare infers the zone from the hostname.
   "routes": [
     {
@@ -39,7 +39,7 @@
   //   wrangler secret put BETTER_AUTH_SECRET
   //
   // NOTE: bindings are NOT inherited by named environments. If you add
-  // `[env.staging]`, repeat all three blocks below inside it — a missing
+  // `[env.staging]`, repeat all three blocks below inside it - a missing
   // binding fails at runtime, not at deploy time.
   "d1_databases": [
     {
@@ -68,15 +68,15 @@
     // DO NOT REMOVE OR CHANGE once anyone has registered. This is the WebAuthn
     // relying-party id; every stored credential is bound to it. While a
     // different value is in place no existing passkey can be used, and since
-    // there is no password there is no other way in — restoring this exact
+    // there is no password there is no other way in - restoring this exact
     // value is the only fix. Migrating away deliberately means every user
     // re-registers from scratch.
     //
     // It is set explicitly because the default is the hostname of
     // PUBLIC_BASE_URL, which would be `plan.bunkerlab.net`. The parent domain
     // scopes credentials to bunkerlab.net instead. That alone does NOT let
-    // other subdomains run ceremonies — `origin` in src/auth/options.ts is
-    // pinned to PUBLIC_BASE_URL — but it keeps that possible later without
+    // other subdomains run ceremonies - `origin` in src/auth/options.ts is
+    // pinned to PUBLIC_BASE_URL - but it keeps that possible later without
     // invalidating anything already registered.
     "RP_ID": "bunkerlab.net",
     "UPLOAD_RATE_MAX": 30,

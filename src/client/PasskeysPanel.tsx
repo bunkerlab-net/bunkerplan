@@ -94,11 +94,11 @@ export function PasskeysPanel() {
           <tbody>
             {passkeys.map((item) => (
               <tr key={item.id}>
-                <td>{item.name ?? "—"}</td>
+                <td>{item.name ?? "-"}</td>
                 <td>
                   {item.createdAt
                     ? new Date(item.createdAt).toLocaleString()
-                    : "—"}
+                    : "-"}
                 </td>
                 <td className="actions">
                   <button

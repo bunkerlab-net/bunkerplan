@@ -2,7 +2,7 @@ import { Redis } from "ioredis";
 import type { KvStore } from "../services/types.ts";
 
 /**
- * Valkey/Redis over `ioredis`. Node-only — this module MUST NOT be reachable
+ * Valkey/Redis over `ioredis`. Node-only - this module MUST NOT be reachable
  * from src/runtime/cloudflare.ts.
  */
 export function createValkeyKv(url: string): KvStore {

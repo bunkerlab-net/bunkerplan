@@ -30,7 +30,7 @@ function Reveal({
   return (
     <div className="notice">
       <p>
-        <strong>Copy this now — you will not see it again.</strong>
+        <strong>Copy this now - you will not see it again.</strong>
       </p>
       <div className="row">
         <code>{value}</code>
@@ -162,10 +162,10 @@ export function ApiKeysPanel() {
           <tbody>
             {keys.map((item) => (
               <tr key={item.id}>
-                <td>{item.name ?? "—"}</td>
+                <td>{item.name ?? "-"}</td>
                 {/* `start` is the first characters of the full key, prefix
-                    included — do not prepend `prefix` again. */}
-                <td className="mono">{item.start ?? "—"}…</td>
+                    included - do not prepend `prefix` again. */}
+                <td className="mono">{item.start ?? "-"}…</td>
                 <td>
                   {item.expiresAt === null
                     ? "Never"

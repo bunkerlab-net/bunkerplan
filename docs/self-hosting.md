@@ -2,9 +2,9 @@
 
 BunkerPlan runs from one source tree on two targets:
 
-- **Cloudflare Workers** — R2 (objects), D1 (database and rate-limit counters),
+- **Cloudflare Workers** - R2 (objects), D1 (database and rate-limit counters),
   Workers KV (session cache). Built with `bun run build`.
-- **Node/Bun** — any S3-compatible store, Postgres or SQLite, Valkey. Built with
+- **Node/Bun** - any S3-compatible store, Postgres or SQLite, Valkey. Built with
   `bun run build:node` and shipped in the provided `Dockerfile`.
 
 Every backing service is selected at runtime, so the same image serves both.
@@ -35,7 +35,7 @@ wrangler r2 bucket create bunkerplan
 # Set vars.PUBLIC_BASE_URL in wrangler.jsonc to the real origin.
 # It MUST match the browser origin exactly or WebAuthn rejects every ceremony.
 
-wrangler secret put BETTER_AUTH_SECRET   # never a var — secrets only
+wrangler secret put BETTER_AUTH_SECRET   # never a var - secrets only
 bun run cf-typegen                       # regenerate the Env types
 wrangler d1 migrations apply bunkerplan --remote
 bun run deploy
@@ -50,8 +50,8 @@ These names are the API. They are not renamed across releases.
 
 | Var                      | Required      | Default                                               | Notes                                                                    |
 | ------------------------ | ------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| `BETTER_AUTH_SECRET`     | yes           | —                                                     | rejected if under 32 characters                                          |
-| `PUBLIC_BASE_URL`        | yes           | —                                                     | e.g. `https://plans.example.com`; also used as the Better Auth base URL  |
+| `BETTER_AUTH_SECRET`     | yes           | -                                                     | rejected if under 32 characters                                          |
+| `PUBLIC_BASE_URL`        | yes           | -                                                     | e.g. `https://plans.example.com`; also used as the Better Auth base URL  |
 | `RP_ID`                  | no            | hostname of `PUBLIC_BASE_URL`                         | WebAuthn relying-party id                                                |
 | `RP_NAME`                | no            | `BunkerPlan`                                          | shown in the passkey prompt                                              |
 | `CLIENT_IP_HEADER`       | no            | `cf-connecting-ip` on Workers, else `x-forwarded-for` | single header your proxy sets to the client IP                           |
@@ -63,30 +63,30 @@ These names are the API. They are not renamed across releases.
 | `LOG_LEVEL`              | no            | `info`                                                | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent` |
 | `LOG_COLOR`              | no            | `false`                                               | colourises `LOG_FORMAT=plain` only                                       |
 | `STORAGE_DRIVER`         | no on Workers | `r2` on Workers                                       | `r2` \| `s3`                                                             |
-| `S3_ENDPOINT`            | no            | —                                                     | **omit for real AWS S3**; set for MinIO / R2 / GCS                       |
-| `S3_BUCKET`              | if `s3`       | —                                                     |                                                                          |
-| `S3_ACCESS_KEY_ID`       | no            | —                                                     | **omit on AWS** — see below                                              |
-| `S3_SECRET_ACCESS_KEY`   | no            | —                                                     | must be set together with the key id                                     |
+| `S3_ENDPOINT`            | no            | -                                                     | **omit for real AWS S3**; set for MinIO / R2 / GCS                       |
+| `S3_BUCKET`              | if `s3`       | -                                                     |                                                                          |
+| `S3_ACCESS_KEY_ID`       | no            | -                                                     | **omit on AWS** - see below                                              |
+| `S3_SECRET_ACCESS_KEY`   | no            | -                                                     | must be set together with the key id                                     |
 | `S3_REGION`              | no            | `us-east-1`                                           | use `auto` for R2                                                        |
 | `S3_FORCE_PATH_STYLE`    | no            | `true`                                                | set `false` for real AWS S3                                              |
 | `DB_DRIVER`              | no on Workers | `d1` on Workers                                       | `d1` \| `sqlite` \| `postgres`                                           |
 | `SQLITE_PATH`            | if `sqlite`   | `./data/bunkerplan.db`                                |                                                                          |
-| `DATABASE_URL`           | if `postgres` | —                                                     |                                                                          |
+| `DATABASE_URL`           | if `postgres` | -                                                     |                                                                          |
 | `KV_DRIVER`              | no on Workers | `kv` on Workers                                       | `kv` \| `valkey`                                                         |
-| `VALKEY_URL`             | if `valkey`   | —                                                     | e.g. `redis://valkey:6379`                                               |
+| `VALKEY_URL`             | if `valkey`   | -                                                     | e.g. `redis://valkey:6379`                                               |
 
 A misconfigured deployment fails at boot with every problem listed at once, not
 on the first request.
 
 ## Swap matrices
 
-| Role                        | Cloudflare                                | Self-hosted                                      |
-| --------------------------- | ----------------------------------------- | ------------------------------------------------ |
-| Objects                     | R2 binding `BUCKET` (`STORAGE_DRIVER=r2`) | any S3-compatible store (`STORAGE_DRIVER=s3`)    |
-| Database + rate limits      | D1 binding `DB` (`DB_DRIVER=d1`)          | Postgres (`postgres`) or local SQLite (`sqlite`) |
-| Session cache               | KV binding `KV` (`KV_DRIVER=kv`)          | Valkey/Redis (`KV_DRIVER=valkey`)                |
+| Role                   | Cloudflare                                | Self-hosted                                      |
+| ---------------------- | ----------------------------------------- | ------------------------------------------------ |
+| Objects                | R2 binding `BUCKET` (`STORAGE_DRIVER=r2`) | any S3-compatible store (`STORAGE_DRIVER=s3`)    |
+| Database + rate limits | D1 binding `DB` (`DB_DRIVER=d1`)          | Postgres (`postgres`) or local SQLite (`sqlite`) |
+| Session cache          | KV binding `KV` (`KV_DRIVER=kv`)          | Valkey/Redis (`KV_DRIVER=valkey`)                |
 
-`d1`, `r2` and `kv` are Workers-only; `sqlite`, `postgres`, `s3` and `valkey`
+`d1`, `r2`, and `kv` are Workers-only; `sqlite`, `postgres`, `s3`, and `valkey`
 are Node/Bun-only. Choosing a driver that does not exist on the current runtime
 fails at boot with an explicit message.
 
@@ -105,13 +105,13 @@ before `app` starts.
 
 ## AWS credentials
 
-**For AWS S3, leave `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` and
+**For AWS S3, leave `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and
 `S3_ENDPOINT` unset** and attach an IAM role. The SDK then resolves credentials
-through its standard chain — web identity (EKS IRSA), ECS/EKS task roles, EC2
-instance profiles, SSO, shared config — and rotates them automatically.
+through its standard chain - web identity (EKS IRSA), ECS/EKS task roles, EC2
+instance profiles, SSO, shared config - and rotates them automatically.
 
 ```sh
-# EC2 / ECS / EKS with an attached role — the correct AWS setup
+# EC2 / ECS / EKS with an attached role - the correct AWS setup
 STORAGE_DRIVER=s3
 S3_BUCKET=my-plans
 S3_REGION=eu-west-2
@@ -150,7 +150,7 @@ S3_SECRET_ACCESS_KEY=...
 ```
 
 Setting exactly one of the two keys is a configuration error and is rejected at
-boot — silently falling through to the provider chain would surface as a
+boot - silently falling through to the provider chain would surface as a
 confusing 403 much later.
 
 ## Operational warnings
@@ -159,14 +159,14 @@ confusing 403 much later.
   origins; a mismatch (including `http` vs `https`, or a stray port) fails the
   ceremony with an opaque browser error.
 - **`RP_ID` cannot be changed later.** It must be the registrable domain.
-  Changing it invalidates every registered passkey — every user is locked out.
+  Changing it invalidates every registered passkey - every user is locked out.
 - **TLS is required for WebAuthn** on every origin except `localhost`.
 - **`CLIENT_IP_HEADER` must name a header your edge overwrites.** Better Auth
   keys its auth rate limit on the client IP and records it on each session.
   When it cannot resolve one, every caller in the world shares a single bucket
   per path and the 100-per-60s ceiling becomes an outage. Behind a proxy that
   _appends_ to `x-forwarded-for`, point this at the one header the proxy
-  overwrites (commonly `x-real-ip`) — a chain is refused as spoofable, and any
+  overwrites (commonly `x-real-ip`) - a chain is refused as spoofable, and any
   header a client can set itself lets it forge its own bucket.
 - **`DB_DRIVER=sqlite` requires the Bun runtime** (`bun:sqlite`). The provided
   image runs Bun, so it works there. Running the Nitro output under plain Node
@@ -174,9 +174,9 @@ confusing 403 much later.
   regardless: SQLite is single-node.
 - **Rate limit counters live in the database, never in KV.** Workers KV
   throttles a single key to one write per second and takes up to 60s to
-  propagate, which is the opposite of what a counter needs. Both limiters —
+  propagate, which is the opposite of what a counter needs. Both limiters -
   Better Auth's per-IP one on `/api/auth/*` and the per-user upload one on
-  `PUT /api/plans` — decide inside a single conditional SQL statement, so a
+  `PUT /api/plans` - decide inside a single conditional SQL statement, so a
   concurrent burst cannot exceed the limit.
 - **The upload limit is per user, not per credential.** An API key and the
   dashboard session draw on the same `UPLOAD_RATE_MAX` allowance, so creating
@@ -194,11 +194,11 @@ confusing 403 much later.
 - **Security headers are applied in `src/server.ts`**, the one entry both
   targets share: `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options:
 DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
-  `form-action` and `frame-ancestors`. Each is only set when absent, so the
+  `form-action`, and `frame-ancestors`. Each is only set when absent, so the
   plan route's `sandbox` CSP above always wins. The app CSP deliberately has no
   `script-src`: server-side rendering inlines the hydration payload, so a
   script policy needs per-request nonces, and `'unsafe-inline'` would be
-  theatre. Helmet is not used — it is Express middleware and cannot run on
+  theatre. Helmet is not used - it is Express middleware and cannot run on
   Workers.
 - **Account deletion is immediate and irreversible.** There is no email
   confirmation because addresses are synthetic (`…@passkey.invalid`) and cannot
@@ -210,7 +210,7 @@ DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
 Authentication for writes is an API key in the `x-api-key` header. Keys are
 minted from the dashboard; there is no limit on how many, and expiry is
 optional. A key authorises upload and delete for its owner's plans and nothing
-else — listing plans, managing keys and deleting the account all require a
+else - listing plans, managing keys, and deleting the account all require a
 session.
 
 ```sh
@@ -227,7 +227,7 @@ curl -X DELETE https://plans.example.com/api/plans/<id> -H "x-api-key: bkp_..."
 ```
 
 Uploads must be **standalone** HTML: no external scripts, stylesheets, images,
-fonts, iframes or CSS `url()`/`@import` targets — including relative paths,
+fonts, iframes, or CSS `url()`/`@import` targets - including relative paths,
 which have nothing to resolve against. A non-empty `iframe[srcdoc]` is rejected
 outright: it carries a whole nested document, and its value is entity-encoded,
 so validating it would mean trusting a hand-rolled entity decoder as a security
@@ -246,14 +246,14 @@ ids need no reserved-word list.
 
 ## Health
 
-`GET /healthz` probes storage, the database and KV concurrently. It returns
+`GET /healthz` probes storage, the database, and KV concurrently. It returns
 `200` with every check `"ok"`, or `503` naming the failed checks. The underlying
 exception never reaches the response body, because a driver error can embed the
 connection string and `/healthz` is unauthenticated. It is logged instead, where
 an operator can act on it.
 
 The probe is self-hosted only: on Cloudflare it returns `404`. Nothing there
-polls it — the platform reports Worker health — and because the route is
+polls it - the platform reports Worker health - and because the route is
 unauthenticated, each call would turn one public request into three billable
 backend operations (a D1 query, a KV read, an R2 head), which anyone holding the
 URL could aim at your bill. On Workers the refusal is returned before any

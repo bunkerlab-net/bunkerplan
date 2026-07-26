@@ -421,6 +421,26 @@ select {
   white-space: nowrap;
 }
 
+/* The upload `<label>` itself, stretched into a target area: `.row`'s flex
+   layout with a dashed boundary, so the whole box takes a click and a drop
+   rather than only the button inside it. */
+.dropzone {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px dashed var(--stone);
+  border-radius: 12px;
+}
+
+.dropzone.is-dragging {
+  border-color: var(--clay-deep);
+  border-style: solid;
+  background: var(--manilla);
+}
+
 /* --- Tables ------------------------------------------------------------- */
 
 table {

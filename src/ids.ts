@@ -16,13 +16,13 @@ const planAlphabet =
  * route, and a route added later cannot shadow an already-published plan.
  *
  * That holds only while `/p/` stays exclusively the plan namespace. A static
- * route declared under it — `/p/new` — would out-rank `/p/$planId` and shadow
+ * route declared under it - `/p/new` - would out-rank `/p/$planId` and shadow
  * that id, which is the very failure this move exists to remove. Put app
  * routes anywhere else.
  */
 export const newPlanId = customAlphabet(planAlphabet);
 
-/** No 0/1/i/l/o lookalikes — handles get read aloud and retyped. */
+/** No 0/1/i/l/o lookalikes - handles get read aloud and retyped. */
 const handleAlphabet = "23456789abcdefghjkmnpqrstuvwxyz";
 
 export const newUserHandle = customAlphabet(handleAlphabet, 10);

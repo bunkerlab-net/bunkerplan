@@ -1,4 +1,4 @@
-// HAND-APPLIED PATCH — RE-APPLY AFTER EVERY `bun run auth:generate:sqlite`.
+// HAND-APPLIED PATCH - RE-APPLY AFTER EVERY `bun run auth:generate:sqlite`.
 //
 // `apikey.referenceId` is declared by the api-key plugin with no `references`
 // at all, so its rows would be silently orphaned by account deletion and could
@@ -7,7 +7,7 @@
 // correct. The account-deletion cascade test is what catches a lost patch.
 //
 // (`passkey.userId` already carries `onDelete: "cascade"` as generated in
-// better-auth 1.6.25 — verify it is still there after regenerating.)
+// better-auth 1.6.25 - verify it is still there after regenerating.)
 import { relations, sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 

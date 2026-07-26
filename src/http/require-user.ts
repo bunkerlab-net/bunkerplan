@@ -2,8 +2,8 @@ import type { AppAuth } from "../auth/instance.ts";
 
 /**
  * An API key authorises PUT (upload) and DELETE (remove) and nothing else, so
- * only the write routes accept one. Management routes — listing plans, keys and
- * passkeys, deleting the account — are session-only. No session is ever minted
+ * only the write routes accept one. Management routes - listing plans, keys, and
+ * passkeys, deleting the account - are session-only. No session is ever minted
  * for a key (`enableSessionForAPIKeys` stays at its `false` default), so there
  * is exactly one code path per credential type.
  */
@@ -15,7 +15,7 @@ export async function resolveWriteUserId(
   if (key !== null) {
     const result = await auth.api.verifyApiKey({ body: { key } });
     if (!result.valid || result.key === null) return null;
-    // `referenceId`, not `userId` — the column was renamed in 1.6.x.
+    // `referenceId`, not `userId` - the column was renamed in 1.6.x.
     return result.key.referenceId;
   }
   return await resolveSessionUserId(auth, request);

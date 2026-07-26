@@ -48,7 +48,7 @@ jobs:
       - run: bun install --frozen-lockfile
       # `hk` is the same gate the pre-commit hook runs, so CI cannot disagree
       # with a clean local commit. It covers Biome, Pkl, package.json ordering,
-      # line endings and private keys in one pass.
+      # line endings, and private keys in one pass.
       - name: Lint and format
         run: hk check --all
       - name: Typecheck

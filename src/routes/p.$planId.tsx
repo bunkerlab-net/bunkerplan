@@ -11,7 +11,7 @@ import { NotFound } from "../client/NotFound.tsx";
  * requests to /api/* and take over the uploader's account. `sandbox` without
  * `allow-same-origin` puts the document in an opaque origin, so it is not
  * same-origin with the app and cannot read cookies or storage; `allow-scripts`,
- * `allow-forms` and `allow-popups` restore ordinary document behaviour without
+ * `allow-forms`, and `allow-popups` restore ordinary document behaviour without
  * giving that back.
  */
 const SANDBOX = "sandbox allow-scripts allow-forms allow-popups";
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/p/$planId")({
         const object = await storage.get(params.planId);
         if (object === null) {
           // Hand the request to the app router, which renders the site's own
-          // 404 page and sets the status — the same path an unknown app route
+          // 404 page and sets the status - the same path an unknown app route
           // takes. `next` is only a real function because this route declares
           // a `component`; without one, Start demands a Response here.
           return next();

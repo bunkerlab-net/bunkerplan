@@ -12,8 +12,8 @@ function Hero() {
     <div className="hero">
       <h1 className="hero-title">One HTML file in. One public URL out.</h1>
       <p className="lede">
-        BunkerPlan hosts self-contained documents — reports, dashboards,
-        one-page briefs — at short public URLs. No build step and no framework.
+        BunkerPlan hosts self-contained documents - reports, dashboards,
+        one-page briefs - at short public URLs. No build step and no framework.
         Uploads must be <a href="#standalone">genuinely standalone</a>: a
         document that statically loads an external resource is refused, though
         links out are fine.
@@ -37,7 +37,7 @@ function SignInCard({
           You are signed in as <span className="mono">{handle}</span>.
         </h2>
         <p>
-          Your plans, API keys and passkeys are on{" "}
+          Your plans, API keys, and passkeys are on{" "}
           <a href="/dashboard">your dashboard</a>.
         </p>
       </section>
@@ -50,8 +50,8 @@ function SignInCard({
       <h2 className="feature-title">A passkey is the whole account.</h2>
       <p>
         No email address, no username, no password to forget or leak. Register
-        with the authenticator you already use — Touch&nbsp;ID, Windows Hello, a
-        phone, or a hardware key — and that is the entire signup.
+        with the authenticator you already use - Touch&nbsp;ID, Windows Hello, a
+        phone, or a hardware key - and that is the entire signup.
       </p>
       <div className="row" style={{ marginTop: "24px" }}>
         <button
@@ -93,7 +93,7 @@ function Features() {
         <h2 className="card-title">Standalone only</h2>
         <p>
           Every upload is parsed before it is stored. Reach for an external
-          script, stylesheet, image, font or iframe and the upload is rejected
+          script, stylesheet, image, font, or iframe and the upload is rejected
           with the offending tag named.
         </p>
       </section>

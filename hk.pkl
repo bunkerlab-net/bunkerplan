@@ -33,7 +33,7 @@ local linters = new Mapping<String, Step> {
     fix = "bun biome check --write --error-on-warnings --no-errors-on-unmatched {{ files }}"
   }
   // Detect accidentally committed private keys. Deliberately NOT excluded
-  // from `.agents/skills` — vendored content still gets scanned.
+  // from `.agents/skills` - vendored content still gets scanned.
   ["detect_private_key"] = Builtins.detect_private_key
   // Check Mise files
   ["mise"] = Builtins.mise

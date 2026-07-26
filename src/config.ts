@@ -1,5 +1,5 @@
 /**
- * Environment parsing. The variable names below are the self-hosting API —
+ * Environment parsing. The variable names below are the self-hosting API -
  * see docs/self-hosting.md. Renaming one is a breaking change for operators.
  *
  * Every problem is collected and reported in a single Error so a misconfigured
@@ -173,7 +173,7 @@ function parseStorage(
   const s3AccessKeyId = str(env, "S3_ACCESS_KEY_ID");
   const s3SecretAccessKey = str(env, "S3_SECRET_ACCESS_KEY");
   // Half-configured is rejected rather than silently falling through to the
-  // provider chain — that failure mode surfaces as a confusing 403 much later.
+  // provider chain - that failure mode surfaces as a confusing 403 much later.
   if ((s3AccessKeyId === undefined) !== (s3SecretAccessKey === undefined)) {
     problems.push(
       "S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together, " +

@@ -11,7 +11,7 @@ import { createR2Storage } from "../storage/r2.ts";
  * Cloudflare Workers wiring. This module is the type-level source of truth for
  * the `#runtime` alias; src/runtime/node.ts must match it structurally.
  *
- * NOTHING reachable from here may import `pg`, `ioredis` or `bun:sqlite` — the
+ * NOTHING reachable from here may import `pg`, `ioredis`, or `bun:sqlite` - the
  * Workers bundle would fail to resolve them.
  *
  * Binding types come from the generated `Cloudflare.Env` in
