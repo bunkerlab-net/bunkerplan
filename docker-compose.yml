@@ -79,6 +79,12 @@ services:
     environment:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      # Required off Workers. This stack has no reverse proxy in front, so
+      # nothing overwrites the header and the value here is only good enough
+      # for local development. Behind a real proxy, set CLIENT_IP_HEADER to
+      # the one header that proxy OVERWRITES, or every caller shares one auth
+      # rate-limit bucket - see docs/self-hosting.md.
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-x-forwarded-for}
       DB_DRIVER: postgres
       DATABASE_URL: postgres://bunkerplan:bunkerplan@postgres:5432/bunkerplan
       KV_DRIVER: valkey

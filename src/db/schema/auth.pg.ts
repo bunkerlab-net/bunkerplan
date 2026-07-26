@@ -17,6 +17,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -110,7 +111,10 @@ export const passkey = pgTable(
   },
   (table) => [
     index("passkey_userId_idx").on(table.userId),
-    index("passkey_credentialID_idx").on(table.credentialID),
+    // Unique, not a plain index - see the note on the SQLite schema. A shared
+    // credential id makes the sign-in lookup non-deterministic, and the id is
+    // attacker-chosen because registration takes no attestation.
+    uniqueIndex("passkey_credentialID_idx").on(table.credentialID),
   ],
 );
 

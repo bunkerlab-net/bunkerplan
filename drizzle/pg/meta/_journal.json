@@ -36,6 +36,13 @@
       "when": 1785050208744,
       "tag": "0004_perfect_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785057825307,
+      "tag": "0005_nice_felicia_hardy",
+      "breakpoints": true
     }
   ]
 }

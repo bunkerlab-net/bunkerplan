@@ -9,7 +9,13 @@
 // (`passkey.userId` already carries `onDelete: "cascade"` as generated in
 // better-auth 1.6.25 - verify it is still there after regenerating.)
 import { relations, sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
@@ -116,7 +122,14 @@ export const passkey = sqliteTable(
   },
   (table) => [
     index("passkey_userId_idx").on(table.userId),
-    index("passkey_credentialID_idx").on(table.credentialID),
+    // Unique, not a plain index. Sign-in looks a credential up by this value
+    // and verifies the assertion against whichever row comes back, so two
+    // rows sharing one id make that lookup non-deterministic. Registration
+    // takes no attestation, so the id is chosen by whoever registers: a second
+    // account can claim a victim's, and the genuine credential then fails
+    // verification whenever the lookup returns the other row. Passkeys are the
+    // only way in, so that is a permanent lockout rather than an annoyance.
+    uniqueIndex("passkey_credentialID_idx").on(table.credentialID),
   ],
 );
 
