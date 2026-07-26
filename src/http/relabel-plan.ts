@@ -1,5 +1,13 @@
 import type { PlanRepo } from "../services/types.ts";
+import { readBoundedBody } from "./bounded-body.ts";
 import { parsePlanLabel } from "./plan-label.ts";
+
+/**
+ * A label is capped at 100 characters, so the document carrying one has no
+ * business being large. Without a bound this endpoint parses whatever it is
+ * sent before the cap is ever consulted, and it is not rate limited.
+ */
+const MAX_LABEL_BODY_BYTES = 4096;
 
 /**
  * Relabels a plan the caller owns. Nothing outside the row changes: the object
@@ -16,9 +24,17 @@ export async function relabelPlan(
   id: string,
   userId: string,
 ): Promise<Response> {
+  const encoded = await readBoundedBody(request, MAX_LABEL_BODY_BYTES);
+  if (encoded === null) {
+    return Response.json(
+      { error: `body exceeds ${MAX_LABEL_BODY_BYTES} bytes` },
+      { status: 413 },
+    );
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(new TextDecoder().decode(encoded));
   } catch {
     return Response.json({ error: "body must be JSON" }, { status: 400 });
   }

@@ -1,8 +1,11 @@
 import { validateStandaloneHtml } from "../html/validate.ts";
+import { readBoundedBody } from "./bounded-body.ts";
 
 /**
- * Reads and vets an upload body, or returns the failing response. The
- * Content-Length check rejects an oversized upload before reading it.
+ * Reads and vets an upload body, or returns the failing response.
+ *
+ * The size cap is enforced while reading rather than from `content-length` -
+ * see `readBoundedBody` for why the header cannot carry that job.
  */
 export async function readUploadBody(
   request: Request,
@@ -16,15 +19,12 @@ export async function readUploadBody(
     );
   }
 
-  const tooBig = `upload exceeds ${maxBytes} bytes`;
-  const declaredLength = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    return Response.json({ error: tooBig }, { status: 413 });
-  }
-
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.byteLength > maxBytes) {
-    return Response.json({ error: tooBig }, { status: 413 });
+  const bytes = await readBoundedBody(request, maxBytes);
+  if (bytes === null) {
+    return Response.json(
+      { error: `upload exceeds ${maxBytes} bytes` },
+      { status: 413 },
+    );
   }
 
   const validation = validateStandaloneHtml(bytes);
