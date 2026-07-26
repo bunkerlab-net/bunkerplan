@@ -18,10 +18,29 @@ const PORT = process.env["PORT"] ?? "3000";
 
 const target = process.argv[2] === "node" ? "node" : "workers";
 
+/**
+ * `--local-upstream` is not optional here.
+ *
+ * `wrangler.jsonc` declares a `routes` entry for the production custom domain,
+ * and `wrangler dev` takes its local upstream host from that route unless told
+ * otherwise. The Worker then sees `Origin: http://plan.bunkerlab.net` on a
+ * request the browser actually sent from `http://localhost:3000`, Better Auth
+ * compares it against `PUBLIC_BASE_URL`, and every passkey ceremony fails with
+ * `INVALID_ORIGIN`. The port matters as much as the host: `localhost` alone
+ * yields `http://localhost` and fails the same way.
+ */
 const command =
   target === "node"
     ? ["bun", "--hot", "src/node.ts"]
-    : ["bun", "wrangler", "dev", "--port", PORT];
+    : [
+        "bun",
+        "wrangler",
+        "dev",
+        "--port",
+        PORT,
+        "--local-upstream",
+        `localhost:${PORT}`,
+      ];
 
 function build(): boolean {
   const result = Bun.spawnSync(["bun", "run", "scripts/build.ts"], {
