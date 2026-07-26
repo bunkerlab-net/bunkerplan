@@ -4,7 +4,7 @@ BunkerPlan runs from one source tree on two targets:
 
 - **Cloudflare Workers** - R2 (objects), D1 (database and rate-limit counters),
   Workers KV (session cache). Built with `bun run build`.
-- **Node/Bun** - any S3-compatible store, Postgres or SQLite, Valkey. Built with
+- **Bun** - any S3-compatible store, Postgres or SQLite, Valkey. Built with
   `bun run build` and shipped in the provided `Dockerfile`, which carries a
   single bundled `dist/server/index.js` plus the client assets - no source tree
   and no `node_modules`.
@@ -90,8 +90,8 @@ on the first request.
 | Session cache          | KV binding `KV` (`KV_DRIVER=kv`)          | Valkey/Redis (`KV_DRIVER=valkey`)                |
 
 `d1`, `r2`, and `kv` are Workers-only; `sqlite`, `postgres`, `s3`, and `valkey`
-are Node/Bun-only. Choosing a driver that does not exist on the current runtime
-fails at boot with an explicit message.
+are self-hosted-only. Choosing a driver that does not exist on the current
+runtime fails at boot with an explicit message.
 
 ## Migrations
 
