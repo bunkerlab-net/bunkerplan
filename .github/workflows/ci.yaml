@@ -60,6 +60,12 @@ jobs:
           cache: true
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
+          # `node_modules` is deliberately absent. Restoring the materialised
+          # tree leaves `--frozen-lockfile` nothing to reconcile, so the
+          # lockfile hashes stop gating what actually executes - including in
+          # the deploy job, which runs with the Cloudflare token in its
+          # environment. `~/.bun/cache` is content addressed, so a bad entry
+          # fails its own integrity check instead.
           path: ~/.bun/cache
           key: ${{ runner.os }}-${{ runner.arch }}-bun-${{ hashFiles('**/bun.lock') }}
       - run: bun install --frozen-lockfile

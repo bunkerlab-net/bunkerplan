@@ -5,8 +5,8 @@
   "type": "module",
   "module": "src/server.ts",
   "scripts": {
-    "auth:generate:pg": "bunx auth@latest generate --config src/db/gen/auth.pg.ts --output src/db/schema/auth.pg.ts --yes",
-    "auth:generate:sqlite": "bunx auth@latest generate --config src/db/gen/auth.sqlite.ts --output src/db/schema/auth.sqlite.ts --yes",
+    "auth:generate:pg": "bun auth generate --config src/db/gen/auth.pg.ts --output src/db/schema/auth.pg.ts --yes",
+    "auth:generate:sqlite": "bun auth generate --config src/db/gen/auth.sqlite.ts --output src/db/schema/auth.sqlite.ts --yes",
     "build": "vite build",
     "build:node": "BUILD_TARGET=node vite build",
     "cf-typegen": "wrangler types",
