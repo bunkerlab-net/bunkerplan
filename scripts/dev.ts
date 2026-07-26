@@ -81,4 +81,9 @@ const stop = () => {
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 
-await server.exited;
+// The watcher holds the event loop open, so closing it is what lets this
+// script exit when the server dies on its own rather than hanging on a dead
+// port. Its status is ours: a crashed server must not report success.
+const code = await server.exited;
+watcher.close();
+process.exit(code);
