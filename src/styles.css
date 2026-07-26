@@ -359,9 +359,12 @@ button:disabled {
   border-color: var(--cloud-dark);
 }
 
-/* Text that happens to be clickable, not a container. */
+/* Text that happens to be clickable, not a container. Sized here rather than
+   inherited from the `button` rule above, because the nav's dashboard link is
+   an anchor. */
 .btn-text {
   padding: 8px 4px;
+  font-size: var(--text-body-sm);
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-color: var(--cloud-dark);

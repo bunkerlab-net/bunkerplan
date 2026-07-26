@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from "./routes/__root";
 import { Route as ApiAuthSplatRouteImport } from "./routes/api/auth/$";
 import { Route as ApiPlansRouteImport } from "./routes/api/plans";
 import { Route as ApiPlansIdRouteImport } from "./routes/api/plans.$id";
+import { Route as DashboardRouteImport } from "./routes/dashboard";
 import { Route as HealthzRouteImport } from "./routes/healthz";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as PPlanIdRouteImport } from "./routes/p.$planId";
@@ -19,6 +20,11 @@ import { Route as PPlanIdRouteImport } from "./routes/p.$planId";
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const DashboardRoute = DashboardRouteImport.update({
+  id: "/dashboard",
+  path: "/dashboard",
   getParentRoute: () => rootRouteImport,
 } as any);
 const HealthzRoute = HealthzRouteImport.update({
@@ -49,6 +55,7 @@ const ApiPlansIdRoute = ApiPlansIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
+  "/dashboard": typeof DashboardRoute;
   "/healthz": typeof HealthzRoute;
   "/api/plans": typeof ApiPlansRouteWithChildren;
   "/p/$planId": typeof PPlanIdRoute;
@@ -57,6 +64,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
+  "/dashboard": typeof DashboardRoute;
   "/healthz": typeof HealthzRoute;
   "/api/plans": typeof ApiPlansRouteWithChildren;
   "/p/$planId": typeof PPlanIdRoute;
@@ -66,6 +74,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
+  "/dashboard": typeof DashboardRoute;
   "/healthz": typeof HealthzRoute;
   "/api/plans": typeof ApiPlansRouteWithChildren;
   "/p/$planId": typeof PPlanIdRoute;
@@ -76,6 +85,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
     | "/"
+    | "/dashboard"
     | "/healthz"
     | "/api/plans"
     | "/p/$planId"
@@ -84,6 +94,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo;
   to:
     | "/"
+    | "/dashboard"
     | "/healthz"
     | "/api/plans"
     | "/p/$planId"
@@ -92,6 +103,7 @@ export interface FileRouteTypes {
   id:
     | "__root__"
     | "/"
+    | "/dashboard"
     | "/healthz"
     | "/api/plans"
     | "/p/$planId"
@@ -101,6 +113,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
+  DashboardRoute: typeof DashboardRoute;
   HealthzRoute: typeof HealthzRoute;
   ApiPlansRoute: typeof ApiPlansRouteWithChildren;
   PPlanIdRoute: typeof PPlanIdRoute;
@@ -114,6 +127,13 @@ declare module "@tanstack/react-router" {
       path: "/";
       fullPath: "/";
       preLoaderRoute: typeof IndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/dashboard": {
+      id: "/dashboard";
+      path: "/dashboard";
+      fullPath: "/dashboard";
+      preLoaderRoute: typeof DashboardRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/healthz": {
@@ -168,6 +188,7 @@ const ApiPlansRouteWithChildren = ApiPlansRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DashboardRoute: DashboardRoute,
   HealthzRoute: HealthzRoute,
   ApiPlansRoute: ApiPlansRouteWithChildren,
   PPlanIdRoute: PPlanIdRoute,

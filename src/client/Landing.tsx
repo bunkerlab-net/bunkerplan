@@ -1,4 +1,6 @@
 interface LandingProps {
+  /** `null` while a session is still resolving as well as when signed out. */
+  handle: string | null;
   error: string | null;
   busy: boolean;
   onRegister: () => void;
@@ -20,7 +22,28 @@ function Hero() {
   );
 }
 
-function SignInCard({ error, busy, onRegister, onSignIn }: LandingProps) {
+function SignInCard({
+  handle,
+  error,
+  busy,
+  onRegister,
+  onSignIn,
+}: LandingProps) {
+  if (handle !== null) {
+    return (
+      <section className="card card-feature">
+        <p className="eyebrow">Signed in</p>
+        <h2 className="feature-title">
+          You are signed in as <span className="mono">{handle}</span>.
+        </h2>
+        <p>
+          Your plans, API keys and passkeys are on{" "}
+          <a href="/dashboard">your dashboard</a>.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="card card-feature">
       <p className="eyebrow">Get started</p>

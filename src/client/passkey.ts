@@ -34,11 +34,13 @@ export function usePasskeyAction() {
         setBusy(false);
         return;
       }
-      // Registration signs the user straight in via a Set-Cookie on the
-      // verify-registration response, but `addPasskey` does not notify the
-      // client's session store (it normally runs with a session already
-      // present). Reloading is the boring way to pick the cookie up.
-      window.location.reload();
+      // Both ceremonies end on the dashboard, and by a full document load
+      // rather than a router navigation: registration signs the user in via a
+      // Set-Cookie on the verify-registration response, but `addPasskey` does
+      // not notify the client's session store (it normally runs with a session
+      // already present), so a client-side navigation would arrive still
+      // believing it is signed out and bounce straight back off the guard.
+      window.location.assign("/dashboard");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setBusy(false);
