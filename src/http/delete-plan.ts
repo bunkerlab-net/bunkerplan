@@ -38,5 +38,14 @@ export async function deletePlan(
     return Response.json({ error: "not found" }, { status: 404 });
   }
 
+  // Sweep again now the row is gone. A replacement running concurrently can
+  // have written its object after the delete above and had its own ownership
+  // check pass before this line, and it would then be served by `/p/{id}`
+  // with no row to own it. Every such write precedes this point, so this is
+  // the one place that can catch it; ordinarily it removes nothing.
+  await storage.delete(id).catch((error: unknown) => {
+    logger.error({ err: error, planId: id }, "orphaned plan object");
+  });
+
   return new Response(null, { status: 204 });
 }

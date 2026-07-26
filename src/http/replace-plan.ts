@@ -11,14 +11,8 @@ import { readUploadBody } from "./upload-body.ts";
  * Object first, row second. A failed object write then changes nothing at all,
  * and `resize` matching on owner as well as id means a row that vanished under
  * a concurrent delete refuses the update, so the object just written is taken
- * back out again.
- *
- * That narrows the delete/replace race rather than closing it: a delete whose
- * object removal lands before this `put`, and whose row removal lands after
- * this `resize`, still leaves an object that `/p/{id}` serves with no row to
- * own it. Closing it needs the two paths to serialise on the row - a claim or
- * a version column - which is more machinery than a same-owner, same-plan,
- * same-instant collision is worth.
+ * back out again. The delete path sweeps once more after dropping the row,
+ * which catches a write that landed inside its own window.
  */
 export async function replacePlan(
   storage: PlanStorage,
