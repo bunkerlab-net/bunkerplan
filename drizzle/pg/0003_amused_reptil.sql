@@ -1,0 +1,1 @@
+ALTER TABLE "upload_rate_limit" ADD CONSTRAINT "upload_rate_limit_key_user_id_fk" FOREIGN KEY ("key") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;

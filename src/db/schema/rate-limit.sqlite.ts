@@ -1,4 +1,5 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { user } from "./auth.sqlite.ts";
 
 /**
  * Upload rate-limit counters, one row per user, fixed window.
@@ -13,8 +14,13 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
  * plain bound number inside SQL.
  */
 export const uploadRateLimit = sqliteTable("upload_rate_limit", {
-  /** The user id. */
-  key: text("key").primaryKey(),
+  /**
+   * The user id. Nothing prunes this table, so without the cascade a deleted
+   * account would leave its counter behind for good.
+   */
+  key: text("key")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
   count: integer("count").notNull(),
   windowStart: integer("window_start").notNull(),
 });
