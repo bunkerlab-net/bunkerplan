@@ -9,7 +9,7 @@ import {
 import { readUploadBody } from "../../http/upload-body.ts";
 import { checkUploadRate } from "../../http/upload-rate-limit.ts";
 import { newPlanId } from "../../ids.ts";
-import type { PlanRepo } from "../../services/types.ts";
+import { PLAN_PAGE_SIZE, type PlanRepo } from "../../services/types.ts";
 
 const MAX_ID_ATTEMPTS = 3;
 
@@ -95,17 +95,20 @@ async function listPlans(request: Request): Promise<Response> {
   const userId = await resolveSessionUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
 
-  // The quota caps how many rows can exist, so this returns every plan the
-  // account has; the limit is a ceiling on the response, not pagination.
-  const rows = await db.plans.listByUser(userId, config.maxPlansPerUser);
+  // Paged by a fixed size, never by the quota: lowering the quota does not
+  // remove rows written under the old one, and paging by it would hide them.
+  // `truncated` says so rather than silently returning a short list.
+  const rows = await db.plans.listByUser(userId, PLAN_PAGE_SIZE + 1);
+  const page = rows.slice(0, PLAN_PAGE_SIZE);
   return Response.json({
-    plans: rows.map((row) => ({
+    plans: page.map((row) => ({
       id: row.id,
       url: planUrl(config.publicBaseUrl, row.id),
       label: row.label,
       size: row.size,
       createdAt: row.createdAt.toISOString(),
     })),
+    truncated: rows.length > PLAN_PAGE_SIZE,
   });
 }
 

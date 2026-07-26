@@ -91,6 +91,13 @@ export interface PlanRepo {
   /**
    * Most recent first, capped at `limit`. Bounded because the result is
    * serialised whole into one response body.
+   *
+   * `limit` must NOT be the plan quota. The quota is an operator setting that
+   * can be lowered, and rows written under the old value do not disappear when
+   * it is - so paging by it would hide them from the dashboard, and worse,
+   * would make account deletion sweep only that many objects while the foreign
+   * key removed every row, orphaning the remainder permanently. Use
+   * `PLAN_PAGE_SIZE` and page until a query comes back short.
    */
   listByUser(userId: string, limit: number): Promise<PlanRow[]>;
   findOwner(id: string): Promise<string | null>;
@@ -104,6 +111,12 @@ export interface PlanRepo {
   /** False means not found or not owned by `userId`. */
   deleteOwned(id: string, userId: string): Promise<boolean>;
 }
+
+/**
+ * Rows fetched per `listByUser` call. Fixed, so it cannot drift with the
+ * quota - see the note there.
+ */
+export const PLAN_PAGE_SIZE = 500;
 
 export interface Db {
   /**

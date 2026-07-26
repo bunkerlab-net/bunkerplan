@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import pg from "pg";
@@ -29,9 +30,12 @@ let pool: pg.Pool;
 let db: NodePgDatabase<PgSchema>;
 let plans: PlanRepo;
 
-async function seedUser(): Promise<string> {
-  const id = `u-${crypto.randomUUID()}`;
-  await db.execute(sql`insert into "user" (id) values (${id})`);
+async function seedUser(prefix = "u"): Promise<string> {
+  const id = `${prefix}-${crypto.randomUUID()}`;
+  await db.execute(
+    sql`insert into "user" (id, name, email, email_verified, created_at, updated_at)
+        values (${id}, ${id}, ${`${id}@example.test`}, false, now(), now())`,
+  );
   return id;
 }
 
@@ -42,44 +46,64 @@ const newRow = (userId: string) => ({
   size: 1,
 });
 
+/**
+ * The SQLSTATE a `pg` driver error carries, if it is one. Drizzle wraps the
+ * driver error, so the code lives on `cause` rather than the thrown error.
+ * Narrowed rather than asserted: nothing here has verified the shape.
+ */
+function pgErrorCode(error: unknown): string | undefined {
+  if (!(error instanceof Error) || !("cause" in error)) return undefined;
+  const cause = error.cause;
+  if (typeof cause !== "object" || cause === null || !("code" in cause)) {
+    return undefined;
+  }
+  return typeof cause.code === "string" ? cause.code : undefined;
+}
+
+beforeAll(async () => {
+  if (DATABASE_URL === undefined) return;
+
+  const bootstrap = new pg.Client({
+    connectionString: DATABASE_URL,
+    connectionTimeoutMillis: 5000,
+  });
+  // No try/catch: once opted in, an unreachable server must fail the suite
+  // rather than let it report success against nothing.
+  await bootstrap.connect();
+  await bootstrap.query(`create schema "${SCHEMA}"`);
+  await bootstrap.end();
+
+  pool = new pg.Pool({
+    connectionString: DATABASE_URL,
+    connectionTimeoutMillis: 5000,
+    options: `-c search_path=${SCHEMA}`,
+  });
+  db = drizzle(pool);
+
+  // The real migrations, so this exercises the artifacts that ship rather than
+  // a hand-written approximation of them. `search_path` places every
+  // unqualified `create` in the scratch schema; drizzle also emits explicit
+  // `"public".` references on its foreign keys, which are redirected the same
+  // way so nothing reaches the real schema.
+  const dir = new URL("../drizzle/pg", import.meta.url).pathname;
+  for (const file of readdirSync(dir).sort()) {
+    if (!file.endsWith(".sql")) continue;
+    const statements = readFileSync(`${dir}/${file}`, "utf8")
+      .replaceAll('"public".', `"${SCHEMA}".`)
+      .split("--> statement-breakpoint")
+      .map((statement) => statement.trim())
+      .filter((statement) => statement !== "");
+    for (const statement of statements) await db.execute(sql.raw(statement));
+  }
+  plans = createPgPlanRepo(db);
+});
+
+afterAll(async () => {
+  await pool?.query(`drop schema if exists "${SCHEMA}" cascade`);
+  await pool?.end();
+});
+
 describe.skipIf(DATABASE_URL === undefined)("createPgPlanRepo quota", () => {
-  beforeAll(async () => {
-    const bootstrap = new pg.Client({
-      connectionString: DATABASE_URL,
-      connectionTimeoutMillis: 5000,
-    });
-    // No try/catch: an unreachable server must fail the suite, not skip it.
-    await bootstrap.connect();
-    await bootstrap.query(`create schema "${SCHEMA}"`);
-    await bootstrap.end();
-
-    pool = new pg.Pool({
-      connectionString: DATABASE_URL,
-      connectionTimeoutMillis: 5000,
-      options: `-c search_path=${SCHEMA}`,
-    });
-    db = drizzle(pool);
-
-    // Only the columns the repo touches. The foreign key is reproduced because
-    // it is what makes a plan row depend on its owner, which the quota counts.
-    await db.execute(sql`
-      create table "user" (id text primary key);
-      create table plan (
-        id text primary key,
-        user_id text not null references "user"(id) on delete cascade,
-        label text,
-        size integer not null,
-        created_at timestamp not null default now()
-      );
-    `);
-    plans = createPgPlanRepo(db);
-  });
-
-  afterAll(async () => {
-    await pool?.query(`drop schema if exists "${SCHEMA}" cascade`);
-    await pool?.end();
-  });
-
   test("reports created, duplicate, and quota distinctly", async () => {
     const userId = await seedUser();
     const row = newRow(userId);
@@ -130,5 +154,52 @@ describe.skipIf(DATABASE_URL === undefined)("createPgPlanRepo quota", () => {
     expect(await plans.insert(newRow(userId), 1)).toBe("quota");
     expect(await plans.deleteOwned(row.id, userId)).toBe(true);
     expect(await plans.insert(newRow(userId), 1)).toBe("created");
+  });
+});
+
+/**
+ * The Postgres migration is a separate generated artifact from the SQLite one,
+ * so the constraint has to be proved on both. A shared credential id makes the
+ * sign-in lookup non-deterministic, and registration takes no attestation, so
+ * the id is chosen by whoever registers.
+ */
+describe.skipIf(DATABASE_URL === undefined)("passkey credential ids", () => {
+  // `async` rather than returning `db.execute(...)` directly: drizzle hands
+  // back a thenable builder, and `.rejects` requires a real promise.
+  const addPasskey = async (userId: string, credentialId: string) => {
+    await db.execute(
+      sql`insert into passkey
+            (id, public_key, user_id, credential_id, counter, device_type, backed_up)
+          values (${`pk-${crypto.randomUUID()}`}, 'pk', ${userId}, ${credentialId},
+                  0, 'singleDevice', false)`,
+    );
+  };
+
+  test("cannot be claimed twice, even by a different account", async () => {
+    const victim = await seedUser("victim");
+    const attacker = await seedUser("attacker");
+
+    const credentialId = `cred-${crypto.randomUUID()}`;
+    await addPasskey(victim, credentialId);
+
+    // Asserted on the driver's code rather than a message: drizzle wraps the
+    // error as "Failed query", so matching text would pass for any failure,
+    // and `23505` is specifically a unique violation.
+    const failure: unknown = await addPasskey(attacker, credentialId).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect(pgErrorCode(failure)).toBe("23505");
+  });
+
+  test("still allows one account to hold several distinct credentials", async () => {
+    const owner = await seedUser("owner");
+    await addPasskey(owner, `cred-${crypto.randomUUID()}`);
+    await addPasskey(owner, `cred-${crypto.randomUUID()}`);
+    const rows = await db.execute<{ total: string }>(
+      sql`select count(*) as total from passkey where user_id = ${owner}`,
+    );
+    expect(Number(rows.rows[0]?.total)).toBe(2);
   });
 });

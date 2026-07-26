@@ -373,7 +373,7 @@ describe("passkey credential ids", () => {
     const credentialId = `cred-${crypto.randomUUID()}`;
     await insert(`pk-${crypto.randomUUID()}`, victim, credentialId);
 
-    expect(
+    await expect(
       insert(`pk-${crypto.randomUUID()}`, attacker, credentialId),
     ).rejects.toThrow(/UNIQUE|constraint/i);
   });

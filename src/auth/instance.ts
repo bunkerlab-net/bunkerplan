@@ -3,7 +3,12 @@ import { betterAuth } from "better-auth";
 import type { Config } from "../config.ts";
 import { toSecondaryStorage } from "../kv/secondary-storage.ts";
 import type { Logger } from "../log.ts";
-import type { Db, KvStore, PlanStorage } from "../services/types.ts";
+import {
+  type Db,
+  type KvStore,
+  PLAN_PAGE_SIZE,
+  type PlanStorage,
+} from "../services/types.ts";
 import { buildAuthOptions } from "./options.ts";
 
 export function createAuth(input: {
@@ -28,17 +33,29 @@ export function createAuth(input: {
       rpId: config.rpId,
       rpName: config.rpName,
       clientIpHeader: config.clientIpHeader,
-      // Objects live outside the database, so no foreign key can clean them up.
-      // Deleted sequentially so a user with many plans cannot open hundreds of
-      // concurrent subrequests and trip the Workers subrequest limit. A throw
-      // aborts the account deletion, which beats stranding public objects.
+      // Objects live outside the database, so no foreign key can clean them
+      // up. Deleted sequentially so a user with many plans cannot open
+      // hundreds of concurrent subrequests and trip the Workers subrequest
+      // limit, and in pages so the number of plans an account holds is not
+      // capped by whatever one query returns - the foreign key removes every
+      // row regardless, so anything this loop failed to reach would be an
+      // object nothing could ever delete. Each page drops its rows too, which
+      // is what makes the loop terminate.
       onBeforeDeleteUser: async (userId) => {
-        const plans = await db.plans.listByUser(userId, config.maxPlansPerUser);
+        let removed = 0;
+        for (;;) {
+          const page = await db.plans.listByUser(userId, PLAN_PAGE_SIZE);
+          if (page.length === 0) break;
+          for (const row of page) {
+            await storage.delete(row.id);
+            await db.plans.deleteOwned(row.id, userId);
+            removed += 1;
+          }
+        }
         logger.info(
-          { userId, planCount: plans.length },
-          "deleting plan objects before account deletion",
+          { userId, planCount: removed },
+          "deleted plan objects before account deletion",
         );
-        for (const row of plans) await storage.delete(row.id);
       },
     }),
   );
