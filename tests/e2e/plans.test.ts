@@ -313,7 +313,7 @@ describe("server-rendered document head", () => {
     expect(response.status).toBe(200);
     expect(body).not.toContain(ATTACKER);
     expect(body).toContain(`content="${PUBLIC_BASE_URL}/"`);
-    expect(body).toContain(`content="${PUBLIC_BASE_URL}/og.png"`);
+    expect(body).toContain(`content="${PUBLIC_BASE_URL}/og-v2.png"`);
   });
 
   test("ignores a forwarded host as well as the host itself", async () => {
@@ -324,7 +324,7 @@ describe("server-rendered document head", () => {
     ).text();
 
     expect(body).not.toContain(ATTACKER);
-    expect(body).toContain(`content="${PUBLIC_BASE_URL}/og.png"`);
+    expect(body).toContain(`content="${PUBLIC_BASE_URL}/og-v2.png"`);
   });
 
   test("still reflects the path so per-page tags stay correct", async () => {

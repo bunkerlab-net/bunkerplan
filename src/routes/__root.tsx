@@ -13,8 +13,10 @@ import appCss from "../styles.css?url";
 
 const TITLE = "BunkerPlan";
 const DESCRIPTION =
-  "Standalone HTML documents at short public URLs. Passkeys only.";
-const IMAGE_ALT = "BunkerPlan - one HTML file in, one public URL out.";
+  "Share the plans, reviews, and diagrams your LLM renders in HTML as a link that opens, not a file that downloads.";
+/** Crawlers cache by URL, so the filename is bumped when the artwork changes. */
+const OG_IMAGE = "/og-v2.png";
+const IMAGE_ALT = "BunkerPlan - upload one HTML file, get a URL that opens.";
 
 /**
  * Open Graph requires absolute URLs and crawlers do not run JavaScript, so the
@@ -41,7 +43,7 @@ const currentUrl = createIsomorphicFn()
 export const Route = createRootRoute({
   head: () => {
     const url = new URL(currentUrl());
-    const image = new URL("/og.png", url).href;
+    const image = new URL(OG_IMAGE, url).href;
     return {
       meta: [
         { charSet: "utf-8" },
