@@ -1,10 +1,14 @@
-.output
-.tanstack
 .wrangler
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
 /data
+
+# Copied out of the @scalar/api-reference devDependency by postinstall.
+/public/scalar
+
+# Written by scripts/build.ts from the hashed client bundle filenames.
+/src/server/manifest.generated.ts
 
 .agents/local
 

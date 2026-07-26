@@ -1,0 +1,10 @@
+{
+  // The browser bundle only. `hono/jsx/dom` is the smaller client runtime and
+  // is source-compatible with `hono/jsx`, which the server render uses -
+  // scripts/build.ts points the client build at this file so the same
+  // components compile onto both.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsxImportSource": "hono/jsx/dom"
+  }
+}

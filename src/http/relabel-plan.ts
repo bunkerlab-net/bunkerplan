@@ -1,3 +1,4 @@
+import type { PlanRelabelled } from "../api/schemas.ts";
 import type { PlanRepo } from "../services/types.ts";
 import { readBoundedBody } from "./bounded-body.ts";
 import { parsePlanLabel } from "./plan-label.ts";
@@ -60,5 +61,5 @@ export async function relabelPlan(
     return Response.json({ error: "not found" }, { status: 404 });
   }
 
-  return Response.json({ id, label: parsed.label });
+  return Response.json({ id, label: parsed.label } satisfies PlanRelabelled);
 }

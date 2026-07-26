@@ -5,7 +5,9 @@ BunkerPlan runs from one source tree on two targets:
 - **Cloudflare Workers** - R2 (objects), D1 (database and rate-limit counters),
   Workers KV (session cache). Built with `bun run build`.
 - **Node/Bun** - any S3-compatible store, Postgres or SQLite, Valkey. Built with
-  `bun run build:node` and shipped in the provided `Dockerfile`.
+  `bun run build` and shipped in the provided `Dockerfile`, which carries a
+  single bundled `dist/server/index.js` plus the client assets - no source tree
+  and no `node_modules`.
 
 Every backing service is selected at runtime, so the same image serves both.
 
@@ -176,10 +178,10 @@ confusing 403 much later.
     client can 429 every sign-in attempt in the deployment.
   - On Cloudflare the default `cf-connecting-ip` is correct, because the edge
     overwrites it.
-- **`DB_DRIVER=sqlite` requires the Bun runtime** (`bun:sqlite`). The provided
-  image runs Bun, so it works there. Running the Nitro output under plain Node
-  means using `postgres`. Postgres is the recommended self-hosted driver
-  regardless: SQLite is single-node.
+- **The self-hosted server requires the Bun runtime.** `dist/server/index.js`
+  is bundled with `bun build --target=bun`, and `DB_DRIVER=sqlite` needs
+  `bun:sqlite` on top of that. The provided image runs Bun, so both hold there.
+  Postgres is the recommended driver regardless: SQLite is single-node.
 - **Rate limit counters live in the database, never in KV.** Workers KV
   throttles a single key to one write per second and takes up to 60s to
   propagate, which is the opposite of what a counter needs. Both limiters -
@@ -214,6 +216,13 @@ DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
   (re-prompting for the passkey) and a type-the-handle confirmation in the UI.
 
 ## API
+
+Every endpoint below is described at `/api/docs`, a Scalar reference rendered
+from `/api/openapi.json`. The document is generated from the same schemas the
+handlers answer with, and `servers` and the upload cap come from the running
+deployment's own configuration - so a self-hosted instance publishes its
+limits, not this repository's defaults. Both pages are unauthenticated, and
+neither loads anything off-origin.
 
 Authentication for writes is an API key in the `x-api-key` header. Keys are
 minted from the dashboard; there is no limit on how many, and expiry is

@@ -61,8 +61,9 @@ export const PLAN_PATH_PREFIX = "/p/";
 /**
  * The app's own policy.
  *
- * It deliberately omits `script-src`: TanStack Start inlines the hydration
- * payload as a `<script>`, so a script policy needs per-request nonces.
+ * It deliberately omits `script-src`: the rendered document carries an inline
+ * `<script type="application/json">` with the page props the client hydrates
+ * from, so a script policy needs per-request nonces.
  */
 const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",

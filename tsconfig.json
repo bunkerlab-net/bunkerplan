@@ -6,11 +6,13 @@
     "module": "Preserve",
     "moduleDetection": "force",
     "jsx": "react-jsx",
+    // Components are shared between the server render and the browser
+    // hydration. `hono/jsx` types both; scripts/build.ts swaps the client
+    // bundle onto the smaller `hono/jsx/dom` runtime, which is
+    // source-compatible.
+    "jsxImportSource": "hono/jsx",
     "allowJs": true,
-    "types": ["bun", "vite/client"],
-    "paths": {
-      "#runtime": ["./src/runtime/cloudflare.ts"]
-    },
+    "types": ["bun"],
 
     // Bundler mode
     "moduleResolution": "bundler",

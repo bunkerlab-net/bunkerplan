@@ -1,8 +1,6 @@
 .git
 .github
 .wrangler
-.tanstack
-.output
 dist
 node_modules
 data

@@ -1,0 +1,87 @@
+import { useEffect } from "hono/jsx";
+import { useSession } from "./auth.ts";
+import { SiteFrame } from "./Chrome.tsx";
+import { Dashboard } from "./Dashboard.tsx";
+import { Landing } from "./Landing.tsx";
+import { usePasskeyAction } from "./passkey.ts";
+
+/**
+ * Everything a page needs that only the server knows. Serialised into the
+ * document and read back on hydration, so both renders start from the same
+ * inputs - which is what keeps the markup identical.
+ */
+export interface PageProps {
+  name: "landing" | "dashboard";
+  path: string;
+  origin: string;
+}
+
+/**
+ * The landing page is the root for everyone. A signed-in visitor is not
+ * redirected to the dashboard - the copy here is what documents the API - but
+ * the sign-in card gives way to a route through to it, because the ceremony
+ * buttons would only add a second passkey to a live session.
+ */
+export function LandingPage({ path, origin }: PageProps) {
+  const { data: session, isPending } = useSession();
+  // One ceremony runner for the whole page: the nav's "Sign in" and the
+  // landing card's two buttons share a single busy flag and error.
+  const passkey = usePasskeyAction();
+  const handle = session?.user.name ?? null;
+  // An unresolved session looks exactly like a signed-out one here, so the
+  // controls that would act on it stay disabled until it lands. On the server
+  // it is always unresolved, which is why the first client render matches.
+  const busy = isPending || passkey.busy;
+
+  return (
+    <SiteFrame
+      handle={handle}
+      busy={busy}
+      onSignIn={passkey.signIn}
+      path={path}
+    >
+      <Landing
+        handle={handle}
+        error={passkey.error}
+        busy={busy}
+        origin={origin}
+        onRegister={passkey.register}
+        onSignIn={passkey.signIn}
+      />
+    </SiteFrame>
+  );
+}
+
+/**
+ * Signed-in only. The guard runs in the browser because the session lives
+ * behind the auth client, and it is navigation rather than access control:
+ * every route this page calls authorises the session server-side.
+ */
+export function DashboardPage({ path }: PageProps) {
+  const { data: session, isPending } = useSession();
+  const handle = session?.user.name ?? null;
+
+  useEffect(() => {
+    if (!isPending && handle === null) window.location.assign("/");
+  }, [isPending, handle]);
+
+  return (
+    <SiteFrame handle={handle} path={path}>
+      {handle === null ? (
+        <div className="shell hero">
+          <p className="muted">Loading…</p>
+        </div>
+      ) : (
+        <Dashboard handle={handle} />
+      )}
+    </SiteFrame>
+  );
+}
+
+export function Page(props: PageProps) {
+  return props.name === "landing" ? (
+    <LandingPage {...props} />
+  ) : (
+    <DashboardPage {...props} />
+  );
+}

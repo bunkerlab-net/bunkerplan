@@ -3,6 +3,12 @@ interface LandingProps {
   handle: string | null;
   error: string | null;
   busy: boolean;
+  /**
+   * The deployment's public origin, resolved on the server. Read from
+   * `location` instead and the snippet would differ between the server render
+   * and the first client render, which is a hydration mismatch.
+   */
+  origin: string;
   onRegister: () => void;
   onSignIn: () => void;
 }
@@ -102,9 +108,7 @@ function HowItWorks({
   );
 }
 
-function CurlSnippet() {
-  const origin =
-    typeof window === "undefined" ? "https://example.com" : location.origin;
+function CurlSnippet({ origin }: { origin: string }) {
   return (
     <code className="snippet">
       {`curl -X PUT ${origin}/api/plans \\\n  -H "x-api-key: $KEY" \\\n  -H "content-type: text/html" \\\n  --data-binary @report.html`}
@@ -112,7 +116,7 @@ function CurlSnippet() {
   );
 }
 
-function Features() {
+function Features({ origin }: { origin: string }) {
   return (
     <div className="card-grid section" id="standalone">
       <section className="card">
@@ -138,7 +142,7 @@ function Features() {
           Mint an API key and upload from a CI job, a git hook, or the agent
           that wrote the page.
         </p>
-        <CurlSnippet />
+        <CurlSnippet origin={origin} />
       </section>
     </div>
   );
@@ -149,7 +153,7 @@ export function Landing(props: LandingProps) {
     <div className="shell">
       <Hero />
       <HowItWorks {...props} />
-      <Features />
+      <Features origin={props.origin} />
     </div>
   );
 }

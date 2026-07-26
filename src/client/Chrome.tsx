@@ -1,5 +1,4 @@
-import { useLocation } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useState } from "react";
+import type { Child } from "hono/jsx";
 import { authClient } from "./auth.ts";
 
 interface NavProps {
@@ -12,11 +11,22 @@ interface NavProps {
    * better than a sign-in button that cannot run a ceremony.
    */
   onSignIn?: () => void;
+  /**
+   * The request path, threaded from the server render rather than read from a
+   * router. Two pages do not need a router, and passing it keeps the server
+   * and client first renders identical.
+   */
+  path?: string;
 }
 
-function NavControls({ handle = null, busy = false, onSignIn }: NavProps) {
+function NavControls({
+  handle = null,
+  busy = false,
+  onSignIn,
+  path = "/",
+}: NavProps) {
   // Dropped on the dashboard itself, where it would point at this page.
-  const onDashboard = useLocation().pathname === "/dashboard";
+  const onDashboard = path === "/dashboard";
 
   if (handle !== null) {
     return (
@@ -80,32 +90,13 @@ export function SiteNav(props: NavProps) {
 export function SiteFrame({
   children,
   ...nav
-}: NavProps & { children: ReactNode }) {
+}: NavProps & { children: Child }) {
   return (
     <div className="page">
       <SiteNav {...nav} />
       <main id="main">{children}</main>
       <SiteFooter />
     </div>
-  );
-}
-
-/**
- * The auth client reads `window.location.origin`, so anything touching a
- * session renders only after hydration - nothing inside `children` runs during
- * SSR. The frame around it does, so the nav and footer reach the markup.
- */
-export function Hydrated({ children }: { children: ReactNode }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  if (mounted) return children;
-  return (
-    <SiteFrame>
-      <div className="shell hero">
-        <p className="muted">Loading…</p>
-      </div>
-    </SiteFrame>
   );
 }
 
@@ -133,6 +124,9 @@ export function SiteFooter() {
           <div>
             <h2>Source</h2>
             <ul>
+              <li>
+                <a href="/api/docs">API reference</a>
+              </li>
               <li>
                 <a href="https://github.com/bunkerlab-net/bunkerplan">GitHub</a>
               </li>

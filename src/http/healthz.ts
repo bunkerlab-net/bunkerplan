@@ -1,3 +1,4 @@
+import type { Health } from "../api/schemas.ts";
 import type { RuntimeTarget, Services } from "../services/types.ts";
 
 /** The probe reads no configuration, so it takes only what it exercises. */
@@ -79,7 +80,7 @@ export async function healthz(
     withTimeout(kv.probe()),
   ]);
 
-  const checks: Record<string, string> = {};
+  const checks: Health["checks"] = {};
   let ok = true;
   for (const [index, name] of CHECKS.entries()) {
     const result = settled[index];
@@ -97,7 +98,7 @@ export async function healthz(
   }
 
   const status = ok ? 200 : 503;
-  const body = { status: ok ? "ok" : "error", checks };
+  const body: Health = { status: ok ? "ok" : "error", checks };
   // Stored as a factory: a `Response` body can only be read once.
   const response = () => Response.json(body, { status });
   cache.set(probed, { at: now, response });

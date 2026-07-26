@@ -50,9 +50,13 @@ export interface Harness {
 }
 
 /**
- * The Worker entry is a Vite build artefact - `src/server.ts` alone does not
- * run - so the bundle the harness serves has to be built first. Unconditional
- * rather than mtime-guessed: a stale `dist` would test the previous commit.
+ * `scripts/build.ts` has to run first: it writes the hashed client bundle and
+ * src/server/manifest.generated.ts, which src/worker.ts imports. Wrangler
+ * bundles the Worker itself from there, so there is no separate server build
+ * to wait for.
+ *
+ * Unconditional rather than mtime-guessed: a stale `dist` would test the
+ * previous commit.
  */
 async function build(): Promise<void> {
   const result = Bun.spawnSync(["bun", "run", "build"], {
@@ -61,7 +65,7 @@ async function build(): Promise<void> {
     stderr: "pipe",
   });
   if (result.exitCode !== 0) {
-    throw new Error(`vite build failed:\n${result.stderr.toString()}`);
+    throw new Error(`build failed:\n${result.stderr.toString()}`);
   }
 }
 
@@ -86,7 +90,7 @@ export async function startWorker(): Promise<Harness> {
     root: ROOT,
     workers: [
       {
-        configPath: `${ROOT}/dist/server/wrangler.json`,
+        configPath: `${ROOT}/wrangler.jsonc`,
         vars: {
           PUBLIC_BASE_URL,
           RP_ID: "localhost",
