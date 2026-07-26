@@ -117,8 +117,8 @@ export function SiteFooter() {
           <div>
             <h2>BunkerPlan</h2>
             <p className="caption">
-              One standalone HTML document in, one public URL out. Passkeys
-              only.
+              Upload a self-contained HTML page and share the URL. Built for the
+              plans, reviews, and diagrams your LLM renders.
             </p>
           </div>
           <div>

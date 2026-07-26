@@ -263,6 +263,50 @@ code,
   padding: 100px 0 76px;
 }
 
+/* --- Steps -------------------------------------------------------------- */
+
+/*
+ * The numbered flow in the featured card. Numerals sit in a gutter in sans at
+ * caption size so the serif prose keeps one left edge; leading zeros because
+ * a bare "1." beside 68px display type reads as a stray glyph.
+ */
+.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 20px;
+  margin-top: 32px;
+}
+
+/* Absolute marker, not a grid or flex track: the step body is a run of inline
+   elements, and every one of them would become its own item in a grid `li`. */
+.steps > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 48px;
+}
+
+.steps > li::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  /* Sits on the first line's baseline: the serif runs 1.4 at 20px, the sans
+     marker 1 at 12px, so the marker box needs the difference as lead. */
+  top: 0.55em;
+  font-family: var(--sans);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+
+.step-lead {
+  font-weight: 600;
+}
+
 /* --- Cards -------------------------------------------------------------- */
 
 .card {
@@ -515,6 +559,12 @@ td.actions {
   border-radius: 0 8px 8px 0;
   padding: 16px;
   margin-top: 16px;
+}
+
+/* Manilla on manilla is invisible; step down to the next warm surface. */
+.card-feature .notice {
+  background: var(--oat-warm);
+  margin-top: 32px;
 }
 
 .notice code {
