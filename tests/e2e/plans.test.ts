@@ -168,8 +168,9 @@ describe("plan lifecycle over HTTP", () => {
       "/api/plans/nosuchplanid",
       upload(key, html("nobody")),
     );
-    // The JSON body is the point: an unrouted PUT would also be a 404, but an
-    // HTML one, and this test would pass with the handler missing entirely.
+    // Route existence is held by tests/openapi.test.ts, which compares Hono's
+    // routing table against the published document - an unrouted PUT is a 404
+    // with this same body now, so it could not fail here.
     expect(response.status).toBe(404);
     expect(await jsonBody(response)).toEqual({ error: "not found" });
   });

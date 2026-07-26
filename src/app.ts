@@ -160,7 +160,15 @@ function registerSite(app: Hono, deps: AppDeps): void {
     return c.html(renderDashboard(assets, c.req.path, config.publicBaseUrl));
   });
 
-  app.notFound((c) => c.html(renderNotFound(assets), 404));
+  // An unknown path under `/api` answers like the rest of the API rather than
+  // handing a client 2 KB of landing-page HTML it cannot parse. Better Auth
+  // owns everything under `/api/auth`, so a miss there never reaches this.
+  app.notFound((c) => {
+    const path = c.req.path;
+    return path === "/api" || path.startsWith("/api/")
+      ? problem(404, "not found")
+      : c.html(renderNotFound(assets), 404);
+  });
 }
 
 /**

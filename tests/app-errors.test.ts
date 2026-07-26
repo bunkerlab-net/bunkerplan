@@ -1,15 +1,16 @@
 /**
- * What a thrown handler sends back.
+ * What the app answers when no handler produced a response - a route that
+ * threw, and a path that matched nothing.
  *
- * The app registers no `onError`, so this is Hono's default answer plus the
- * header middleware. That combination is easy to assume is broken - the
- * middleware applies its headers after `await next()`, which looks like it
- * cannot run when the handler throws. It does: the throw is caught further
- * in, so `next()` resolves. These tests hold that, since the alternative is
- * shipping the one response in the app that carries no policy.
+ * The throw cases are easy to assume are broken: the header middleware
+ * applies its policy after `await next()`, which looks like it cannot run
+ * when the handler throws. It does - the throw is caught further in, so
+ * `next()` resolves. These hold that, since the alternative is shipping the
+ * one response in the app that carries no policy.
  */
 
 import { describe, expect, spyOn, test } from "bun:test";
+import { ErrorBody } from "../src/api/schemas.ts";
 import { createApp } from "../src/app.ts";
 
 const BOOM = "config is unreadable";
@@ -79,5 +80,33 @@ describe("a handler that throws", () => {
     expect(response.headers.get("content-security-policy")).not.toContain(
       "sandbox",
     );
+  });
+});
+
+describe("a path that matched nothing", () => {
+  test("answers JSON under /api, so a client can read it", async () => {
+    for (const path of ["/api", "/api/nonexistent", "/api/plans/x/y"]) {
+      const response = await fetchQuietly(path);
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get("content-type")).toStartWith(
+        "application/json",
+      );
+      // Parsed with the schema the document publishes, so this also holds
+      // that a miss carries the same shape as every other API failure.
+      expect(ErrorBody.parse(await response.json())).toEqual({
+        error: "not found",
+      });
+    }
+  });
+
+  test("answers the site's own page anywhere else", async () => {
+    const response = await fetchQuietly("/nope");
+
+    // A reader who mistyped a URL gets a page, not a JSON fragment. This is
+    // also the path a deleted plan takes, so it has to stay browsable.
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toStartWith("text/html");
+    expect(await response.text()).toContain("Nothing lives at this URL");
   });
 });
