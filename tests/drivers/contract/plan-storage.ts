@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { newPlanId } from "../../../src/ids.ts";
 import type { PlanObject, PlanStorage } from "../../../src/services/types.ts";
-import type { StorageFixture } from "../backends.ts";
+import { FIXTURE_TIMEOUT_MS, type StorageFixture } from "../backends.ts";
 
 /**
  * The `PlanStorage` contract, run against every implementation of it.
@@ -83,11 +83,11 @@ export function describePlanStorage(
     beforeAll(async () => {
       fixture = await open();
       storage = fixture.subject;
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     afterAll(async () => {
       await fixture.close();
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     describe("round trip", () => {
       test("get returns the body, its size, and an etag", async () => {

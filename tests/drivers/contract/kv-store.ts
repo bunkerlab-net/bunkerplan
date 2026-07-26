@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { KvStore } from "../../../src/services/types.ts";
-import type { Fixture } from "../backends.ts";
+import { FIXTURE_TIMEOUT_MS, type Fixture } from "../backends.ts";
 
 /**
  * The `KvStore` contract, run against Workers KV and Valkey.
@@ -32,11 +32,11 @@ export function describeKvStore(
     beforeAll(async () => {
       fixture = await open();
       kv = fixture.subject;
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     afterAll(async () => {
       await fixture.close();
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     describe("round trip", () => {
       test("get returns what set stored", async () => {

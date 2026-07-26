@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { DbFixture } from "../backends.ts";
+import { type DbFixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
 
 /**
  * Constraints that live in the migrations rather than in any repository, run
@@ -20,11 +20,11 @@ export function describeSchema(
 
     beforeAll(async () => {
       fixture = await open();
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     afterAll(async () => {
       await fixture.close();
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     /**
      * Registration takes no attestation, so a credential id carries no

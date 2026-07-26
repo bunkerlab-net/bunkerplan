@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { AccountClosingRepo } from "../../../src/services/types.ts";
-import type { DbFixture } from "../backends.ts";
+import { type DbFixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
 
 /**
  * The `AccountClosingRepo` contract, run against D1, bun:sqlite, and Postgres.
@@ -24,11 +24,11 @@ export function describeAccountClosingRepo(
     beforeAll(async () => {
       fixture = await open();
       closing = fixture.accountClosing;
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     afterAll(async () => {
       await fixture.close();
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     test("an account is not closing until it is marked", async () => {
       expect(await closing.isOpen(await fixture.seedUser())).toBe(false);

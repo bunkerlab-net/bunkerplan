@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { RateLimitRepo } from "../../../src/services/types.ts";
-import type { DbFixture } from "../backends.ts";
+import { type DbFixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
 
 /**
  * The `RateLimitRepo` contract, run against D1, bun:sqlite, and Postgres.
@@ -37,11 +37,11 @@ export function describeRateLimitRepo(
     beforeAll(async () => {
       fixture = await open();
       limits = fixture.rateLimits;
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     afterAll(async () => {
       await fixture.close();
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     describe("the window", () => {
       test("allows up to max, then refuses", async () => {

@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { KvStore } from "../../src/services/types.ts";
-import { VALKEY_URL, valkeyKv } from "./backends.ts";
+import { FIXTURE_TIMEOUT_MS, VALKEY_URL, valkeyKv } from "./backends.ts";
 import { describeKvStore } from "./contract/kv-store.ts";
 
 const skip = VALKEY_URL === undefined;
@@ -45,7 +45,7 @@ describe.skipIf(skip)("KvStore: Valkey expiry", () => {
     expect(await kv.get(key("alongside"))).toBe("dropped");
 
     await Bun.sleep(1_200);
-  });
+  }, FIXTURE_TIMEOUT_MS);
 
   test("a key set with a one-second ttl is gone afterwards", async () => {
     expect(await kv.get(key("elapses"))).toBeNull();

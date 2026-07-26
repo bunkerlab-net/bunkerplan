@@ -74,6 +74,19 @@ const S3_SECRET_ACCESS_KEY =
 const PG_CONNECT_TIMEOUT_MS = 5_000;
 
 /**
+ * Bound for the `beforeAll`/`afterAll` that open and close a fixture. Bun
+ * defaults a hook to 5 seconds, and opening one of these is not a 5 second
+ * operation on a loaded machine: bundling a Worker, booting workerd, applying
+ * seven migrations to a cold Postgres, creating a bucket. Tests run one
+ * process per file, so on a four-core runner all of that happens at once.
+ *
+ * Generous on purpose. It exists to fail a fixture that has genuinely hung,
+ * not to police how long a cold start takes - a hook that times out under
+ * load is a flake, and a flaky conformance suite gets ignored.
+ */
+export const FIXTURE_TIMEOUT_MS = 120_000;
+
+/**
  * A store under test plus the teardown that releases it. `unique` prefixes
  * ids so suites sharing one server cannot collide: Miniflare and bun:sqlite
  * get a fresh instance each time, but Postgres, Valkey, and MinIO are one

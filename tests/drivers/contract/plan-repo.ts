@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { newPlanId } from "../../../src/ids.ts";
 import type { PlanRepo } from "../../../src/services/types.ts";
-import type { DbFixture } from "../backends.ts";
+import { type DbFixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
 
 /**
  * The `PlanRepo` contract, run against D1, bun:sqlite, and Postgres.
@@ -36,11 +36,11 @@ export function describePlanRepo(
     beforeAll(async () => {
       fixture = await open();
       plans = fixture.plans;
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     afterAll(async () => {
       await fixture.close();
-    });
+    }, FIXTURE_TIMEOUT_MS);
 
     describe("claiming an id", () => {
       test("reports created, duplicate, and quota distinctly", async () => {

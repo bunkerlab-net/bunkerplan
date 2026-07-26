@@ -13,13 +13,23 @@ import {
 
 let app: Harness;
 
+/**
+ * `startWorker()` runs a full Vite build before it boots Miniflare, which is
+ * nowhere near the 5 second default for a hook. Tests run one process per file
+ * (see tests/drivers/plan-storage.r2.test.ts for why), so on a four-core
+ * runner this build competes with twenty-odd other files and takes far longer
+ * than it does on an idle machine. The bound is here to catch a build that has
+ * genuinely hung, not to police how long a cold one takes.
+ */
+const BOOT_TIMEOUT_MS = 120_000;
+
 beforeAll(async () => {
   app = await startWorker();
-});
+}, BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
   await app.close();
-});
+}, BOOT_TIMEOUT_MS);
 
 interface Created {
   id: string;
