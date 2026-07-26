@@ -21,6 +21,12 @@ export interface AuthOptionsInput {
   rpId: string;
   rpName: string;
   /**
+   * Header the runtime can be trusted to have set to the real client IP.
+   * Without it Better Auth resolves no IP, and every caller shares one
+   * rate-limit bucket per path.
+   */
+  clientIpHeader: string;
+  /**
    * Runs before Better Auth deletes anything, while the user's plan rows still
    * exist. Objects live outside the database, so no foreign key can clean them
    * up — this hook is the only chance. Throwing aborts the deletion.
@@ -114,14 +120,16 @@ export function buildAuthOptions(input: AuthOptionsInput) {
     // degrades to a DB read instead of logging the user out.
     session: { storeSessionInDatabase: true },
 
-    // Set explicitly so dev and prod behave identically — the defaults resolve
-    // `enabled` from NODE_ENV.
-    rateLimit: {
-      enabled: true,
-      storage: "secondary-storage",
-      window: 60,
-      max: 100,
-    },
+    // Without this the default `x-forwarded-for` resolves nothing on Workers,
+    // every caller shares one bucket per path, and `session.ipAddress` is null.
+    advanced: { ipAddress: { ipAddressHeaders: [input.clientIpHeader] } },
+
+    // `enabled` is explicit because the default resolves it from NODE_ENV.
+    // Counters go to the database, not KV: Workers KV throttles one write per
+    // second per key, takes up to 60s to propagate, and exposes no `increment`
+    // for Better Auth's atomic `consume`. The database path decides inside one
+    // conditional UPDATE, so the count stays exact under concurrency.
+    rateLimit: { enabled: true, storage: "database", window: 60, max: 100 },
 
     // Passkeys only. `emailAndPassword` already defaults to disabled; this
     // makes the router 404 the routes outright so there is nothing to probe.

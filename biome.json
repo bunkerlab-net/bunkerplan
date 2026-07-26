@@ -10,23 +10,16 @@
     "includes": [
       "**",
       "!.claude",
+      "!.agents",
       "!.zed/settings.json",
       "!**/tsconfig.json",
       "!**/dist",
-      "!**/dev-dist",
       "!**/coverage",
-      "!packages/sdks/*/src",
-      "!**/routeTree.gen.ts",
-      "!**/worker-configuration.d.ts",
       "!**/.tanstack",
       "!**/.nitro",
       "!**/.output",
       "!**/.wrangler",
       "!**/wrangler.jsonc",
-      "!poc/tanstack/android",
-      "!poc/tanstack/ios",
-      "!mono",
-      "!.design_handoff_didx_products",
       "!fixtures/too-big.html"
     ]
   },
@@ -36,6 +29,7 @@
   },
   "linter": {
     "enabled": true,
+    "includes": ["**", "!worker-configuration.d.ts", "!src/routeTree.gen.ts"],
     "rules": {
       "preset": "recommended",
       "complexity": {

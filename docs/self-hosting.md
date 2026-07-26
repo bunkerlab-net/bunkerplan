@@ -48,42 +48,43 @@ production deploy cannot silently ship the localhost WebAuthn origin.
 
 These names are the API. They are not renamed across releases.
 
-| Var | Required | Default | Notes |
-|---|---|---|---|
-| `BETTER_AUTH_SECRET` | yes | — | rejected if under 32 characters |
-| `PUBLIC_BASE_URL` | yes | — | e.g. `https://plans.example.com`; also used as the Better Auth base URL |
-| `RP_ID` | no | hostname of `PUBLIC_BASE_URL` | WebAuthn relying-party id |
-| `RP_NAME` | no | `BunkerPlan` | shown in the passkey prompt |
-| `MAX_UPLOAD_BYTES` | no | `2097152` (2 MiB) | |
-| `UPLOAD_RATE_MAX` | no | `30` | writes per window per user |
-| `UPLOAD_RATE_WINDOW_SEC` | no | `60` | clamped to a minimum of 60 |
-| `PLAN_ID_LENGTH` | no | `16` | characters in a plan id; alphanumeric only, minimum 8 |
-| `LOG_FORMAT` | no | `json` | `json` (ECS) \| `plain` (pino-pretty) |
-| `LOG_LEVEL` | no | `info` | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent` |
-| `LOG_COLOR` | no | `false` | colourises `LOG_FORMAT=plain` only |
-| `STORAGE_DRIVER` | no on Workers | `r2` on Workers | `r2` \| `s3` |
-| `S3_ENDPOINT` | no | — | **omit for real AWS S3**; set for MinIO / R2 / GCS |
-| `S3_BUCKET` | if `s3` | — | |
-| `S3_ACCESS_KEY_ID` | no | — | **omit on AWS** — see below |
-| `S3_SECRET_ACCESS_KEY` | no | — | must be set together with the key id |
-| `S3_REGION` | no | `us-east-1` | use `auto` for R2 |
-| `S3_FORCE_PATH_STYLE` | no | `true` | set `false` for real AWS S3 |
-| `DB_DRIVER` | no on Workers | `d1` on Workers | `d1` \| `sqlite` \| `postgres` |
-| `SQLITE_PATH` | if `sqlite` | `./data/bunkerplan.db` | |
-| `DATABASE_URL` | if `postgres` | — | |
-| `KV_DRIVER` | no on Workers | `kv` on Workers | `kv` \| `valkey` |
-| `VALKEY_URL` | if `valkey` | — | e.g. `redis://valkey:6379` |
+| Var                      | Required      | Default                                               | Notes                                                                    |
+| ------------------------ | ------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| `BETTER_AUTH_SECRET`     | yes           | —                                                     | rejected if under 32 characters                                          |
+| `PUBLIC_BASE_URL`        | yes           | —                                                     | e.g. `https://plans.example.com`; also used as the Better Auth base URL  |
+| `RP_ID`                  | no            | hostname of `PUBLIC_BASE_URL`                         | WebAuthn relying-party id                                                |
+| `RP_NAME`                | no            | `BunkerPlan`                                          | shown in the passkey prompt                                              |
+| `CLIENT_IP_HEADER`       | no            | `cf-connecting-ip` on Workers, else `x-forwarded-for` | single header your proxy sets to the client IP                           |
+| `MAX_UPLOAD_BYTES`       | no            | `2097152` (2 MiB)                                     |                                                                          |
+| `UPLOAD_RATE_MAX`        | no            | `30`                                                  | writes per window per user                                               |
+| `UPLOAD_RATE_WINDOW_SEC` | no            | `60`                                                  | clamped to a minimum of 60                                               |
+| `PLAN_ID_LENGTH`         | no            | `16`                                                  | characters in a plan id; alphanumeric only, minimum 8                    |
+| `LOG_FORMAT`             | no            | `json`                                                | `json` (ECS) \| `plain` (pino-pretty)                                    |
+| `LOG_LEVEL`              | no            | `info`                                                | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent` |
+| `LOG_COLOR`              | no            | `false`                                               | colourises `LOG_FORMAT=plain` only                                       |
+| `STORAGE_DRIVER`         | no on Workers | `r2` on Workers                                       | `r2` \| `s3`                                                             |
+| `S3_ENDPOINT`            | no            | —                                                     | **omit for real AWS S3**; set for MinIO / R2 / GCS                       |
+| `S3_BUCKET`              | if `s3`       | —                                                     |                                                                          |
+| `S3_ACCESS_KEY_ID`       | no            | —                                                     | **omit on AWS** — see below                                              |
+| `S3_SECRET_ACCESS_KEY`   | no            | —                                                     | must be set together with the key id                                     |
+| `S3_REGION`              | no            | `us-east-1`                                           | use `auto` for R2                                                        |
+| `S3_FORCE_PATH_STYLE`    | no            | `true`                                                | set `false` for real AWS S3                                              |
+| `DB_DRIVER`              | no on Workers | `d1` on Workers                                       | `d1` \| `sqlite` \| `postgres`                                           |
+| `SQLITE_PATH`            | if `sqlite`   | `./data/bunkerplan.db`                                |                                                                          |
+| `DATABASE_URL`           | if `postgres` | —                                                     |                                                                          |
+| `KV_DRIVER`              | no on Workers | `kv` on Workers                                       | `kv` \| `valkey`                                                         |
+| `VALKEY_URL`             | if `valkey`   | —                                                     | e.g. `redis://valkey:6379`                                               |
 
 A misconfigured deployment fails at boot with every problem listed at once, not
 on the first request.
 
 ## Swap matrices
 
-| Role | Cloudflare | Self-hosted |
-|---|---|---|
-| Objects | R2 binding `BUCKET` (`STORAGE_DRIVER=r2`) | any S3-compatible store (`STORAGE_DRIVER=s3`) |
-| Database | D1 binding `DB` (`DB_DRIVER=d1`) | Postgres (`postgres`) or local SQLite (`sqlite`) |
-| Session cache + rate limits | KV binding `KV` (`KV_DRIVER=kv`) | Valkey/Redis (`KV_DRIVER=valkey`) |
+| Role                        | Cloudflare                                | Self-hosted                                      |
+| --------------------------- | ----------------------------------------- | ------------------------------------------------ |
+| Objects                     | R2 binding `BUCKET` (`STORAGE_DRIVER=r2`) | any S3-compatible store (`STORAGE_DRIVER=s3`)    |
+| Database                    | D1 binding `DB` (`DB_DRIVER=d1`)          | Postgres (`postgres`) or local SQLite (`sqlite`) |
+| Session cache + rate limits | KV binding `KV` (`KV_DRIVER=kv`)          | Valkey/Redis (`KV_DRIVER=valkey`)                |
 
 `d1`, `r2` and `kv` are Workers-only; `sqlite`, `postgres`, `s3` and `valkey`
 are Node/Bun-only. Choosing a driver that does not exist on the current runtime
@@ -91,12 +92,12 @@ fails at boot with an explicit message.
 
 ## Migrations
 
-| Target | Command |
-|---|---|
-| D1 (local) | `wrangler d1 migrations apply bunkerplan --local` |
+| Target      | Command                                            |
+| ----------- | -------------------------------------------------- |
+| D1 (local)  | `wrangler d1 migrations apply bunkerplan --local`  |
 | D1 (remote) | `wrangler d1 migrations apply bunkerplan --remote` |
-| SQLite | `bun run db:migrate:sqlite` |
-| Postgres | `bun run db:migrate:pg` |
+| SQLite      | `bun run db:migrate:sqlite`                        |
+| Postgres    | `bun run db:migrate:pg`                            |
 
 Migration SQL is generated from the Drizzle schemas with `bun run db:generate`.
 The Compose stack runs the Postgres migration as a one-shot `migrate` service
@@ -160,6 +161,13 @@ confusing 403 much later.
 - **`RP_ID` cannot be changed later.** It must be the registrable domain.
   Changing it invalidates every registered passkey — every user is locked out.
 - **TLS is required for WebAuthn** on every origin except `localhost`.
+- **`CLIENT_IP_HEADER` must name a header your edge overwrites.** Better Auth
+  keys its auth rate limit on the client IP and records it on each session.
+  When it cannot resolve one, every caller in the world shares a single bucket
+  per path and the 100-per-60s ceiling becomes an outage. Behind a proxy that
+  _appends_ to `x-forwarded-for`, point this at the one header the proxy
+  overwrites (commonly `x-real-ip`) — a chain is refused as spoofable, and any
+  header a client can set itself lets it forge its own bucket.
 - **`DB_DRIVER=sqlite` requires the Bun runtime** (`bun:sqlite`). The provided
   image runs Bun, so it works there. Running the Nitro output under plain Node
   means using `postgres`. Postgres is the recommended self-hosted driver
@@ -178,7 +186,7 @@ confusing 403 much later.
   same-origin requests to `/api/*` and take over the uploader's account.
 - **Security headers are applied in `src/server.ts`**, the one entry both
   targets share: `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options:
-  DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
+DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
   `form-action` and `frame-ancestors`. Each is only set when absent, so the
   plan route's `sandbox` CSP above always wins. The app CSP deliberately has no
   `script-src`: server-side rendering inlines the hydration payload, so a

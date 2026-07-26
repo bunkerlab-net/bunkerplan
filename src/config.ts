@@ -27,6 +27,11 @@ export interface Config {
   publicBaseUrl: string;
   rpId: string;
   rpName: string;
+  /**
+   * Single request header carrying the client IP, lowercased. Better Auth
+   * derives its rate-limit bucket and the recorded session IP from it.
+   */
+  clientIpHeader: string;
   maxUploadBytes: number;
   planIdLength: number;
   uploadRateMax: number;
@@ -256,6 +261,37 @@ function parseLogging(env: Env, problems: string[]): LogSettings {
   };
 }
 
+interface Limits {
+  maxUploadBytes: number;
+  planIdLength: number;
+  uploadRateMax: number;
+  uploadRateWindowSec: number;
+}
+
+function parseLimits(env: Env, problems: string[]): Limits {
+  return {
+    maxUploadBytes: int(
+      env,
+      "MAX_UPLOAD_BYTES",
+      DEFAULT_MAX_UPLOAD_BYTES,
+      1,
+      problems,
+    ),
+    planIdLength: int(
+      env,
+      "PLAN_ID_LENGTH",
+      DEFAULT_PLAN_ID_LENGTH,
+      MIN_PLAN_ID_LENGTH,
+      problems,
+    ),
+    uploadRateMax: int(env, "UPLOAD_RATE_MAX", 30, 1, problems),
+    uploadRateWindowSec: Math.max(
+      MIN_RATE_WINDOW_SEC,
+      int(env, "UPLOAD_RATE_WINDOW_SEC", MIN_RATE_WINDOW_SEC, 1, problems),
+    ),
+  };
+}
+
 export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
   const problems: string[] = [];
   const workers = options.workers === true;
@@ -264,25 +300,7 @@ export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
 
   const drivers = parseDrivers(env, workers, problems);
 
-  const maxUploadBytes = int(
-    env,
-    "MAX_UPLOAD_BYTES",
-    DEFAULT_MAX_UPLOAD_BYTES,
-    1,
-    problems,
-  );
-  const planIdLength = int(
-    env,
-    "PLAN_ID_LENGTH",
-    DEFAULT_PLAN_ID_LENGTH,
-    MIN_PLAN_ID_LENGTH,
-    problems,
-  );
-  const uploadRateMax = int(env, "UPLOAD_RATE_MAX", 30, 1, problems);
-  const uploadRateWindowSec = Math.max(
-    MIN_RATE_WINDOW_SEC,
-    int(env, "UPLOAD_RATE_WINDOW_SEC", MIN_RATE_WINDOW_SEC, 1, problems),
-  );
+  const limits = parseLimits(env, problems);
   const s3ForcePathStyle = bool(env, "S3_FORCE_PATH_STYLE", true, problems);
   const logging = parseLogging(env, problems);
 
@@ -299,10 +317,14 @@ export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
     publicBaseUrl,
     rpId: str(env, "RP_ID") ?? baseHostname,
     rpName: str(env, "RP_NAME") ?? "BunkerPlan",
-    maxUploadBytes,
-    planIdLength,
-    uploadRateMax,
-    uploadRateWindowSec,
+    // Cloudflare overwrites `cf-connecting-ip` at the Worker, so it cannot be
+    // spoofed there; elsewhere Better Auth's own `x-forwarded-for` default
+    // applies. See CLIENT_IP_HEADER in docs/self-hosting.md.
+    clientIpHeader: (
+      str(env, "CLIENT_IP_HEADER") ??
+      (workers ? "cf-connecting-ip" : "x-forwarded-for")
+    ).toLowerCase(),
+    ...limits,
     s3Endpoint: str(env, "S3_ENDPOINT"),
     s3Region: str(env, "S3_REGION") ?? "us-east-1",
     s3ForcePathStyle,

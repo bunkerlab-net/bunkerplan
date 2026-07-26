@@ -27,6 +27,7 @@ export function createAuth(input: {
       secret: config.secret,
       rpId: config.rpId,
       rpName: config.rpName,
+      clientIpHeader: config.clientIpHeader,
       // Objects live outside the database, so no foreign key can clean them up.
       // Deleted sequentially so a user with many plans cannot open hundreds of
       // concurrent subrequests and trip the Workers subrequest limit. A throw
