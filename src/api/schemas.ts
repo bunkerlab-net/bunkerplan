@@ -1,11 +1,29 @@
 /**
- * The wire shapes of the JSON API, as Zod schemas.
+ * The wire shapes of the JSON API, as Zod schemas. `src/api/openapi.ts` turns
+ * these into the published OpenAPI document.
  *
- * This module is the source of truth for what `/api/*` accepts and sends.
- * `src/api/openapi.ts` turns these into the published document, and the
- * handlers type their response bodies against them with `satisfies`, so a body
- * that stops matching the spec fails `tsc` instead of shipping a document that
- * quietly lies.
+ * Only half of this is enforced, and the halves are worth telling apart.
+ *
+ * RESPONSES are load-bearing: every handler types its body with
+ * `satisfies`, so one that stops matching the published shape fails `tsc`.
+ *
+ * REQUESTS are description only. Nothing here parses an incoming body or
+ * query - `src/app.ts` hands the raw request to the manual parsers in
+ * `src/http/*`, which own the validation and the error messages. So
+ * `RelabelRequest` and `PlanLabelQuery` document what those parsers accept
+ * rather than deciding it, and a change to one has to be mirrored by hand.
+ *
+ * Hono's `@hono/zod-openapi` fuses the two: `app.openapi(route, handler)`
+ * validates from the same schema it publishes. What keeps us off it is the
+ * converter, not the coupling - it reads Zod internals through
+ * `@asteasolutions/zod-to-openapi` rather than calling `z.toJSONSchema`, and
+ * its output differs from what this module emits today: fields with defaults
+ * drop out of `required`, `additionalProperties: false` disappears,
+ * `z.iso.datetime()` loses its `pattern`, and nullable renders as
+ * `type: [T, "null"]`. That is a re-baseline of a published contract.
+ * Everything else about the move is ordinary work: request parts are only
+ * validated where a route declares them, and `defaultHook` can keep the
+ * error bodies `src/http/*` already returns.
  *
  * The star import is deliberate. `import { z } from "zod"` defeats
  * tree-shaking and costs 65 KB gzip in the Worker where this costs 21 KB, for
