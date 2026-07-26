@@ -1,0 +1,202 @@
+name: Docker
+
+# Reusable: build both images on each architecture, then join them into one
+# multi-arch index and apply the real tags. Called by ci.yaml; never triggered
+# on its own.
+#
+# Build and publish live together because they are two halves of one thing:
+# `build` pushes per-architecture tags that are meaningless on their own, and
+# `publish` is what turns them into the image people pull. Splitting them
+# across files would let a caller wire up one without the other.
+on:
+  workflow_call:
+    inputs:
+      push:
+        description: >-
+          Publish. False builds only, which is what a pull request wants: it
+          proves both images still build without leaving per-branch tags
+          behind to garbage collect. The publish job is skipped entirely.
+        type: boolean
+        default: false
+      buildx-version:
+        description: >-
+          Pinned for the same reason every action is pinned to a SHA: `latest`
+          would let a Buildx release change how these images are built with no
+          commit to point at.
+        type: string
+        required: true
+
+permissions: {}
+
+env:
+  NAMESPACE: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runs-on }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-24.04
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          cache-binary: false
+          version: ${{ inputs.buildx-version }}
+      # A build that will not push needs no registry write.
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        if: inputs.push
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+
+      # One tag per architecture. The real tags are applied in `publish`, when
+      # the two are joined into a single index. `latest=false` keeps the flavour
+      # default from quietly adding a second tag that would then race the other
+      # architecture.
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta-app
+        with:
+          images: ${{ env.NAMESPACE }}/bunkerplan
+          flavor: latest=false
+          tags: type=raw,value=${{ github.sha }},prefix=sha-,suffix=-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.title=bunkerplan
+            org.opencontainers.image.description=Standalone HTML documents at short public URLs
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta-migrate
+        with:
+          images: ${{ env.NAMESPACE }}/bunkerplan-migrate
+          flavor: latest=false
+          tags: type=raw,value=${{ github.sha }},prefix=sha-,suffix=-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.title=bunkerplan-migrate
+            org.opencontainers.image.description=Drizzle migrations for BunkerPlan, run as a one-shot job
+
+      # Both images come from one Dockerfile: `migrate` is the `build` stage plus
+      # an entrypoint, and `runtime` copies `.output` out of it. Building them in
+      # the same job means the install and the Vite build happen once.
+      - name: Build app image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: runtime
+          platforms: linux/${{ matrix.arch }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.meta-app.outputs.tags }}
+          labels: ${{ steps.meta-app.outputs.labels }}
+          annotations: ${{ steps.meta-app.outputs.annotations }}
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.arch }}
+      # No `cache-to` here. This build shares every expensive stage with the one
+      # above, which has already exported them, and two writers on one scope
+      # would just race to overwrite the same entry.
+      - name: Build migration image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: migrate
+          platforms: linux/${{ matrix.arch }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.meta-migrate.outputs.tags }}
+          labels: ${{ steps.meta-migrate.outputs.labels }}
+          annotations: ${{ steps.meta-migrate.outputs.annotations }}
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+
+  publish:
+    name: Publish ${{ matrix.image }}
+    needs: [build]
+    if: inputs.push
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: bunkerplan
+            description: Standalone HTML documents at short public URLs
+          - image: bunkerplan-migrate
+            description: Drizzle migrations for BunkerPlan, run as a one-shot job
+    steps:
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          cache-binary: false
+          version: ${{ inputs.buildx-version }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        env:
+          # An image index has no config blob, so it carries annotations where a
+          # single image carries labels. Emitting them at `index` level is what
+          # puts the description and source on the package users actually pull.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
+        with:
+          images: ${{ env.NAMESPACE }}/${{ matrix.image }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch,priority=600
+            type=ref,event=branch,suffix=-{{sha}},priority=601
+            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},suffix=-{{sha}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.description=${{ matrix.description }}
+
+      # The architectures were built on their own native runners, so no single
+      # builder holds both. Each pushed its own suffixed tag; this gathers them
+      # into one index without rebuilding or re-uploading a layer.
+      #
+      # `imagetools create` accepts `--tag` and `--annotation` repeatedly, so one
+      # call applies every tag to one resolved index rather than re-resolving the
+      # same two digests once per tag.
+      - name: Create and push multi-arch manifest
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
+          IMAGE: ${{ env.NAMESPACE }}/${{ matrix.image }}
+          SHA: ${{ github.sha }}
+        run: |-
+          set -euo pipefail
+
+          args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            args+=(--tag "$tag")
+          done <<< "$TAGS"
+
+          # A tagless `imagetools create` would publish an index reachable only
+          # by digest, which looks like success and is useless.
+          if [ ${#args[@]} -eq 0 ]; then
+            echo "::error::metadata-action produced no tags"
+            exit 1
+          fi
+
+          while IFS= read -r annotation; do
+            [ -n "$annotation" ] || continue
+            args+=(--annotation "$annotation")
+          done <<< "$ANNOTATIONS"
+
+          printf 'Tagging:\n%s\n' "$TAGS"
+          docker buildx imagetools create "${args[@]}" \
+            "${IMAGE}:sha-${SHA}-amd64" \
+            "${IMAGE}:sha-${SHA}-arm64"

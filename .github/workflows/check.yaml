@@ -1,0 +1,122 @@
+name: Check
+
+# Reusable: lint, typecheck, and the whole test suite against every backend
+# BunkerPlan ships on. Called by ci.yaml; never triggered on its own.
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    # Native service containers rather than the Docker Compose stack. Compose
+    # is how a developer brings these up locally (docker-compose.test.yml); on
+    # a runner the same images attach directly, so nothing has to shell out to
+    # a second orchestrator, and the health gates below are what the job waits
+    # on instead of a script polling ports.
+    #
+    # Every one of these is what makes a suite run rather than skip. Without
+    # them tests/drivers/* reports success having exercised only the Cloudflare
+    # half, which is the failure mode this whole layout exists to avoid.
+    services:
+      # The Postgres repos are separate SQL from the SQLite ones. The plan
+      # ceiling in particular is held by an advisory lock here, because unlike
+      # SQLite this evaluates the count inside the claiming statement against a
+      # snapshot - and that lock only exists against a real server.
+      postgres:
+        image: docker.io/postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      # Backs KV_DRIVER=valkey, where Better Auth keeps sessions. Its default
+      # command already starts the server, so no override is needed - which
+      # matters, because a service container cannot supply one.
+      valkey:
+        image: docker.io/valkey/valkey:9-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      # `edge-cicd` rather than the ordinary MinIO tag for exactly that reason:
+      # it carries `CMD ["minio","server","/data"]`, so it needs no argument.
+      # The bucket is not created here - tests/drivers/backends.ts makes its own
+      # per run and drops it, so nothing has to survive between jobs.
+      minio:
+        image: docker.io/minio/minio:edge-cicd
+        env:
+          MINIO_ROOT_USER: bunkerplan
+          MINIO_ROOT_PASSWORD: bunkerplan-secret
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install: true
+          cache: true
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # `node_modules` is deliberately absent. Restoring the materialised
+          # tree leaves `--frozen-lockfile` nothing to reconcile, so the
+          # lockfile hashes stop gating what actually executes - including in
+          # the deploy job, which runs with the Cloudflare token in its
+          # environment. `~/.bun/cache` is content addressed, so a bad entry
+          # fails its own integrity check instead.
+          path: ~/.bun/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-bun-${{ hashFiles('**/bun.lock') }}
+      - run: bun install --frozen-lockfile
+
+      # `hk` is the same gate the pre-commit hook runs, so CI cannot disagree
+      # with a clean local commit. It covers Biome, Pkl, package.json ordering,
+      # line endings, and private keys in one pass.
+      - name: Lint and format
+        run: hk check --all
+      - name: Typecheck
+        run: bun run typecheck
+
+      # `bun run test` is `bun test --parallel`: one process per file. That is
+      # not a speed choice. Miniflare runs a workerd child process, and holding
+      # one open in the same process as the AWS SDK intermittently wedges a
+      # concurrent S3 request that then never settles - see
+      # tests/drivers/plan-storage.r2.test.ts.
+      #
+      # The suite also serves the real Workers bundle on Miniflare, so it
+      # builds one first. That covers what a separate build step used to: a
+      # bundle that does not build fails here, before anything is published.
+      #
+      # These three variables are the opt-in. A backend whose variable is
+      # missing SKIPS, so dropping one turns a conformance suite off silently -
+      # they are set here precisely so that cannot happen unnoticed.
+      - name: Test
+        run: bun run test
+        env:
+          TEST_DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
+          TEST_VALKEY_URL: redis://127.0.0.1:6379
+          TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          TEST_S3_ACCESS_KEY_ID: bunkerplan
+          TEST_S3_SECRET_ACCESS_KEY: bunkerplan-secret
