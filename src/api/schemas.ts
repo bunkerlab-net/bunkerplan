@@ -4,10 +4,14 @@
  *
  * Only half of this is enforced, and the halves are worth telling apart.
  *
- * RESPONSES are load-bearing. Every body the document describes is typed
- * against a schema here - success bodies with `satisfies` at the point they
- * are built, failures through `problem()` in src/http/problem.ts - so one
- * that stops matching the published shape fails `tsc`.
+ * RESPONSES are load-bearing. Every JSON response body the document
+ * describes is typed against a schema here at the point it is built - with
+ * `satisfies` on a literal, or an explicit annotation where the body is
+ * assembled first, as in `/healthz` and `problem()` - so one that stops
+ * matching the published shape fails `tsc`. The `text/html` bodies on
+ * `/p/{id}` are the exception: a stored plan and the site's 404 page are raw
+ * `Response`s, described inline in src/api/openapi.ts rather than from a
+ * schema here.
  *
  * REQUESTS are description only. Nothing here parses an incoming body or
  * query - `src/app.ts` hands the raw request to the manual parsers in
