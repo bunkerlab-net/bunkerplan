@@ -295,3 +295,44 @@ describe("plan lifecycle over HTTP", () => {
     expect(refused).toBe(2);
   });
 });
+
+/**
+ * Server-rendered pages must describe the deployment, not the request. The
+ * origin used to come from `getRequestUrl()`, so a proxy forwarding an
+ * arbitrary `Host` produced Open Graph tags pointing at whatever hostname the
+ * caller supplied - a link preview on the attacker's domain, attributed to
+ * this site.
+ */
+describe("server-rendered document head", () => {
+  const ATTACKER = "evil.example";
+
+  test("builds absolute URLs from the configured origin", async () => {
+    const response = await app.fetch("/", { headers: { host: ATTACKER } });
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).not.toContain(ATTACKER);
+    expect(body).toContain(`content="${PUBLIC_BASE_URL}/"`);
+    expect(body).toContain(`content="${PUBLIC_BASE_URL}/og.png"`);
+  });
+
+  test("ignores a forwarded host as well as the host itself", async () => {
+    const body = await (
+      await app.fetch("/", {
+        headers: { "x-forwarded-host": ATTACKER, "x-forwarded-proto": "http" },
+      })
+    ).text();
+
+    expect(body).not.toContain(ATTACKER);
+    expect(body).toContain(`content="${PUBLIC_BASE_URL}/og.png"`);
+  });
+
+  test("still reflects the path so per-page tags stay correct", async () => {
+    const body = await (
+      await app.fetch("/dashboard", { headers: { host: ATTACKER } })
+    ).text();
+
+    expect(body).toContain(`content="${PUBLIC_BASE_URL}/dashboard"`);
+    expect(body).not.toContain(ATTACKER);
+  });
+});
