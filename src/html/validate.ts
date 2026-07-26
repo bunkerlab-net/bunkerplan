@@ -21,33 +21,49 @@ export type ValidationResult = { ok: true } | { ok: false; reason: string };
  * `button[formaction]`, `a[ping]`. Those are user-initiated navigations, not
  * automatic loads, and rejecting them would reject ordinary documents that
  * merely link out.
+ *
+ * Null-prototype because the lookup key is a tag name straight out of the
+ * document: a plain object literal answers `URL_ATTRS["constructor"]` with a
+ * function, which is not iterable, and `<constructor>` is a parseable tag.
  */
-const URL_ATTRS: Record<string, readonly string[]> = {
-  script: ["src"],
-  link: ["href"],
-  img: ["src", "srcset"],
-  source: ["src", "srcset"],
-  iframe: ["src"],
-  frame: ["src"],
-  embed: ["src"],
-  object: ["data"],
-  video: ["src", "poster"],
-  audio: ["src"],
-  track: ["src"],
-  input: ["src"],
-  base: ["href"],
-  html: ["manifest"],
-  body: ["background"],
-  table: ["background"],
-  tr: ["background"],
-  td: ["background"],
-  th: ["background"],
-  use: ["href", "xlink:href"],
-  image: ["href", "xlink:href"],
-};
+const URL_ATTRS: Record<string, readonly string[]> = Object.assign(
+  Object.create(null),
+  {
+    // SVG `<script>` takes `href`/`xlink:href`, not `src`, and browsers fetch
+    // it. Same element name as the HTML one, different attribute.
+    script: ["src", "href", "xlink:href"],
+    link: ["href", "imagesrcset"],
+    img: ["src", "srcset"],
+    source: ["src", "srcset"],
+    iframe: ["src"],
+    frame: ["src"],
+    embed: ["src"],
+    object: ["data", "archive", "classid"],
+    video: ["src", "poster"],
+    audio: ["src"],
+    track: ["src"],
+    input: ["src"],
+    base: ["href"],
+    html: ["manifest"],
+    body: ["background"],
+    table: ["background"],
+    tr: ["background"],
+    td: ["background"],
+    th: ["background"],
+    use: ["href", "xlink:href"],
+    image: ["href", "xlink:href"],
+    // SVG filter primitive; fetches like any other image.
+    feimage: ["href", "xlink:href"],
+  },
+);
 
 /** Attributes whose value is a comma-separated candidate list. */
-const SRCSET_ATTRS: Record<string, true> = { srcset: true };
+const SRCSET_ATTRS: Record<string, true> = {
+  srcset: true,
+  // `<link rel=preload as=image imagesrcset=...>` fetches on load exactly as
+  // `img[srcset]` does.
+  imagesrcset: true,
+};
 
 /**
  * Allowed: nothing to fetch, or the bytes travel inside the document.
@@ -73,18 +89,94 @@ function firstExternalCandidate(srcset: string): string | null {
   return null;
 }
 
-/** `url(...)` and `@import` targets inside CSS text or a style attribute. */
-function findExternalInCss(css: string): string | null {
-  const urlPattern = /url\(\s*(['"]?)([^'")]*)\1\s*\)/gi;
-  for (const match of css.matchAll(urlPattern)) {
-    const target = match[2];
+/**
+ * Comments are token separators, so `@import/**` + `/"evil.css"` is a valid
+ * import that no pattern anchored on `@import\s` would see. Removing them
+ * first is cheaper than teaching every pattern to skip them, and it closes
+ * the whole class rather than one spelling of it. Hand-scanned rather than
+ * regex-replaced: a lazy `[\s\S]*?` retried at every unterminated `/*` is
+ * quadratic, and the input is attacker-supplied.
+ */
+function stripCssComments(css: string): string {
+  if (!css.includes("/*")) return css;
+  let out = "";
+  let index = 0;
+  for (;;) {
+    const start = css.indexOf("/*", index);
+    if (start === -1) return out + css.slice(index);
+    out += `${css.slice(index, start)} `;
+    const end = css.indexOf("*/", start + 2);
+    if (end === -1) return out;
+    index = end + 2;
+  }
+}
+
+/**
+ * The argument text of every `name(` call, in order.
+ *
+ * Hand-scanned, because every regex spelling of this rescans. `url\(\s*(...)?
+ * \s*\)` has two whitespace runs either side of a value that may match empty,
+ * so a `url(` followed by a long run of spaces and no closing paren makes the
+ * engine try each way of splitting that run between them. `[^)]*\)` is no
+ * better: with no `)` anywhere, it walks back over the whole remainder from
+ * every call site. Both are quadratic or worse on bytes an uploader chooses,
+ * and 500 KB was enough to hold a CPU for two minutes. `indexOf` only ever
+ * moves forward.
+ *
+ * A `)` inside a quoted value ends the span early, which can only make the
+ * extracted text look more external than it is - the safe direction.
+ */
+function* callArguments(
+  css: string,
+  lowered: string,
+  name: string,
+): Generator<string> {
+  let index = 0;
+  for (;;) {
+    const open = lowered.indexOf(name, index);
+    if (open === -1) return;
+    const start = open + name.length;
+    const close = css.indexOf(")", start);
+    // No `)` in the remainder, so nothing after this can close either.
+    if (close === -1) return;
+    yield css.slice(start, close);
+    index = close + 1;
+  }
+}
+
+/** `\s+` before a required quote only ever walks back over its own run. */
+const CSS_IMPORT = /@import\s+(?:"([^"]*)"|'([^']*)')/gi;
+const CSS_STRING = /"([^"]*)"|'([^']*)'/g;
+
+/** `url(...)`, `@import`, and `image-set(...)` targets in CSS text. */
+function findExternalInCss(rawCss: string): string | null {
+  const css = stripCssComments(rawCss);
+  const lowered = css.toLowerCase();
+
+  for (const raw of callArguments(css, lowered, "url(")) {
+    const trimmed = raw.trim();
+    const quote = trimmed.charAt(0);
+    const target =
+      (quote === '"' || quote === "'") && trimmed.endsWith(quote)
+        ? trimmed.slice(1, -1)
+        : trimmed;
+    if (isExternalRef(target)) return target;
+  }
+
+  // `image-set("x.png" 1x)` takes bare strings, so it fetches without ever
+  // writing `url(`. Matching the bare name also covers `-webkit-image-set(`.
+  for (const args of callArguments(css, lowered, "image-set(")) {
+    for (const candidate of args.matchAll(CSS_STRING)) {
+      const target = candidate[1] ?? candidate[2];
+      if (target !== undefined && isExternalRef(target)) return target;
+    }
+  }
+
+  for (const match of css.matchAll(CSS_IMPORT)) {
+    const target = match[1] ?? match[2];
     if (target !== undefined && isExternalRef(target)) return target;
   }
-  const importPattern = /@import\s+(['"])([^'"]*)\1/gi;
-  for (const match of css.matchAll(importPattern)) {
-    const target = match[2];
-    if (target !== undefined && isExternalRef(target)) return target;
-  }
+
   return null;
 }
 
@@ -97,7 +189,9 @@ function refreshTarget(content: string): string | null {
 function lowerAttributes(
   attributes: Record<string, string>,
 ): Record<string, string> {
-  const lowered: Record<string, string> = {};
+  // Null-prototype for the same reason as `URL_ATTRS`: the keys come from the
+  // document, so `__proto__` on a plain literal would not be an ordinary entry.
+  const lowered: Record<string, string> = Object.create(null);
   for (const [key, value] of Object.entries(attributes)) {
     lowered[key.toLowerCase()] = value;
   }
@@ -183,10 +277,18 @@ export function validateStandaloneHtml(bytes: Uint8Array): ValidationResult {
   }
 
   let reason: string | null = null;
-  walkSync(parse(text), (node) => {
-    if (reason !== null) return;
-    reason = checkElement(node);
-  });
+  try {
+    walkSync(parse(text), (node) => {
+      if (reason !== null) return;
+      reason = checkElement(node);
+    });
+  } catch {
+    // ultrahtml parses and walks recursively, so a deeply nested document
+    // overflows the stack rather than returning. Anything the parser cannot
+    // see through, this check cannot vouch for, so refuse it as an upload
+    // error instead of letting a `RangeError` surface as a 500.
+    return { ok: false, reason: "could not parse document" };
+  }
 
   return reason === null ? { ok: true } : { ok: false, reason };
 }

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { PLAN_CSP } from "../../src/http/security-headers.ts";
 import {
   type FetchResponse,
   type Harness,
@@ -82,9 +83,32 @@ describe("plan lifecycle over HTTP", () => {
     const served = await app.fetch(`/p/${created.id}`);
     expect(served.status).toBe(200);
     expect(await served.text()).toBe(body);
-    expect(served.headers.get("content-security-policy")).toBe(
-      "sandbox allow-scripts allow-forms allow-popups",
-    );
+    expect(served.headers.get("content-security-policy")).toBe(PLAN_CSP);
+  });
+
+  /**
+   * The 304 is the dangerous branch. It legitimately carries almost no
+   * headers, and the entry wrapper fills in whatever a response leaves
+   * absent - so a plan that omitted its policy here would be revalidated
+   * into the cache under the APP policy, which has no `sandbox`. A cache
+   * updating a stored response from a 304 (RFC 9111 4.3.4) would then hold
+   * the plan under a policy that lets it script the real origin.
+   */
+  test("serves the same sandbox policy on a 304 as on the 200", async () => {
+    const key = await app.account();
+    const created = await createPlan(key, html("revalidated"));
+
+    const fresh = await app.fetch(`/p/${created.id}`);
+    const etag = fresh.headers.get("etag");
+    expect(etag).not.toBeNull();
+
+    const revalidated = await app.fetch(`/p/${created.id}`, {
+      headers: { "if-none-match": etag ?? "" },
+    });
+
+    expect(revalidated.status).toBe(304);
+    expect(revalidated.headers.get("content-security-policy")).toBe(PLAN_CSP);
+    expect(fresh.headers.get("content-security-policy")).toBe(PLAN_CSP);
   });
 
   test("replaces the document behind an id, keeping the URL and the label", async () => {
