@@ -43,6 +43,13 @@
       "when": 1785057825307,
       "tag": "0005_nice_felicia_hardy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785059861089,
+      "tag": "0006_curly_greymalkin",
+      "breakpoints": true
     }
   ]
 }

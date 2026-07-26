@@ -35,14 +35,20 @@ export function createAuth(input: {
       clientIpHeader: config.clientIpHeader,
       logger,
       // Objects live outside the database, so no foreign key can clean them
-      // up. Deleted sequentially so a user with many plans cannot open
-      // hundreds of concurrent subrequests and trip the Workers subrequest
-      // limit, and in pages so the number of plans an account holds is not
-      // capped by whatever one query returns - the foreign key removes every
-      // row regardless, so anything this loop failed to reach would be an
-      // object nothing could ever delete. Each page drops its rows too, which
-      // is what makes the loop terminate.
+      // up. The marker goes first and is what makes the rest safe: without it
+      // a sweep can finish, an upload can then claim a row and write its
+      // object, and the cascade that follows removes the row - leaving an
+      // object served at `/p/{id}` that nothing owns and nothing can delete.
+      // With it, uploads for this account are refused, and one already in
+      // flight withdraws its own object.
+      //
+      // Deleted sequentially so a user with many plans cannot open hundreds of
+      // concurrent subrequests and trip the Workers subrequest limit, and in
+      // pages so the number of plans an account holds is not capped by
+      // whatever one query returns.
       onBeforeDeleteUser: async (userId) => {
+        await db.accountClosing.open(userId);
+
         let removed = 0;
         for (;;) {
           const page = await db.plans.listByUser(userId, PLAN_PAGE_SIZE);

@@ -3,6 +3,7 @@
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Db } from "../services/types.ts";
+import { createSqliteAccountClosingRepo } from "./account-closing.sqlite.ts";
 import { createSqlitePlanRepo } from "./plans.sqlite.ts";
 import { createSqliteRateLimitRepo } from "./rate-limits.sqlite.ts";
 import { sqliteSchema } from "./sqlite-shared.ts";
@@ -19,6 +20,7 @@ export function createD1Db(binding: D1Database): Db {
     provider: "sqlite",
     plans: createSqlitePlanRepo(db),
     uploadRateLimits: createSqliteRateLimitRepo(db),
+    accountClosing: createSqliteAccountClosingRepo(db),
     async probe() {
       await db.run(sql`select 1`);
     },

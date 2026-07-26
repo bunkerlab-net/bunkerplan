@@ -118,6 +118,20 @@ export interface PlanRepo {
  */
 export const PLAN_PAGE_SIZE = 500;
 
+/**
+ * The admission gate for account deletion.
+ *
+ * Deleting an account removes objects the database does not know about, so it
+ * sweeps them and then lets the foreign key take the rows. Marking the account
+ * first is what stops an upload slipping between the sweep and the cascade and
+ * leaving an object nothing owns.
+ */
+export interface AccountClosingRepo {
+  /** Idempotent: re-running a failed deletion must not fail on the marker. */
+  open(userId: string): Promise<void>;
+  isOpen(userId: string): Promise<boolean>;
+}
+
 export interface Db {
   /**
    * The value handed to `drizzleAdapter()`. `unknown` because the D1,
@@ -129,6 +143,7 @@ export interface Db {
   provider: "sqlite" | "pg";
   plans: PlanRepo;
   uploadRateLimits: RateLimitRepo;
+  accountClosing: AccountClosingRepo;
   probe(): Promise<void>;
 }
 

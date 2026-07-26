@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import type { Db } from "../services/types.ts";
+import { createPgAccountClosingRepo } from "./account-closing.pg.ts";
 import { pgSchema } from "./pg-shared.ts";
 import { createPgPlanRepo } from "./plans.pg.ts";
 import { createPgRateLimitRepo } from "./rate-limits.pg.ts";
@@ -35,6 +36,7 @@ export function createPostgresDb(connectionString: string): Db {
     provider: "pg",
     plans: createPgPlanRepo(db),
     uploadRateLimits: createPgRateLimitRepo(db),
+    accountClosing: createPgAccountClosingRepo(db),
     async probe() {
       await db.execute(sql`select 1`);
     },

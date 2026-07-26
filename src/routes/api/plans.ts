@@ -9,7 +9,12 @@ import {
 import { readUploadBody } from "../../http/upload-body.ts";
 import { checkUploadRate } from "../../http/upload-rate-limit.ts";
 import { newPlanId } from "../../ids.ts";
-import { PLAN_PAGE_SIZE, type PlanRepo } from "../../services/types.ts";
+import {
+  type AccountClosingRepo,
+  PLAN_PAGE_SIZE,
+  type PlanRepo,
+  type Services,
+} from "../../services/types.ts";
 
 const MAX_ID_ATTEMPTS = 3;
 
@@ -38,6 +43,47 @@ async function claimId(
   return null;
 }
 
+/**
+ * Writes the object for a row that has already been claimed, and confirms the
+ * account is still open. Returns the failing response, or `null` when the plan
+ * is safely stored.
+ *
+ * The re-check is the point. Deleting an account marks it, sweeps the objects
+ * its rows name, and lets the foreign key take the rows. An upload that passed
+ * the admission check before the marker appeared can still be mid-write while
+ * that sweep runs, and its object would then survive a cascade that removed
+ * the row - served at `/p/{id}`, owned by nobody, reachable by nothing. Reading
+ * the marker again after the write is what lets the loser withdraw. Any
+ * deletion that starts after this point sees the row and sweeps the object
+ * itself.
+ */
+async function storeAndConfirm(
+  services: Pick<Services, "storage" | "logger"> & {
+    plans: PlanRepo;
+    accountClosing: AccountClosingRepo;
+  },
+  id: string,
+  userId: string,
+  body: Uint8Array,
+): Promise<Response | null> {
+  const { storage, plans, accountClosing, logger } = services;
+  try {
+    await storage.put(id, body);
+  } catch (error) {
+    await plans.deleteOwned(id, userId);
+    logger.error({ err: error, planId: id }, "plan upload failed");
+    return problem(502, "storage unavailable");
+  }
+
+  if (!(await accountClosing.isOpen(userId))) return null;
+
+  await plans.deleteOwned(id, userId);
+  await storage.delete(id).catch((error: unknown) => {
+    logger.error({ err: error, planId: id }, "orphaned plan object");
+  });
+  return problem(404, "not found");
+}
+
 async function createPlan(request: Request): Promise<Response> {
   const { auth, config, db, logger, storage } = await getServices();
 
@@ -46,6 +92,13 @@ async function createPlan(request: Request): Promise<Response> {
 
   const limited = await checkUploadRate(db.uploadRateLimits, config, userId);
   if (limited !== null) return limited;
+
+  // Refused once deletion of this account has begun. Without this an upload
+  // can land between the object sweep and the row cascade, and its object
+  // outlives the row that owned it.
+  if (await db.accountClosing.isOpen(userId)) {
+    return problem(409, "account is being deleted");
+  }
 
   // A label is optional metadata, so a bad one is rejected before the body is
   // read rather than after a large upload has already been accepted.
@@ -74,13 +127,13 @@ async function createPlan(request: Request): Promise<Response> {
   }
   if (id === null) return problem(500, "could not allocate a plan id");
 
-  try {
-    await storage.put(id, body);
-  } catch (error) {
-    await db.plans.deleteOwned(id, userId);
-    logger.error({ err: error, planId: id }, "plan upload failed");
-    return problem(502, "storage unavailable");
-  }
+  const failed = await storeAndConfirm(
+    { storage, plans: db.plans, accountClosing: db.accountClosing, logger },
+    id,
+    userId,
+    body,
+  );
+  if (failed !== null) return failed;
 
   const url = planUrl(config.publicBaseUrl, id);
   return Response.json(
