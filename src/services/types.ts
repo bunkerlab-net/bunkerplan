@@ -53,15 +53,24 @@ export interface RateLimitRepo {
 
 export interface PlanRow {
   id: string;
+  /** Owner-facing text, null until one is set. */
+  label: string | null;
   size: number;
   createdAt: Date;
 }
 
 export interface PlanRepo {
   /** False means the id already existed - regenerate and retry. */
-  insert(row: { id: string; userId: string; size: number }): Promise<boolean>;
+  insert(row: {
+    id: string;
+    userId: string;
+    label: string | null;
+    size: number;
+  }): Promise<boolean>;
   listByUser(userId: string): Promise<PlanRow[]>;
   findOwner(id: string): Promise<string | null>;
+  /** False means not found or not owned by `userId`. */
+  relabel(id: string, userId: string, label: string | null): Promise<boolean>;
   /** False means not found or not owned by `userId`. */
   deleteOwned(id: string, userId: string): Promise<boolean>;
 }

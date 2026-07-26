@@ -210,21 +210,29 @@ DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
 Authentication for writes is an API key in the `x-api-key` header. Keys are
 minted from the dashboard; there is no limit on how many, and expiry is
 optional. A key authorises upload and delete for its owner's plans and nothing
-else - listing plans, managing keys, and deleting the account all require a
-session.
+else - listing plans, relabelling them, managing keys, and deleting the account
+all require a session.
 
 ```sh
-# Upload
-curl -X PUT https://plans.example.com/api/plans \
+# Upload, optionally labelled
+curl -X PUT "https://plans.example.com/api/plans?label=Q3%20rollout" \
   -H "x-api-key: bkp_..." \
   -H "content-type: text/html" \
   --data-binary @plan.html
-# 201 {"id":"...","url":"https://plans.example.com/p/..."}
+# 201 {"id":"...","url":"https://plans.example.com/p/...","label":"Q3 rollout"}
 
 # Delete
 curl -X DELETE https://plans.example.com/api/plans/<id> -H "x-api-key: bkp_..."
 # 204
 ```
+
+A label is owner-facing only. It is stored on the plan row, shown in the
+dashboard, and returned by `GET /api/plans`; it never reaches the object store
+and never appears in the public URL, so relabelling changes nothing a visitor
+can see. Labels are free text up to 100 characters, are not unique, and are
+optional - the id stays the identity. Blank clears the label. The dashboard
+edits them in place with `PATCH /api/plans/<id>` and a `{"label":"..."}` body,
+which is session-only.
 
 Uploads must be **standalone** HTML: no external scripts, stylesheets, images,
 fonts, iframes, or CSS `url()`/`@import` targets - including relative paths,

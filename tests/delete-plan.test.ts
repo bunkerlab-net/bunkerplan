@@ -33,6 +33,7 @@ function fakes(
     insert: async () => true,
     listByUser: async () => [],
     findOwner: async () => owner,
+    relabel: async () => false,
     deleteOwned: async (id, userId) => {
       if (owner !== userId) return false;
       deleted.rows.push(id);

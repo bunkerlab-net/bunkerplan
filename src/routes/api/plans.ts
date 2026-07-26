@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getServices } from "#runtime";
+import { parsePlanLabel } from "../../http/plan-label.ts";
 import { planUrl } from "../../http/plan-url.ts";
 import {
   resolveSessionUserId,
@@ -19,12 +20,13 @@ function problem(status: number, error: string, headers?: HeadersInit) {
 async function claimId(
   plans: PlanRepo,
   userId: string,
+  label: string | null,
   size: number,
   length: number,
 ): Promise<string | null> {
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
     const id = newPlanId(length);
-    if (await plans.insert({ id, userId, size })) return id;
+    if (await plans.insert({ id, userId, label, size })) return id;
   }
   return null;
 }
@@ -48,6 +50,11 @@ async function createPlan(request: Request): Promise<Response> {
     });
   }
 
+  // A label is optional metadata, so a bad one is rejected before the body is
+  // read rather than after a large upload has already been accepted.
+  const parsed = parsePlanLabel(new URL(request.url).searchParams.get("label"));
+  if (!parsed.ok) return problem(400, parsed.reason);
+
   const body = await readUploadBody(request, config.maxUploadBytes);
   if (body instanceof Response) return body;
 
@@ -57,6 +64,7 @@ async function createPlan(request: Request): Promise<Response> {
   const id = await claimId(
     db.plans,
     userId,
+    parsed.label,
     body.byteLength,
     config.planIdLength,
   );
@@ -72,7 +80,7 @@ async function createPlan(request: Request): Promise<Response> {
 
   const url = planUrl(config.publicBaseUrl, id);
   return Response.json(
-    { id, url },
+    { id, url, label: parsed.label },
     { status: 201, headers: { location: url } },
   );
 }
@@ -88,6 +96,7 @@ async function listPlans(request: Request): Promise<Response> {
     plans: rows.map((row) => ({
       id: row.id,
       url: planUrl(config.publicBaseUrl, row.id),
+      label: row.label,
       size: row.size,
       createdAt: row.createdAt.toISOString(),
     })),

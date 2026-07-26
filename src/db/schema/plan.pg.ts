@@ -9,6 +9,8 @@ export const plan = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    /** Owner-facing text. Never stored on the object, never public. */
+    label: text("label"),
     size: integer("size").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },

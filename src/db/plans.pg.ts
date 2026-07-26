@@ -9,7 +9,12 @@ export function createPgPlanRepo(db: NodePgDatabase<PgSchema>): PlanRepo {
     async insert(row) {
       const inserted = await db
         .insert(plan)
-        .values({ id: row.id, userId: row.userId, size: row.size })
+        .values({
+          id: row.id,
+          userId: row.userId,
+          label: row.label,
+          size: row.size,
+        })
         .onConflictDoNothing()
         .returning({ id: plan.id });
       return inserted.length > 0;
@@ -17,7 +22,12 @@ export function createPgPlanRepo(db: NodePgDatabase<PgSchema>): PlanRepo {
 
     async listByUser(userId) {
       return await db
-        .select({ id: plan.id, size: plan.size, createdAt: plan.createdAt })
+        .select({
+          id: plan.id,
+          label: plan.label,
+          size: plan.size,
+          createdAt: plan.createdAt,
+        })
         .from(plan)
         .where(eq(plan.userId, userId))
         .orderBy(desc(plan.createdAt));
@@ -30,6 +40,15 @@ export function createPgPlanRepo(db: NodePgDatabase<PgSchema>): PlanRepo {
         .where(eq(plan.id, id))
         .limit(1);
       return rows[0]?.userId ?? null;
+    },
+
+    async relabel(id, userId, label) {
+      const updated = await db
+        .update(plan)
+        .set({ label })
+        .where(and(eq(plan.id, id), eq(plan.userId, userId)))
+        .returning({ id: plan.id });
+      return updated.length > 0;
     },
 
     async deleteOwned(id, userId) {

@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { deletePlan, listPlans, type PlanSummary, uploadPlan } from "./api.ts";
+import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
+import {
+  deletePlan,
+  listPlans,
+  type PlanSummary,
+  relabelPlan,
+  uploadPlan,
+} from "./api.ts";
 
 function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -19,12 +26,53 @@ function isHtml(file: File): boolean {
 interface RowProps {
   plan: PlanSummary;
   busy: boolean;
+  onRelabel: (id: string, label: string | null) => Promise<boolean>;
   onDelete: (id: string) => void;
 }
 
-function PlanRow({ plan, busy, onDelete }: RowProps) {
+function PlanRow({ plan, busy, onRelabel, onDelete }: RowProps) {
+  const stored = plan.label ?? "";
+  const [draft, setDraft] = useState(stored);
+
+  // A refresh can bring a different label for this row - the id is the React
+  // key, so the component survives and the draft has to follow.
+  useEffect(() => {
+    setDraft(stored);
+  }, [stored]);
+
+  // Blur is the commit, which covers Enter (it blurs), tabbing out, and
+  // clicking away. Unchanged text sends nothing.
+  const commit = () => {
+    const next = draft.trim();
+    setDraft(next);
+    if (next === stored) return;
+    void onRelabel(plan.id, next === "" ? null : next).then((ok) => {
+      // A refused relabel leaves the row's stored value alone, so nothing
+      // re-seeds the draft: without this the field keeps showing text the
+      // server never accepted, beside an error saying it did not.
+      if (!ok) setDraft(stored);
+    });
+  };
+
   return (
     <tr>
+      <td>
+        <input
+          className="label-input"
+          type="text"
+          placeholder="Add a label"
+          aria-label={`Label for plan ${plan.id}`}
+          maxLength={MAX_PLAN_LABEL_LENGTH}
+          value={draft}
+          disabled={busy}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") setDraft(stored);
+          }}
+        />
+      </td>
       <td>
         <a className="mono" href={plan.url}>
           {plan.id}
@@ -86,16 +134,19 @@ export function PlansPanel() {
     };
   }, []);
 
-  const guard = async (work: () => Promise<unknown>) => {
+  /** Resolves false when `work` threw, so a caller can undo its optimism. */
+  const guard = async (work: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true);
     try {
       await work();
       setError(null);
       await refresh();
+      return true;
     } catch (cause) {
       // The validator's reason is rendered verbatim so a rejection is
       // actionable rather than a bare 422.
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -170,6 +221,7 @@ export function PlansPanel() {
         <table>
           <thead>
             <tr>
+              <th>Label</th>
               <th>Id</th>
               <th>Size</th>
               <th>Created</th>
@@ -182,6 +234,7 @@ export function PlansPanel() {
                 key={item.id}
                 plan={item}
                 busy={busy}
+                onRelabel={(id, label) => guard(() => relabelPlan(id, label))}
                 onDelete={(id) => void guard(() => deletePlan(id))}
               />
             ))}

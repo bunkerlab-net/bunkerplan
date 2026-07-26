@@ -10,6 +10,8 @@ export const plan = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    /** Owner-facing text. Never stored on the object, never public. */
+    label: text("label"),
     size: integer("size").notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

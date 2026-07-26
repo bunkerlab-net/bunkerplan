@@ -1,6 +1,7 @@
 export interface PlanSummary {
   id: string;
   url: string;
+  label: string | null;
   size: number;
   createdAt: string;
 }
@@ -40,9 +41,22 @@ export async function uploadPlan(file: File): Promise<PlanSummary> {
   return {
     id: body.id,
     url: body.url,
+    label: null,
     size: file.size,
     createdAt: new Date().toISOString(),
   };
+}
+
+export async function relabelPlan(
+  id: string,
+  label: string | null,
+): Promise<void> {
+  const response = await fetch(`/api/plans/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+  if (!response.ok) throw new Error(await readError(response));
 }
 
 export async function deletePlan(id: string): Promise<void> {

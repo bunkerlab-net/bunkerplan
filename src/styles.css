@@ -475,6 +475,22 @@ td.actions {
   white-space: nowrap;
 }
 
+/* An editable cell, not a form field: no chrome until it is hovered or
+   focused, so a table of labels still reads as a table. */
+.label-input {
+  width: 100%;
+  min-width: 12ch;
+  padding: 6px 8px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.label-input:hover:not(:disabled),
+.label-input:focus {
+  background: var(--ivory-light);
+  border-color: var(--stone);
+}
+
 /* --- Signals ------------------------------------------------------------ */
 
 /*
