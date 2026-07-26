@@ -1,4 +1,4 @@
-import { SiteFooter, SiteNav } from "./Chrome.tsx";
+import { SiteFrame } from "./Chrome.tsx";
 
 /**
  * Rendered for an unknown app route and for a plan id that is not in storage —
@@ -10,22 +10,18 @@ import { SiteFooter, SiteNav } from "./Chrome.tsx";
  */
 export function NotFound() {
   return (
-    <div className="page">
-      <SiteNav />
-      <main id="main">
-        <div className="shell">
-          <div className="hero">
-            <h1 className="page-title">Nothing lives at this URL.</h1>
-            <p className="lede muted">
-              A plan may have been deleted by its owner, or the address may be
-              mistyped. Plans are unlisted, so there is nothing to browse from
-              here — <a href="/">start from the home page</a> to publish one of
-              your own.
-            </p>
-          </div>
+    <SiteFrame>
+      <div className="shell">
+        <div className="hero">
+          <h1 className="page-title">Nothing lives at this URL.</h1>
+          <p className="lede muted">
+            A plan may have been deleted by its owner, or the address may be
+            mistyped. Plans are unlisted, so there is nothing to browse from
+            here — <a href="/">start from the home page</a> to publish one of
+            your own.
+          </p>
         </div>
-      </main>
-      <SiteFooter />
-    </div>
+      </div>
+    </SiteFrame>
   );
 }
