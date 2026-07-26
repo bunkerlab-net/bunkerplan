@@ -11,6 +11,21 @@ import type { SqliteSchema } from "./sqlite-shared.ts";
  */
 type SqliteDb = BaseSQLiteDatabase<"sync" | "async", unknown, SqliteSchema>;
 
+/** False means no row matched: unknown id, or one owned by somebody else. */
+async function updateOwned(
+  db: SqliteDb,
+  id: string,
+  userId: string,
+  fields: Partial<typeof plan.$inferInsert>,
+): Promise<boolean> {
+  const updated = await db
+    .update(plan)
+    .set(fields)
+    .where(and(eq(plan.id, id), eq(plan.userId, userId)))
+    .returning({ id: plan.id });
+  return updated.length > 0;
+}
+
 export function createSqlitePlanRepo(db: SqliteDb): PlanRepo {
   return {
     async insert(row) {
@@ -49,14 +64,9 @@ export function createSqlitePlanRepo(db: SqliteDb): PlanRepo {
       return rows[0]?.userId ?? null;
     },
 
-    async relabel(id, userId, label) {
-      const updated = await db
-        .update(plan)
-        .set({ label })
-        .where(and(eq(plan.id, id), eq(plan.userId, userId)))
-        .returning({ id: plan.id });
-      return updated.length > 0;
-    },
+    relabel: (id, userId, label) => updateOwned(db, id, userId, { label }),
+
+    resize: (id, userId, size) => updateOwned(db, id, userId, { size }),
 
     async deleteOwned(id, userId) {
       const deleted = await db

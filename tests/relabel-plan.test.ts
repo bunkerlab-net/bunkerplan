@@ -23,6 +23,7 @@ function fakes() {
       stored.label = label;
       return true;
     },
+    resize: async () => false,
     deleteOwned: async () => false,
   };
 

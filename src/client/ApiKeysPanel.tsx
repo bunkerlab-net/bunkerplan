@@ -112,8 +112,8 @@ export function ApiKeysPanel() {
     <section className="card">
       <h2 className="card-title">API keys</h2>
       <p className="muted">
-        A key authorises upload and delete for your own plans, and nothing else.
-        Send it as <code>x-api-key</code>.
+        A key authorises upload, replacement, and delete for your own plans, and
+        nothing else. Send it as <code>x-api-key</code>.
       </p>
       <div className="row" style={{ marginTop: "16px" }}>
         <input

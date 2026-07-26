@@ -1,9 +1,10 @@
 import type { AppAuth } from "../auth/instance.ts";
 
 /**
- * An API key authorises PUT (upload) and DELETE (remove) and nothing else, so
- * only the write routes accept one. Management routes - listing plans, keys, and
- * passkeys, deleting the account - are session-only. No session is ever minted
+ * An API key authorises PUT (upload and replace) and DELETE (remove) and
+ * nothing else, so only the write routes accept one. Management routes -
+ * listing plans, keys, and passkeys, relabelling, deleting the account - are
+ * session-only. No session is ever minted
  * for a key (`enableSessionForAPIKeys` stays at its `false` default), so there
  * is exactly one code path per credential type.
  */

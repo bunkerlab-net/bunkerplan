@@ -6,7 +6,8 @@ Upload a standalone HTML document, get a public URL at `https://{host}/p/{id}`.
   visitor registers with nothing but a passkey, and one WebAuthn prompt signs
   them straight in.
 - **API keys** for automation - as many as you want, expiry optional. A key
-  authorises upload and delete for its owner's plans and nothing else.
+  authorises upload, replacement, and delete for its owner's plans and nothing
+  else.
 - **Runs on Cloudflare or your own box** from one source tree: R2/D1/KV on
   Workers, any S3-compatible store + Postgres/SQLite + Valkey when self-hosted.
 
@@ -46,6 +47,11 @@ curl -X PUT "https://plans.example.com/api/plans?label=Q3%20rollout" \
   --data-binary @plan.html
 # 201 {"id":"...","url":"https://plans.example.com/p/...","label":"Q3 rollout"}
 
+curl -X PUT https://plans.example.com/api/plans/<id> \
+  -H "x-api-key: bkp_..." -H "content-type: text/html" \
+  --data-binary @revised.html
+# 200 {"id":"...","url":"https://plans.example.com/p/..."}
+
 curl -X DELETE https://plans.example.com/api/plans/<id> -H "x-api-key: bkp_..."
 # 204
 ```
@@ -53,6 +59,11 @@ curl -X DELETE https://plans.example.com/api/plans/<id> -H "x-api-key: bkp_..."
 `label` is optional and owner-facing: it names a plan in the dashboard and in
 `GET /api/plans`, but never reaches the stored object or the public URL. The
 dashboard edits labels in place; the id stays the identity either way.
+
+Uploading to an id you already own replaces the document behind it: same URL,
+same label, new bytes. Somebody else's id is a `404` and their object is never
+touched. Caches hold a plan for five minutes, so a replacement can take that
+long to reach a visitor who has already seen the old one.
 
 Uploads must be self-contained: no external scripts, stylesheets, images,
 iframes, or CSS `url()`/`@import` targets, including relative paths, and no

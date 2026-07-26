@@ -4,7 +4,24 @@ import type { PlanRepo } from "../services/types.ts";
 import type { PgSchema } from "./pg-shared.ts";
 import { plan } from "./schema/plan.pg.ts";
 
-export function createPgPlanRepo(db: NodePgDatabase<PgSchema>): PlanRepo {
+type PgDb = NodePgDatabase<PgSchema>;
+
+/** False means no row matched: unknown id, or one owned by somebody else. */
+async function updateOwned(
+  db: PgDb,
+  id: string,
+  userId: string,
+  fields: Partial<typeof plan.$inferInsert>,
+): Promise<boolean> {
+  const updated = await db
+    .update(plan)
+    .set(fields)
+    .where(and(eq(plan.id, id), eq(plan.userId, userId)))
+    .returning({ id: plan.id });
+  return updated.length > 0;
+}
+
+export function createPgPlanRepo(db: PgDb): PlanRepo {
   return {
     async insert(row) {
       const inserted = await db
@@ -42,14 +59,9 @@ export function createPgPlanRepo(db: NodePgDatabase<PgSchema>): PlanRepo {
       return rows[0]?.userId ?? null;
     },
 
-    async relabel(id, userId, label) {
-      const updated = await db
-        .update(plan)
-        .set({ label })
-        .where(and(eq(plan.id, id), eq(plan.userId, userId)))
-        .returning({ id: plan.id });
-      return updated.length > 0;
-    },
+    relabel: (id, userId, label) => updateOwned(db, id, userId, { label }),
+
+    resize: (id, userId, size) => updateOwned(db, id, userId, { size }),
 
     async deleteOwned(id, userId) {
       const deleted = await db

@@ -16,7 +16,9 @@ import { NotFound } from "../client/NotFound.tsx";
  */
 const SANDBOX = "sandbox allow-scripts allow-forms allow-popups";
 
-// Short max-age rather than `immutable` because plans can be deleted.
+// Short max-age rather than `immutable` because plans can be deleted, and
+// replaced: a cache that already has one can serve the old document until the
+// window is up.
 const CACHE_CONTROL = "public, max-age=300, must-revalidate";
 
 export const Route = createFileRoute("/p/$planId")({

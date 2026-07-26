@@ -125,6 +125,7 @@ export function SiteFooter() {
             <h2>API</h2>
             <ul>
               <li className="mono">PUT /api/plans</li>
+              <li className="mono">PUT /api/plans/:id</li>
               <li className="mono">DELETE /api/plans/:id</li>
               <li className="mono">GET /p/:id</li>
             </ul>

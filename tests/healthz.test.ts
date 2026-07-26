@@ -45,6 +45,7 @@ function fakes(fails: string[] = []): Fakes {
       listByUser: async () => [],
       findOwner: async () => null,
       relabel: async () => false,
+      resize: async () => false,
       deleteOwned: async () => false,
     },
     uploadRateLimits: {

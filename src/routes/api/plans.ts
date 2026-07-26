@@ -7,6 +7,7 @@ import {
   resolveWriteUserId,
 } from "../../http/require-user.ts";
 import { readUploadBody } from "../../http/upload-body.ts";
+import { checkUploadRate } from "../../http/upload-rate-limit.ts";
 import { newPlanId } from "../../ids.ts";
 import type { PlanRepo } from "../../services/types.ts";
 
@@ -37,18 +38,8 @@ async function createPlan(request: Request): Promise<Response> {
   const userId = await resolveWriteUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
 
-  // Per user, not per credential: an API key and the dashboard session share
-  // one allowance, and creating more keys does not buy more uploads.
-  const limit = await db.uploadRateLimits.consume(
-    userId,
-    config.uploadRateMax,
-    config.uploadRateWindowSec,
-  );
-  if (!limit.allowed) {
-    return problem(429, "rate limit exceeded", {
-      "retry-after": String(limit.retryAfter),
-    });
-  }
+  const limited = await checkUploadRate(db.uploadRateLimits, config, userId);
+  if (limited !== null) return limited;
 
   // A label is optional metadata, so a bad one is rejected before the body is
   // read rather than after a large upload has already been accepted.
@@ -87,7 +78,7 @@ async function createPlan(request: Request): Promise<Response> {
 
 async function listPlans(request: Request): Promise<Response> {
   const { auth, config, db } = await getServices();
-  // Session-only: an API key authorises upload and delete, nothing else.
+  // Session-only: an API key authorises writes to plans, nothing else.
   const userId = await resolveSessionUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
 

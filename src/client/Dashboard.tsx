@@ -14,8 +14,8 @@ export function Dashboard({ handle }: DashboardProps) {
         <h1 className="page-title">Your plans, keys, and passkeys.</h1>
         <p className="lede muted">
           Uploads are public to anyone holding the URL and unlisted otherwise.
-          Deleting a plan takes its URL out of service, though a cached copy can
-          survive for up to five minutes.
+          Replacing or deleting a plan reuses or retires its URL, though a
+          cached copy of the old document can survive for up to five minutes.
         </p>
       </div>
       <div className="stack">

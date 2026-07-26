@@ -71,6 +71,11 @@ export interface PlanRepo {
   findOwner(id: string): Promise<string | null>;
   /** False means not found or not owned by `userId`. */
   relabel(id: string, userId: string, label: string | null): Promise<boolean>;
+  /**
+   * Records a replaced document. False means not found or not owned by
+   * `userId`, which is what authorises the object write that follows.
+   */
+  resize(id: string, userId: string, size: number): Promise<boolean>;
   /** False means not found or not owned by `userId`. */
   deleteOwned(id: string, userId: string): Promise<boolean>;
 }

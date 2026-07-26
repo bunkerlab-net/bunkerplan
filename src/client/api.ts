@@ -63,3 +63,13 @@ export async function deletePlan(id: string): Promise<void> {
   const response = await fetch(`/api/plans/${id}`, { method: "DELETE" });
   if (!response.ok) throw new Error(await readError(response));
 }
+
+/** Overwrites the document behind `id`; the id, URL, and label all survive. */
+export async function replacePlan(id: string, file: File): Promise<void> {
+  const response = await fetch(`/api/plans/${id}`, {
+    method: "PUT",
+    headers: { "content-type": "text/html" },
+    body: await file.arrayBuffer(),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import {
   deletePlan,
   listPlans,
   type PlanSummary,
   relabelPlan,
+  replacePlan,
   uploadPlan,
 } from "./api.ts";
 
@@ -27,12 +28,14 @@ interface RowProps {
   plan: PlanSummary;
   busy: boolean;
   onRelabel: (id: string, label: string | null) => Promise<boolean>;
+  onReplace: (id: string, files: FileList | null) => void;
   onDelete: (id: string) => void;
 }
 
-function PlanRow({ plan, busy, onRelabel, onDelete }: RowProps) {
+function PlanRow({ plan, busy, onRelabel, onReplace, onDelete }: RowProps) {
   const stored = plan.label ?? "";
   const [draft, setDraft] = useState(stored);
+  const replaceInput = useRef<HTMLInputElement>(null);
 
   // A refresh can bring a different label for this row - the id is the React
   // key, so the component survives and the draft has to follow.
@@ -81,6 +84,28 @@ function PlanRow({ plan, busy, onRelabel, onDelete }: RowProps) {
       <td>{formatBytes(plan.size)}</td>
       <td>{new Date(plan.createdAt).toLocaleString()}</td>
       <td className="actions">
+        <button
+          type="button"
+          className="btn-text"
+          disabled={busy}
+          onClick={() => replaceInput.current?.click()}
+        >
+          Replace
+        </button>
+        {/* The button above is the accessible control; this only carries the
+            picker, so it stays out of the tab order. */}
+        <input
+          ref={replaceInput}
+          className="file-input"
+          type="file"
+          accept=".html,.htm,text/html"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(event) => {
+            onReplace(plan.id, event.target.files);
+            event.target.value = "";
+          }}
+        />
         <button
           type="button"
           className="btn-text"
@@ -152,18 +177,29 @@ export function PlansPanel() {
     }
   };
 
-  const submit = (files: FileList | null) => {
+  /** The one HTML file in `files`, or null with the reason already shown. */
+  const vet = (files: FileList | null): File | null => {
     const [file, ...rest] = Array.from(files ?? []);
-    if (file === undefined) return;
+    if (file === undefined) return null;
     if (rest.length > 0) {
       setError("Upload one file at a time.");
-      return;
+      return null;
     }
     if (!isHtml(file)) {
       setError(`${file.name} is not an HTML document.`);
-      return;
+      return null;
     }
-    void guard(() => uploadPlan(file));
+    return file;
+  };
+
+  const submit = (files: FileList | null) => {
+    const file = vet(files);
+    if (file !== null) void guard(() => uploadPlan(file));
+  };
+
+  const replace = (id: string, files: FileList | null) => {
+    const file = vet(files);
+    if (file !== null) void guard(() => replacePlan(id, file));
   };
 
   return (
@@ -235,6 +271,7 @@ export function PlansPanel() {
                 plan={item}
                 busy={busy}
                 onRelabel={(id, label) => guard(() => relabelPlan(id, label))}
+                onReplace={replace}
                 onDelete={(id) => void guard(() => deletePlan(id))}
               />
             ))}
