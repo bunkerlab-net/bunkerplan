@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getServices } from "#runtime";
-import { validateStandaloneHtml } from "../../html/validate.ts";
 import { planUrl } from "../../http/plan-url.ts";
 import {
   resolveSessionUserId,
   resolveWriteUserId,
 } from "../../http/require-user.ts";
+import { readUploadBody } from "../../http/upload-body.ts";
 import { newPlanId } from "../../ids.ts";
 import type { PlanRepo } from "../../services/types.ts";
 
@@ -27,34 +27,6 @@ async function claimId(
     if (await plans.insert({ id, userId, size })) return id;
   }
   return null;
-}
-
-/**
- * Reads and vets the request body, or returns the failing response. The
- * Content-Length check rejects an oversized upload before reading it.
- */
-async function readUploadBody(
-  request: Request,
-  maxBytes: number,
-): Promise<Uint8Array | Response> {
-  const contentType = request.headers.get("content-type") ?? "";
-  if (contentType.split(";")[0]?.trim().toLowerCase() !== "text/html") {
-    return problem(415, "content-type must be text/html");
-  }
-
-  const tooBig = `upload exceeds ${maxBytes} bytes`;
-  const declaredLength = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    return problem(413, tooBig);
-  }
-
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.byteLength > maxBytes) return problem(413, tooBig);
-
-  const validation = validateStandaloneHtml(bytes);
-  if (!validation.ok) return problem(422, validation.reason);
-
-  return bytes;
 }
 
 async function createPlan(request: Request): Promise<Response> {

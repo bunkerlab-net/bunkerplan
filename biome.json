@@ -19,8 +19,7 @@
       "!**/.nitro",
       "!**/.output",
       "!**/.wrangler",
-      "!**/wrangler.jsonc",
-      "!fixtures/too-big.html"
+      "!**/wrangler.jsonc"
     ]
   },
   "formatter": {
