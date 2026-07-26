@@ -7,19 +7,12 @@ import {
 } from "@aws-sdk/client-s3";
 import type { Config } from "../config.ts";
 import type { PlanObject, PlanStorage } from "../services/types.ts";
+import { planObjectKey } from "./object-key.ts";
 
 const CONTENT_TYPE = "text/html; charset=utf-8";
 
-/**
- * Plans own the `plans/` namespace and address nothing outside it. The bucket
- * is not assumed to be exclusively ours - a self-hosted deployment may point
- * `S3_BUCKET` at one that already holds other things - and `/p/{planId}`
- * builds a key from a URL path segment. Ids become keys here rather than at
- * the call sites, so there is one place that knows the layout.
- */
-const KEY_PREFIX = "plans/";
-
-const objectKey = (id: string) => `${KEY_PREFIX}${id}`;
+// The `plans/` mapping and the id shapes it refuses live in
+// ./object-key.ts, shared with the R2 driver.
 
 function isNotFound(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
@@ -77,7 +70,7 @@ export function createS3Storage(config: Config): PlanStorage {
       await client.send(
         new PutObjectCommand({
           Bucket: bucket,
-          Key: objectKey(id),
+          Key: planObjectKey(id),
           Body: body,
           ContentType: CONTENT_TYPE,
           ContentLength: body.byteLength,
@@ -88,7 +81,7 @@ export function createS3Storage(config: Config): PlanStorage {
     async get(id): Promise<PlanObject | null> {
       try {
         const response = await client.send(
-          new GetObjectCommand({ Bucket: bucket, Key: objectKey(id) }),
+          new GetObjectCommand({ Bucket: bucket, Key: planObjectKey(id) }),
         );
         if (response.Body === undefined) return null;
         return {
@@ -106,7 +99,7 @@ export function createS3Storage(config: Config): PlanStorage {
     async delete(id) {
       // S3 deletes are idempotent: a missing key is a success.
       await client.send(
-        new DeleteObjectCommand({ Bucket: bucket, Key: objectKey(id) }),
+        new DeleteObjectCommand({ Bucket: bucket, Key: planObjectKey(id) }),
       );
     },
 
