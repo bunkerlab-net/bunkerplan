@@ -22,6 +22,24 @@ const planAlphabet =
  */
 export const newPlanId = customAlphabet(planAlphabet);
 
+/**
+ * Whether a string is an id `newPlanId` could have issued.
+ *
+ * `/p/{planId}` turns a URL path segment into an object key, and the router
+ * percent-decodes it first, so a segment carrying `%2F` would otherwise reach
+ * storage as a real `/`. The character class is the generator's own alphabet,
+ * so the two cannot drift apart.
+ *
+ * The length bound is deliberately loose rather than `config.planIdLength`: an
+ * operator who raises or lowers that setting must not orphan ids already
+ * issued under the previous one.
+ */
+const PLAN_ID_PATTERN = new RegExp(`^[${planAlphabet}]{1,64}$`);
+
+export function isPlanId(value: string): boolean {
+  return PLAN_ID_PATTERN.test(value);
+}
+
 /** No 0/1/i/l/o lookalikes - handles get read aloud and retyped. */
 const handleAlphabet = "23456789abcdefghjkmnpqrstuvwxyz";
 

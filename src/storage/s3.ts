@@ -10,6 +10,17 @@ import type { PlanObject, PlanStorage } from "../services/types.ts";
 
 const CONTENT_TYPE = "text/html; charset=utf-8";
 
+/**
+ * Plans own the `plans/` namespace and address nothing outside it. The bucket
+ * is not assumed to be exclusively ours - a self-hosted deployment may point
+ * `S3_BUCKET` at one that already holds other things - and `/p/{planId}`
+ * builds a key from a URL path segment. Ids become keys here rather than at
+ * the call sites, so there is one place that knows the layout.
+ */
+const KEY_PREFIX = "plans/";
+
+const objectKey = (id: string) => `${KEY_PREFIX}${id}`;
+
 function isNotFound(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   if ("name" in error && error.name === "NoSuchKey") return true;
@@ -62,11 +73,11 @@ export function createS3Storage(config: Config): PlanStorage {
   const client = makeClient(config);
 
   return {
-    async put(key, body) {
+    async put(id, body) {
       await client.send(
         new PutObjectCommand({
           Bucket: bucket,
-          Key: key,
+          Key: objectKey(id),
           Body: body,
           ContentType: CONTENT_TYPE,
           ContentLength: body.byteLength,
@@ -74,10 +85,10 @@ export function createS3Storage(config: Config): PlanStorage {
       );
     },
 
-    async get(key): Promise<PlanObject | null> {
+    async get(id): Promise<PlanObject | null> {
       try {
         const response = await client.send(
-          new GetObjectCommand({ Bucket: bucket, Key: key }),
+          new GetObjectCommand({ Bucket: bucket, Key: objectKey(id) }),
         );
         if (response.Body === undefined) return null;
         return {
@@ -92,9 +103,11 @@ export function createS3Storage(config: Config): PlanStorage {
       }
     },
 
-    async delete(key) {
+    async delete(id) {
       // S3 deletes are idempotent: a missing key is a success.
-      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+      await client.send(
+        new DeleteObjectCommand({ Bucket: bucket, Key: objectKey(id) }),
+      );
     },
 
     async probe() {

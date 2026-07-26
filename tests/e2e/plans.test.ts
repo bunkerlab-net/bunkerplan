@@ -197,4 +197,35 @@ describe("plan lifecycle over HTTP", () => {
     expect((await app.fetch(`/p/${created.id}`)).status).toBe(404);
     expect(await storedSize(created.id)).toBeNull();
   });
+
+  /**
+   * A bucket holding more than plans is the ordinary self-hosted layout, so
+   * `/p/{planId}` must resolve only within the plan namespace. Both halves of
+   * the mapping are exercised: the id check refuses a segment the generator
+   * could not have issued, and the `plans/` prefix bounds what a key can name.
+   */
+  test("never serves an object outside the plan namespace", async () => {
+    await app.bucket.put("config.json", "NOT-A-PLAN");
+    await app.bucket.put("backups/db.sql", "NOT-A-PLAN");
+
+    for (const probe of [
+      "config.json",
+      "backups%2Fdb.sql",
+      "..%2F..%2Fconfig.json",
+      "%2Fconfig.json",
+    ]) {
+      const response = await app.fetch(`/p/${probe}`);
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toContain("NOT-A-PLAN");
+    }
+  });
+
+  test("stores plan objects under the plans/ prefix", async () => {
+    const key = await app.account();
+    const created = await createPlan(key, html("namespaced"));
+
+    expect(await app.bucket.head(`plans/${created.id}`)).not.toBeNull();
+    // Nothing at the bare id: the prefix is the only place a plan lives.
+    expect(await app.bucket.head(created.id)).toBeNull();
+  });
 });

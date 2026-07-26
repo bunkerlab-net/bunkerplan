@@ -14,10 +14,15 @@ export interface PlanObject {
   etag: string;
 }
 
+/**
+ * Addressed by plan id, never by object key: turning an id into a key in the
+ * store's own namespace is the driver's job, so every call site speaks ids
+ * and only the driver knows the layout.
+ */
 export interface PlanStorage {
-  put(key: string, body: Uint8Array): Promise<void>;
-  get(key: string): Promise<PlanObject | null>;
-  delete(key: string): Promise<void>;
+  put(id: string, body: Uint8Array): Promise<void>;
+  get(id: string): Promise<PlanObject | null>;
+  delete(id: string): Promise<void>;
   /** Throws if the backing store is unreachable. */
   probe(): Promise<void>;
 }

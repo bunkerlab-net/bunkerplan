@@ -39,6 +39,8 @@ export interface Harness {
   /** Paths resolve against the worker's own origin. */
   fetch(path: string, init?: FetchInit): Promise<FetchResponse>;
   db: D1Database;
+  /** The plan bucket, for asserting object layout directly. */
+  bucket: R2Bucket;
   /** Seeds a fresh account and returns its API key. */
   account(): Promise<string>;
   close(): Promise<void>;
@@ -99,7 +101,7 @@ export async function startWorker(): Promise<Harness> {
 
   await server.listen();
   const worker = server.getWorker<Env>();
-  const { DB } = await worker.getEnv();
+  const { DB, BUCKET } = await worker.getEnv();
   await migrate(DB);
 
   let seeded = 0;
@@ -107,6 +109,7 @@ export async function startWorker(): Promise<Harness> {
   return {
     fetch: (path, init) => worker.fetch(path, init),
     db: DB,
+    bucket: BUCKET,
     async account() {
       seeded += 1;
       const userId = `e2e-user-${seeded}`;

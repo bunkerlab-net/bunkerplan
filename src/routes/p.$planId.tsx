@@ -1,6 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { getServices } from "#runtime";
 import { NotFound } from "../client/NotFound.tsx";
+import { isPlanId } from "../ids.ts";
 
 /**
  * The `Content-Security-Policy: sandbox` header below is the single most
@@ -25,6 +26,11 @@ export const Route = createFileRoute("/p/$planId")({
   server: {
     handlers: {
       GET: async ({ request, params, next }) => {
+        // Only ids this app could have issued are routable. Anything else
+        // takes the same path as a plan that is not there, so an id that was
+        // never valid is indistinguishable from one that has been deleted.
+        if (!isPlanId(params.planId)) return next();
+
         // No auth, no database read: serving a plan is a single object read.
         const { storage } = await getServices();
         const object = await storage.get(params.planId);
