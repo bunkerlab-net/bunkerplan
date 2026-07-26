@@ -103,9 +103,7 @@
       "indexes": {
         "account_userId_idx": {
           "name": "account_userId_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -114,12 +112,8 @@
           "name": "account_user_id_user_id_fk",
           "tableFrom": "account",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -295,23 +289,17 @@
       "indexes": {
         "apikey_configId_idx": {
           "name": "apikey_configId_idx",
-          "columns": [
-            "config_id"
-          ],
+          "columns": ["config_id"],
           "isUnique": false
         },
         "apikey_referenceId_idx": {
           "name": "apikey_referenceId_idx",
-          "columns": [
-            "reference_id"
-          ],
+          "columns": ["reference_id"],
           "isUnique": false
         },
         "apikey_key_idx": {
           "name": "apikey_key_idx",
-          "columns": [
-            "key"
-          ],
+          "columns": ["key"],
           "isUnique": false
         }
       },
@@ -320,12 +308,8 @@
           "name": "apikey_reference_id_user_id_fk",
           "tableFrom": "apikey",
           "tableTo": "user",
-          "columnsFrom": [
-            "reference_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["reference_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -418,16 +402,12 @@
       "indexes": {
         "passkey_userId_idx": {
           "name": "passkey_userId_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         },
         "passkey_credentialID_idx": {
           "name": "passkey_credentialID_idx",
-          "columns": [
-            "credential_id"
-          ],
+          "columns": ["credential_id"],
           "isUnique": true
         }
       },
@@ -436,12 +416,8 @@
           "name": "passkey_user_id_user_id_fk",
           "tableFrom": "passkey",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -485,9 +461,7 @@
       "indexes": {
         "rate_limit_key_unique": {
           "name": "rate_limit_key_unique",
-          "columns": [
-            "key"
-          ],
+          "columns": ["key"],
           "isUnique": true
         }
       },
@@ -560,16 +534,12 @@
       "indexes": {
         "session_token_unique": {
           "name": "session_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         },
         "session_userId_idx": {
           "name": "session_userId_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -578,12 +548,8 @@
           "name": "session_user_id_user_id_fk",
           "tableFrom": "session",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -651,9 +617,7 @@
       "indexes": {
         "user_email_unique": {
           "name": "user_email_unique",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": true
         }
       },
@@ -713,9 +677,7 @@
       "indexes": {
         "verification_identifier_idx": {
           "name": "verification_identifier_idx",
-          "columns": [
-            "identifier"
-          ],
+          "columns": ["identifier"],
           "isUnique": false
         }
       },
@@ -767,9 +729,7 @@
       "indexes": {
         "plan_userId_idx": {
           "name": "plan_userId_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -778,12 +738,8 @@
           "name": "plan_user_id_user_id_fk",
           "tableFrom": "plan",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -823,12 +779,8 @@
           "name": "upload_rate_limit_key_user_id_fk",
           "tableFrom": "upload_rate_limit",
           "tableTo": "user",
-          "columnsFrom": [
-            "key"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["key"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
