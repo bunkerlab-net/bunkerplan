@@ -1,20 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getServices } from "#runtime";
+import type { Config } from "../../config.ts";
 import { parsePlanLabel } from "../../http/plan-label.ts";
 import { planUrl } from "../../http/plan-url.ts";
 import {
   resolveSessionUserId,
   resolveWriteUserId,
 } from "../../http/require-user.ts";
+import { storeAndConfirm } from "../../http/store-plan.ts";
 import { readUploadBody } from "../../http/upload-body.ts";
 import { checkUploadRate } from "../../http/upload-rate-limit.ts";
 import { newPlanId } from "../../ids.ts";
-import {
-  type AccountClosingRepo,
-  PLAN_PAGE_SIZE,
-  type PlanRepo,
-  type Services,
-} from "../../services/types.ts";
+import { PLAN_PAGE_SIZE, type PlanRepo } from "../../services/types.ts";
 
 const MAX_ID_ATTEMPTS = 3;
 
@@ -31,57 +28,18 @@ async function claimId(
   userId: string,
   label: string | null,
   size: number,
-  length: number,
-  maxPlans: number,
+  limits: Pick<Config, "planIdLength" | "maxPlansPerUser">,
 ): Promise<string | "quota" | null> {
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
-    const id = newPlanId(length);
-    const claimed = await plans.insert({ id, userId, label, size }, maxPlans);
+    const id = newPlanId(limits.planIdLength);
+    const claimed = await plans.insert(
+      { id, userId, label, size },
+      limits.maxPlansPerUser,
+    );
     if (claimed === "created") return id;
     if (claimed === "quota") return "quota";
   }
   return null;
-}
-
-/**
- * Writes the object for a row that has already been claimed, and confirms the
- * account is still open. Returns the failing response, or `null` when the plan
- * is safely stored.
- *
- * The re-check is the point. Deleting an account marks it, sweeps the objects
- * its rows name, and lets the foreign key take the rows. An upload that passed
- * the admission check before the marker appeared can still be mid-write while
- * that sweep runs, and its object would then survive a cascade that removed
- * the row - served at `/p/{id}`, owned by nobody, reachable by nothing. Reading
- * the marker again after the write is what lets the loser withdraw. Any
- * deletion that starts after this point sees the row and sweeps the object
- * itself.
- */
-async function storeAndConfirm(
-  services: Pick<Services, "storage" | "logger"> & {
-    plans: PlanRepo;
-    accountClosing: AccountClosingRepo;
-  },
-  id: string,
-  userId: string,
-  body: Uint8Array,
-): Promise<Response | null> {
-  const { storage, plans, accountClosing, logger } = services;
-  try {
-    await storage.put(id, body);
-  } catch (error) {
-    await plans.deleteOwned(id, userId);
-    logger.error({ err: error, planId: id }, "plan upload failed");
-    return problem(502, "storage unavailable");
-  }
-
-  if (!(await accountClosing.isOpen(userId))) return null;
-
-  await plans.deleteOwned(id, userId);
-  await storage.delete(id).catch((error: unknown) => {
-    logger.error({ err: error, planId: id }, "orphaned plan object");
-  });
-  return problem(404, "not found");
 }
 
 async function createPlan(request: Request): Promise<Response> {
@@ -116,24 +74,22 @@ async function createPlan(request: Request): Promise<Response> {
     userId,
     parsed.label,
     body.byteLength,
-    config.planIdLength,
-    config.maxPlansPerUser,
+    config,
   );
-  if (id === "quota") {
-    return problem(
-      409,
-      `plan limit reached (${config.maxPlansPerUser}); delete one first`,
-    );
-  }
+  const full = `plan limit reached (${config.maxPlansPerUser}); delete one first`;
+  if (id === "quota") return problem(409, full);
   if (id === null) return problem(500, "could not allocate a plan id");
 
-  const failed = await storeAndConfirm(
+  const failure = await storeAndConfirm(
     { storage, plans: db.plans, accountClosing: db.accountClosing, logger },
     id,
     userId,
     body,
   );
-  if (failed !== null) return failed;
+  if (failure === "storage-unavailable") {
+    return problem(502, "storage unavailable");
+  }
+  if (failure === "withdrawn") return problem(404, "not found");
 
   const url = planUrl(config.publicBaseUrl, id);
   return Response.json(

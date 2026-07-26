@@ -23,7 +23,8 @@ import type { PlanRepo } from "../src/services/types.ts";
  * afterwards, so pointing the variable at a database that already has a `plan`
  * table cannot destroy it.
  */
-const DATABASE_URL = process.env["TEST_DATABASE_URL"];
+/** Blank counts as unset: an empty env var is not an opt-in. */
+const DATABASE_URL = process.env["TEST_DATABASE_URL"]?.trim() || undefined;
 const SCHEMA = `bunkerplan_test_${crypto.randomUUID().replaceAll("-", "")}`;
 
 let pool: pg.Pool;
