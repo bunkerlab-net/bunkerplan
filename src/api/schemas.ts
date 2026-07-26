@@ -4,8 +4,10 @@
  *
  * Only half of this is enforced, and the halves are worth telling apart.
  *
- * RESPONSES are load-bearing: every handler types its body with
- * `satisfies`, so one that stops matching the published shape fails `tsc`.
+ * RESPONSES are load-bearing. Every body the document describes is typed
+ * against a schema here - success bodies with `satisfies` at the point they
+ * are built, failures through `problem()` in src/http/problem.ts - so one
+ * that stops matching the published shape fails `tsc`.
  *
  * REQUESTS are description only. Nothing here parses an incoming body or
  * query - `src/app.ts` hands the raw request to the manual parsers in
@@ -132,7 +134,7 @@ export const ErrorBody = component(
   "Error",
   z.object({ error: z.string().meta({ examples: ["not found"] }) }).meta({
     title: "Error",
-    description: "The body of every failing request.",
+    description: "The error body returned by failing plan API operations.",
   }),
 );
 

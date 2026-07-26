@@ -1,8 +1,9 @@
-import type { ErrorBody, PlanReplaced } from "../api/schemas.ts";
+import type { PlanReplaced } from "../api/schemas.ts";
 import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
 import type { PlanRepo, PlanStorage } from "../services/types.ts";
 import { planUrl } from "./plan-url.ts";
+import { problem } from "./problem.ts";
 import { readUploadBody } from "./upload-body.ts";
 
 /**
@@ -27,8 +28,7 @@ export async function replacePlan(
   // 404 rather than 403 for someone else's plan: never confirm that an id
   // belonging to another account exists. Checked before the body is read, so
   // an upload for a plan the caller does not own is refused at the header.
-  const notFound = () =>
-    Response.json({ error: "not found" } satisfies ErrorBody, { status: 404 });
+  const notFound = () => problem(404, "not found");
   if ((await plans.findOwner(id)) !== userId) return notFound();
 
   const body = await readUploadBody(request, config.maxUploadBytes);
@@ -38,7 +38,7 @@ export async function replacePlan(
     await storage.put(id, body);
   } catch (error) {
     logger.error({ err: error, planId: id }, "plan replacement failed");
-    return Response.json({ error: "storage unavailable" }, { status: 502 });
+    return problem(502, "storage unavailable");
   }
 
   if (!(await plans.resize(id, userId, body.byteLength))) {
