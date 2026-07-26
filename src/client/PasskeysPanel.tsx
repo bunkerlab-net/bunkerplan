@@ -103,7 +103,7 @@ export function PasskeysPanel() {
                 <td className="actions">
                   <button
                     type="button"
-                    className="btn-text"
+                    className="btn-text btn-text-clay"
                     disabled={busy || onlyOne}
                     title={
                       onlyOne

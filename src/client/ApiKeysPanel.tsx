@@ -174,7 +174,7 @@ export function ApiKeysPanel() {
                 <td className="actions">
                   <button
                     type="button"
-                    className="btn-text"
+                    className="btn-text btn-text-clay"
                     disabled={busy}
                     onClick={() => void onRevoke(item.id)}
                   >

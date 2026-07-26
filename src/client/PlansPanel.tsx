@@ -108,7 +108,7 @@ function PlanRow({ plan, busy, onRelabel, onReplace, onDelete }: RowProps) {
         />
         <button
           type="button"
-          className="btn-text"
+          className="btn-text btn-text-clay"
           disabled={busy}
           onClick={() => onDelete(plan.id)}
         >
