@@ -18,6 +18,9 @@
     "deploy": "bun run scripts/check-deploy-config.ts && bun run build && wrangler deploy -c dist/server/wrangler.json",
     "dev": "vite dev --port 3000",
     "start": "node .output/server/index.mjs",
+    "test": "bun test --parallel",
+    "test:backends": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml up -d --wait postgres valkey minio",
+    "test:backends:down": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml down -v",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -50,6 +53,7 @@
     "@vitejs/plugin-react": "^6.0.4",
     "auth": "^1.6.25",
     "drizzle-kit": "^0.31.10",
+    "miniflare": "^4.20260722.0",
     "nitro": "^3.0.260610-beta",
     "sort-package-json": "^4.0.0",
     "vite": "^8.1.5",

@@ -28,9 +28,50 @@ bun run dev
 | `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - **re-apply the hand patch noted at the top of each generated file** |
-| `bun test`                             | Unit tests, plus an end-to-end suite that builds the Worker and serves it on Miniflare                  |
+| `bun run test`                         | The whole suite. Skips the container-backed backends unless they are up - see Tests                     |
+| `bun run test:backends`                | Postgres, Valkey, and MinIO on localhost, so nothing skips                                              |
 | `bun run check`                        | Biome lint and format                                                                                   |
 | `bun run typecheck`                    | `tsc --noEmit`                                                                                          |
+
+## Tests
+
+Six stores ship: D1, R2, and Workers KV on Cloudflare; Postgres, MinIO, and
+Valkey when self-hosted. `tests/drivers/` holds one conformance suite per
+interface and runs it against every implementation, so a difference between
+two backends fails an assertion instead of surfacing on one deployment and not
+the other. Nothing there is a fake - the Cloudflare three run on real workerd
+via Miniflare, the rest against containers.
+
+The Cloudflare half needs nothing installed. The other three are opt-in by
+environment variable and **skip** when it is absent, so `bun run test` on a
+checkout with no Docker still passes - having exercised rather less than it
+looks. To run everything:
+
+```sh
+bun run test:backends   # postgres, valkey, minio, published on localhost
+TEST_DATABASE_URL=postgres://bunkerplan:bunkerplan@127.0.0.1:5432/bunkerplan \
+TEST_VALKEY_URL=redis://127.0.0.1:6379 \
+TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
+  bun run test
+bun run test:backends:down
+```
+
+Or uncomment the same variables in your local environment file - `bun test`
+reads it - and `bun run test` alone runs the full matrix. `.env.example`
+documents all five, including the two S3 credentials that default to the
+compose MinIO.
+
+CI sets them, so a pull request always runs the full matrix. Nothing here
+can reach data you care about: the backends run under their own Compose
+project (`bunkerplan-test`), separate from the self-hosting stack below, so
+`test:backends:down -v` cannot take your local Postgres, Valkey, or MinIO
+volumes with it. Postgres then works in a scratch schema and MinIO in a bucket
+created for the run, both dropped afterwards.
+
+`bun run test` is `bun test --parallel`, one process per file, and that is not
+a speed choice: Miniflare runs a workerd child process, and sharing a process
+with the AWS SDK intermittently wedges a concurrent S3 request that then never
+settles.
 
 ## Self-hosting
 

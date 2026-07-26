@@ -1,0 +1,37 @@
+# Publishes the backing services on localhost so `bun test` can reach them from
+# the host. Overlay only - it adds ports to the services docker-compose.yml
+# already defines, so the images, pins, and healthchecks stay declared once.
+#
+# Always under its own project name. Compose derives that from the directory
+# otherwise, which is the same project `docker compose up --build -d` uses for
+# the real self-hosting stack - and `down -v` there deletes the named volumes,
+# so tearing the test backends down would take a developer's local Postgres,
+# Valkey, and MinIO data with them. `-p` gives this set its own containers,
+# network, and volumes, and `bun run test:backends` passes it for you:
+#
+#   BETTER_AUTH_SECRET=unused docker compose -p bunkerplan-test \
+#     -f docker-compose.yml -f docker-compose.test.yml \
+#     up -d --wait postgres valkey minio
+#
+# The secret is needed even though the `app` service is never started: Compose
+# interpolates the whole file before it selects which services to bring up, so
+# the `:?` guard on `app` fires regardless. `bun run test:backends` supplies a
+# placeholder, which is what makes this work on a checkout with no local
+# environment file. Anything real would be pointless - nothing reads it.
+#
+# CI does not use this file. GitHub Actions attaches the same backends as
+# native service containers, which is a second declaration of the same set on
+# purpose: a compose stack cannot be a job service, and the alternative -
+# running compose inside the runner - hides the ports behind another daemon.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  valkey:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  minio:
+    ports:
+      - "127.0.0.1:9000:9000"
