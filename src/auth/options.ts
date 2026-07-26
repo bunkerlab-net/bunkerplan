@@ -4,6 +4,7 @@ import { passkey } from "@better-auth/passkey";
 import type { BetterAuthOptions } from "better-auth";
 import { setSessionCookie } from "better-auth/cookies";
 import { newUserHandle } from "../ids.ts";
+import type { Logger } from "../log.ts";
 
 /**
  * Marks the provisional identity returned by `resolveUser`. A signed-in user
@@ -26,6 +27,12 @@ export interface AuthOptionsInput {
    * rate-limit bucket per path.
    */
   clientIpHeader: string;
+  /**
+   * Better Auth's own output is routed here so it cannot bypass redaction.
+   * Optional because the `auth generate` config stubs build these options
+   * without ever running a server.
+   */
+  logger?: Logger | undefined;
   /**
    * Runs before Better Auth deletes anything, while the user's plan rows still
    * exist. Objects live outside the database, so no foreign key can clean them
@@ -105,6 +112,45 @@ function apiKeyPlugin() {
 }
 
 /**
+ * Bridges Better Auth's own logging onto the app logger.
+ *
+ * It writes to `console` by default, which is the one output that bypasses the
+ * redacting destination in src/log.ts - and an adapter error it reports can
+ * carry a driver message with a connection string in it. Omitted entirely when
+ * no logger is supplied, so the `auth generate` config stubs still build.
+ */
+function loggerOption(logger: Logger | undefined) {
+  if (logger === undefined) return {};
+  return {
+    logger: {
+      disabled: false,
+      log: (
+        level: "info" | "warn" | "error" | "debug",
+        message: string,
+        ...args: unknown[]
+      ) => {
+        logger[level]({ args, source: "better-auth" }, message);
+      },
+    },
+  };
+}
+
+/**
+ * Passkeys only, so every password and email-verification route is 404'd
+ * rather than merely disabled - there is then nothing to probe.
+ */
+const PASSWORD_PATHS = [
+  "/sign-in/email",
+  "/sign-up/email",
+  "/forget-password",
+  "/reset-password",
+  "/change-password",
+  "/change-email",
+  "/verify-email",
+  "/send-verification-email",
+];
+
+/**
  * Deliberately un-annotated: `betterAuth()` infers its plugin API surface (e.g.
  * `auth.api.verifyApiKey`) from the literal `plugins` tuple. Annotating this as
  * `BetterAuthOptions` would widen it away. `satisfies` keeps the check.
@@ -118,6 +164,7 @@ export function buildAuthOptions(input: AuthOptionsInput) {
     ...(input.secondaryStorage
       ? { secondaryStorage: input.secondaryStorage }
       : {}),
+    ...loggerOption(input.logger),
 
     // KV is a cache; the database is the source of truth. `findSession` reads
     // KV first and falls back to the DB, so a KV miss or cross-region lag
@@ -137,16 +184,7 @@ export function buildAuthOptions(input: AuthOptionsInput) {
 
     // Passkeys only. `emailAndPassword` already defaults to disabled; this
     // makes the router 404 the routes outright so there is nothing to probe.
-    disabledPaths: [
-      "/sign-in/email",
-      "/sign-up/email",
-      "/forget-password",
-      "/reset-password",
-      "/change-password",
-      "/change-email",
-      "/verify-email",
-      "/send-verification-email",
-    ],
+    disabledPaths: PASSWORD_PATHS,
 
     experimental: { joins: true },
 

@@ -6,6 +6,39 @@ type Probed = Pick<Services, "storage" | "db" | "kv" | "logger">;
 const CHECKS = ["storage", "db", "kv"] as const;
 
 /**
+ * A probe that never returns is worse than one that fails: the endpoint is
+ * unauthenticated, and the S3 client ships no request timeout, so a blackholed
+ * endpoint would pin a socket and a pool client per call until both ran out.
+ */
+const PROBE_TIMEOUT_MS = 2_000;
+
+/**
+ * Docker polls every 30s, so a short cache changes nothing an operator sees
+ * while turning a flood of anonymous calls into one round of backend work.
+ */
+const CACHE_MS = 5_000;
+
+/**
+ * Keyed on the services object rather than held in a bare module variable, so
+ * the cache belongs to one wiring. In production `getServices` is memoised and
+ * there is exactly one, which is the intended behaviour; a test that builds
+ * its own fakes gets its own entry instead of inheriting the previous one.
+ */
+const cache = new WeakMap<Probed, { at: number; response: () => Response }>();
+
+function withTimeout(probe: Promise<void>): Promise<void> {
+  return Promise.race([
+    probe,
+    new Promise<void>((_, reject) => {
+      setTimeout(
+        () => reject(new Error(`probe timed out after ${PROBE_TIMEOUT_MS}ms`)),
+        PROBE_TIMEOUT_MS,
+      );
+    }),
+  ]);
+}
+
+/**
  * `/healthz` is a self-hosting feature. Its only caller is the Dockerfile
  * HEALTHCHECK, which needs an unauthenticated readiness signal because a
  * container orchestrator has no other way to see that Postgres, Valkey, and the
@@ -31,11 +64,19 @@ export async function healthz(
     });
   }
 
-  const { storage, db, kv, logger } = await services();
+  const probed = await services();
+  const { storage, db, kv, logger } = probed;
+
+  const now = Date.now();
+  const previous = cache.get(probed);
+  if (previous !== undefined && now - previous.at < CACHE_MS) {
+    return previous.response();
+  }
+
   const settled = await Promise.allSettled([
-    storage.probe(),
-    db.probe(),
-    kv.probe(),
+    withTimeout(storage.probe()),
+    withTimeout(db.probe()),
+    withTimeout(kv.probe()),
   ]);
 
   const checks: Record<string, string> = {};
@@ -55,8 +96,10 @@ export async function healthz(
     logger.error({ err: result?.reason, check: name }, "probe failed");
   }
 
-  return Response.json(
-    { status: ok ? "ok" : "error", checks },
-    { status: ok ? 200 : 503 },
-  );
+  const status = ok ? 200 : 503;
+  const body = { status: ok ? "ok" : "error", checks };
+  // Stored as a factory: a `Response` body can only be read once.
+  const response = () => Response.json(body, { status });
+  cache.set(probed, { at: now, response });
+  return response();
 }
