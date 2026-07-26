@@ -56,20 +56,33 @@ export function LandingPage({ path, origin }: PageProps) {
  * Signed-in only. The guard runs in the browser because the session lives
  * behind the auth client, and it is navigation rather than access control:
  * every route this page calls authorises the session server-side.
+ *
+ * A session that failed to load is not a signed-out one. Redirecting on it
+ * would throw a signed-in reader back to the landing page over a dropped
+ * request, so a failure says so and leaves them somewhere they can retry.
  */
 export function DashboardPage({ path }: PageProps) {
-  const { data: session, isPending } = useSession();
+  const { data: session, error, isPending } = useSession();
   const handle = session?.user.name ?? null;
 
   useEffect(() => {
-    if (!isPending && handle === null) window.location.assign("/");
-  }, [isPending, handle]);
+    if (!isPending && error === null && handle === null) {
+      window.location.assign("/");
+    }
+  }, [isPending, error, handle]);
 
   return (
     <SiteFrame handle={handle} path={path}>
       {handle === null ? (
         <div className="shell hero">
-          <p className="muted">Loading…</p>
+          {error === null ? (
+            <p className="muted">Loading…</p>
+          ) : (
+            <p className="error">
+              Could not load your session. Check your connection and{" "}
+              <a href="/dashboard">try again</a>.
+            </p>
+          )}
         </div>
       ) : (
         <Dashboard handle={handle} />

@@ -28,10 +28,11 @@ export function authClient(): AuthClient {
   return client;
 }
 
-interface SessionState {
-  data: { user: { name: string } } | null;
-  isPending: boolean;
-}
+/** Derived rather than restated, so it cannot drift from the pinned client. */
+type SessionState = Pick<
+  ReturnType<AuthClient["useSession"]["get"]>,
+  "data" | "error" | "isPending"
+>;
 
 /**
  * The React build of Better Auth shipped a `useSession` hook; the vanilla
@@ -45,13 +46,14 @@ interface SessionState {
 export function useSession(): SessionState {
   const [state, setState] = useState<SessionState>({
     data: null,
+    error: null,
     isPending: true,
   });
 
   useEffect(() => {
     const store = authClient().useSession;
-    setState(store.get() as SessionState);
-    return store.subscribe((next) => setState(next as SessionState));
+    setState(store.get());
+    return store.subscribe(setState);
   }, []);
 
   return state;
