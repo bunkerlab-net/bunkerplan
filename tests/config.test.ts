@@ -133,3 +133,36 @@ describe("non-string environment values", () => {
     expect(config.uploadRateMax).toBe(100);
   });
 });
+
+/**
+ * Plan ids are lowercase (src/ids.ts) so that one is also a valid DNS label,
+ * which is what keeps a later move to `{id}.{host}` a redirect rather than a
+ * re-encoding of every published URL. A configurable length with no ceiling
+ * would undo that quietly: the ids would still be lowercase and still be
+ * unmintable as hostnames.
+ */
+describe("planIdLength", () => {
+  test("accepts the longest id a DNS label can hold", () => {
+    const config = loadConfig(
+      { ...REQUIRED, PLAN_ID_LENGTH: 63 },
+      { workers: true },
+    );
+    expect(config.planIdLength).toBe(63);
+  });
+
+  test("refuses to boot on a length no hostname could carry", () => {
+    expect(() =>
+      loadConfig({ ...REQUIRED, PLAN_ID_LENGTH: 64 }, { workers: true }),
+    ).toThrow(/PLAN_ID_LENGTH must be an integer between 8 and 63/);
+  });
+
+  test("refuses to boot on a length too short to resist guessing", () => {
+    expect(() =>
+      loadConfig({ ...REQUIRED, PLAN_ID_LENGTH: 7 }, { workers: true }),
+    ).toThrow(/PLAN_ID_LENGTH must be an integer between 8 and 63/);
+  });
+
+  test("defaults to 16 when unset", () => {
+    expect(loadConfig(REQUIRED, { workers: true }).planIdLength).toBe(16);
+  });
+});

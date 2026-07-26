@@ -208,7 +208,7 @@ export function describePlanStorage(
 
       test("still accepts every id the generator can issue", async () => {
         // The refusal above is only safe because it cannot refuse a real id.
-        for (const id of ["a", "Z9", newPlanId(8), newPlanId(64)]) {
+        for (const id of ["a", "z9", newPlanId(8), newPlanId(63)]) {
           await put(id, `body-${id}`);
           expect(await text(id)).toBe(`body-${id}`);
         }

@@ -4,9 +4,9 @@ import { isPlanId, newPlanId, newUserHandle } from "../src/ids.ts";
 const SAMPLE = 500;
 
 describe("newPlanId", () => {
-  test("is alphanumeric only, never - or _", () => {
+  test("is lowercase alphanumeric only, never - or _", () => {
     for (let i = 0; i < SAMPLE; i += 1) {
-      expect(newPlanId(16)).toMatch(/^[0-9A-Za-z]{16}$/);
+      expect(newPlanId(16)).toMatch(/^[0-9a-z]{16}$/);
     }
   });
 
@@ -25,11 +25,32 @@ describe("newPlanId", () => {
 
 describe("isPlanId", () => {
   test("accepts everything newPlanId produces", () => {
-    for (const length of [8, 12, 16, 32, 64]) {
+    for (const length of [8, 12, 16, 32, 63]) {
       for (let i = 0; i < 50; i += 1) {
         expect(isPlanId(newPlanId(length))).toBe(true);
       }
     }
+  });
+
+  /**
+   * The lowercase rule is what keeps `{id}.{host}` reachable later without
+   * re-encoding: DNS labels are case-insensitive and the URL parser lowercases
+   * a host, so an uppercase id could not survive the move. Refusing it here
+   * means no id can be minted, stored, or served that would not fit.
+   */
+  test("rejects uppercase, so every id is also a valid DNS label", () => {
+    expect(isPlanId("AbCd1234")).toBe(false);
+    expect(isPlanId(newPlanId(16).toUpperCase())).toBe(false);
+  });
+
+  /**
+   * The other half of the same invariant. `MAX_PLAN_ID_LENGTH` stops a longer
+   * id being minted; this stops one being served or addressed if it arrives
+   * from anywhere else.
+   */
+  test("rejects an id longer than a DNS label holds", () => {
+    expect(isPlanId("a".repeat(63))).toBe(true);
+    expect(isPlanId("a".repeat(64))).toBe(false);
   });
 
   /**
@@ -50,7 +71,7 @@ describe("isPlanId", () => {
       "has\u0000nul",
       "dash-id",
       "under_score",
-      "a".repeat(65),
+      "a".repeat(64),
     ]) {
       expect(isPlanId(value)).toBe(false);
     }

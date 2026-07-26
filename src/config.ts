@@ -74,10 +74,19 @@ const DEFAULT_MAX_UPLOAD_BYTES = 2_097_152;
 const DEFAULT_PLAN_ID_LENGTH = 16;
 /**
  * Plan URLs are public and unlisted, so the id is the only thing keeping a
- * document from being found by guessing. Eight alphanumeric characters is
- * about 48 bits, which is the floor worth allowing.
+ * document from being found by guessing. Eight lowercase alphanumeric
+ * characters is about 41 bits, which is the floor worth allowing.
  */
 const MIN_PLAN_ID_LENGTH = 8;
+/**
+ * A plan id is a single DNS label's worth of characters, and RFC 1035 caps a
+ * label at 63. Nothing today needs that - plans are served from `/p/{id}` -
+ * but the alphabet is lowercase for the same reason (see src/ids.ts), and a
+ * ceiling is what makes the pair an enforced invariant rather than a
+ * convention: every id this app can mint fits in a hostname, so moving plans
+ * to `{id}.{host}` stays a redirect instead of a re-encoding.
+ */
+const MAX_PLAN_ID_LENGTH = 63;
 
 function str(env: Env, key: string): string | undefined {
   const raw = env[key];
@@ -111,12 +120,18 @@ function int(
   fallback: number,
   min: number,
   problems: string[],
+  max?: number,
 ): number {
   const raw = str(env, key);
   if (raw === undefined) return fallback;
   const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < min) {
-    problems.push(`${key} must be an integer >= ${min}, got "${raw}"`);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < min ||
+    (max !== undefined && parsed > max)
+  ) {
+    const range = max === undefined ? `>= ${min}` : `between ${min} and ${max}`;
+    problems.push(`${key} must be an integer ${range}, got "${raw}"`);
     return fallback;
   }
   return parsed;
@@ -295,6 +310,7 @@ function parseLimits(env: Env, problems: string[]): Limits {
       DEFAULT_PLAN_ID_LENGTH,
       MIN_PLAN_ID_LENGTH,
       problems,
+      MAX_PLAN_ID_LENGTH,
     ),
     maxPlansPerUser: int(env, "MAX_PLANS_PER_USER", 250, 1, problems),
     uploadRateMax: int(env, "UPLOAD_RATE_MAX", 30, 1, problems),

@@ -66,7 +66,7 @@ describe("applySecurityHeaders - plan responses", () => {
   test.each([200, 304])(
     "pins the plan policy onto a %i that omits it",
     (status) => {
-      const response = harden("https://plan.example/p/AbCd1234", { status });
+      const response = harden("https://plan.example/p/abcd1234", { status });
       expect(get(response, "content-security-policy")).toBe(PLAN_CSP);
     },
   );
@@ -74,7 +74,7 @@ describe("applySecurityHeaders - plan responses", () => {
   test.each([200, 304])(
     "overrides a wrong policy a %i already carries",
     (status) => {
-      const response = harden("https://plan.example/p/AbCd1234", {
+      const response = harden("https://plan.example/p/abcd1234", {
         status,
         headers: { "content-security-policy": "default-src *" },
       });
@@ -84,7 +84,7 @@ describe("applySecurityHeaders - plan responses", () => {
 
   test("the pinned policy sandboxes and blocks fetching", () => {
     const csp = get(
-      harden("https://plan.example/p/AbCd1234", { status: 200 }),
+      harden("https://plan.example/p/abcd1234", { status: 200 }),
       "content-security-policy",
     );
     expect(csp).toContain("sandbox");
@@ -98,7 +98,7 @@ describe("applySecurityHeaders - plan responses", () => {
    * HTML and needs the app policy - sandboxing it would break hydration.
    */
   test("leaves the app 404 under the app policy", () => {
-    const response = harden("https://plan.example/p/AbCd1234", { status: 404 });
+    const response = harden("https://plan.example/p/abcd1234", { status: 404 });
     expect(get(response, "content-security-policy")).toContain(
       "frame-ancestors 'none'",
     );

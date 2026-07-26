@@ -6,8 +6,8 @@ describe("planUrl", () => {
   // documents, and every one of those copies breaks if the prefix moves. This
   // asserts the contract so a change to it has to be deliberate.
   test("puts plans under /p", () => {
-    expect(planUrl("https://plans.example.com", "aB3xQ7")).toBe(
-      "https://plans.example.com/p/aB3xQ7",
+    expect(planUrl("https://plans.example.com", "ab3xq7")).toBe(
+      "https://plans.example.com/p/ab3xq7",
     );
   });
 

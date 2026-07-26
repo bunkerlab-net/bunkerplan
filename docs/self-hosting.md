@@ -59,7 +59,7 @@ These names are the API. They are not renamed across releases.
 | `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`   |
 | `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
 | `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | clamped to a minimum of 60                                               |
-| `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; alphanumeric only, minimum 8                    |
+| `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                 |
 | `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                    |
 | `LOG_LEVEL`              | no              | `info`                        | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent` |
 | `LOG_COLOR`              | no              | `false`                       | colourises `LOG_FORMAT=plain` only                                       |
