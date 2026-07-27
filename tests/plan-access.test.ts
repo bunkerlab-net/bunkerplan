@@ -197,18 +197,25 @@ describe("resolvePlanAccess", () => {
     }
   });
 
-  test("a grantee is granted by key, and a stranger is not", async () => {
+  test("a grantee is granted by either credential, and a stranger by neither", async () => {
     const plans = fakePlans(privateRow(), [GRANTEE]);
 
-    const granted = fakeAuth({ keyUser: GRANTEE });
+    // The gate authorises the user behind a credential, not a credential
+    // type, so both routes to the same account must land the same way.
+    const byKey = fakeAuth({ keyUser: GRANTEE });
     expect(
       await resolvePlanAccess(
-        granted.auth,
+        byKey.auth,
         plans,
         CONFIG,
         get("/p/x", { "x-api-key": "k" }),
         PLAN,
       ),
+    ).toEqual({ kind: "granted", visibility: "private" });
+
+    const bySession = fakeAuth({ sessionUser: GRANTEE });
+    expect(
+      await resolvePlanAccess(bySession.auth, plans, CONFIG, get("/p/x"), PLAN),
     ).toEqual({ kind: "granted", visibility: "private" });
 
     const refused = fakeAuth({ keyUser: STRANGER });

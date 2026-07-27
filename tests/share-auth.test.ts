@@ -164,6 +164,28 @@ describe("the unlock cookie", () => {
     ).toBe(false);
   });
 
+  test("a well-formed payload signed with that same key is accepted", async () => {
+    // The positive control for the block above. `COOKIE_SECRET` is restated
+    // here rather than imported, so if the derivation in share-auth.ts ever
+    // changed, every negative case would still pass - for the wrong reason,
+    // because nothing would verify. This is what notices.
+    const signed = await serializeSigned(
+      shareCookieName(PLAN),
+      `${PLAN}:hash:${NOW + 60_000}`,
+      COOKIE_SECRET,
+    );
+
+    expect(
+      await verifyShareCookie(
+        SECRET,
+        PLAN,
+        "hash",
+        asRequestCookie(signed),
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
   test("refuses a cookie minted for another plan", async () => {
     const hash = await hashShareCode("code-one");
     const other = "zzzzzzzz99999999";

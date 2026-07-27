@@ -491,6 +491,57 @@ describe("gated sharing", () => {
     expect((await app.fetch("/api/plans")).status).toBe(401);
   });
 
+  /**
+   * A grant is displayed as `user.name` but resolved through the synthetic
+   * `@passkey.invalid` address derived from that name at registration. If a
+   * grantee could rename itself, the owner would be shown a handle whose
+   * revoke computes an address belonging to nobody - the grant would still be
+   * live and no longer removable through the API or the dashboard.
+   *
+   * Better Auth ships `/update-user`, so this is a route that has to stay
+   * switched off rather than one that was never there.
+   */
+  test("a session cannot rename its account out of a grant", async () => {
+    const owner = await app.accountWithSession();
+    const guest = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("immutable"), {
+      visibility: "private",
+    });
+    const session = { cookie: owner.cookie };
+
+    await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { ...session, "content-type": "application/json" },
+      body: JSON.stringify({ handle: guest.handle }),
+    });
+
+    const renamed = await app.fetch("/api/auth/update-user", {
+      method: "POST",
+      headers: { cookie: guest.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "sneakyrename" }),
+    });
+    expect(renamed.status).toBe(404);
+
+    // The owner still sees the handle they granted, and revoking it works.
+    const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: session,
+    });
+    expect((await jsonBody(sharing))["grants"]).toEqual([guest.handle]);
+
+    const revoked = await app.fetch(
+      `/api/plans/${created.id}/grants/${guest.handle}`,
+      { method: "DELETE", headers: session },
+    );
+    expect(revoked.status).toBe(204);
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { cookie: guest.cookie },
+        })
+      ).status,
+    ).toBe(401);
+  });
+
   test("a plan is private unless the upload asked otherwise", async () => {
     const key = await app.account();
     const created = await createPlan(key, html("secret"), {

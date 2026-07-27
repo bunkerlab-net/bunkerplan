@@ -1,8 +1,8 @@
 import type { AppAuth } from "../auth/instance.ts";
-import type { Config } from "../config.ts";
 import type { PlanRepo, PlanStorage } from "../services/types.ts";
 import { resolvePlanAccess } from "./plan-access.ts";
 import { PLAN_CSP } from "./security-headers.ts";
+import type { ShareCookieConfig } from "./share-auth.ts";
 
 /**
  * `PLAN_CSP` is the single most important control in this design and MUST NOT
@@ -32,7 +32,7 @@ export async function servePlan(
   storage: PlanStorage,
   plans: PlanRepo,
   auth: AppAuth,
-  config: Pick<Config, "secret" | "publicBaseUrl">,
+  config: ShareCookieConfig,
   request: Request,
   planId: string,
 ): Promise<Response | { gate: true; hasCode: boolean } | null> {

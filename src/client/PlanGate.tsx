@@ -1,4 +1,5 @@
 import { useState } from "hono/jsx";
+import { MAX_SHARE_CODE_LENGTH } from "../config.ts";
 import { unlockPlan } from "./api.ts";
 import { useSession } from "./auth.ts";
 import { SiteFrame } from "./Chrome.tsx";
@@ -27,19 +28,26 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const submit = async (event: Event) => {
+  const submit = (event: Event) => {
     event.preventDefault();
+    if (busy || code === "") return;
     setBusy(true);
-    try {
-      await unlockPlan(planId, code);
-      // A full reload rather than a fetch of the document: the unlock response
-      // set the cookie, so the plan is now simply a normal navigation - and it
-      // must be, because the plan renders under its own sandboxed CSP.
-      window.location.reload();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      setBusy(false);
-    }
+    // The previous attempt's message must go now, or a second try appears to
+    // have failed the moment it starts.
+    setError(null);
+    void (async () => {
+      try {
+        await unlockPlan(planId, code);
+        // A full reload rather than a fetch of the document: the unlock
+        // response set the cookie, so the plan is now simply a normal
+        // navigation - and it must be, because the plan renders under its own
+        // sandboxed CSP.
+        window.location.reload();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        setBusy(false);
+      }
+    })();
   };
 
   return (
@@ -71,7 +79,7 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
                   spellcheck={false}
                   placeholder="Share code"
                   aria-label="Share code"
-                  maxLength={64}
+                  maxLength={MAX_SHARE_CODE_LENGTH}
                   value={code}
                   disabled={busy}
                   onChange={(event: Event) => setCode(inputOf(event).value)}

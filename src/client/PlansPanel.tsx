@@ -192,7 +192,12 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
           </p>
         )}
         {code !== null && (
-          <code className="snippet">{`${plan.url}?code=${code}`}</code>
+          // Encoded even though the alphabet is base62 and needs none: the
+          // link is built here, and a future alphabet change must not silently
+          // start producing broken URLs.
+          <code className="snippet">
+            {`${plan.url}?code=${encodeURIComponent(code)}`}
+          </code>
         )}
         {code === null && state.hasShareCode && (
           <p className="muted">

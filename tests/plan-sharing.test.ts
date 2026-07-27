@@ -406,7 +406,7 @@ describe("revokePlanGrant", () => {
       plans,
       del(),
       PLAN,
-      "nobodyatall",
+      HANDLE,
     );
 
     expect(response.status).toBe(404);

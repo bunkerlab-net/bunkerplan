@@ -56,7 +56,12 @@ export function shareCookieName(planId: string): string {
   return `bkp_share_${planId}`;
 }
 
-type ShareCookieConfig = Pick<Config, "secret" | "publicBaseUrl">;
+/**
+ * What minting and verifying a share cookie needs. Exported so the read gate
+ * and the plan route thread one contract rather than three copies of the same
+ * `Pick` drifting apart.
+ */
+export type ShareCookieConfig = Pick<Config, "secret" | "publicBaseUrl">;
 
 function cookieSecret(secret: string): string {
   return `${secret}:${COOKIE_KEY_SUFFIX}`;

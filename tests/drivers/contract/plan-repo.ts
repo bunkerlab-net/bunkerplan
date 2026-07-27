@@ -523,6 +523,13 @@ export function describePlanRepo(
         expect(await plans.grantByHandle(newPlanId(16), owner, handle)).toBe(
           "no-plan",
         );
+        // Both wrong at once: the handle is checked first, so this is
+        // "no-user". Pinned because the two dialects run different SQL and a
+        // silent disagreement here would surface as a different error message
+        // depending on which database a deployment uses.
+        expect(
+          await plans.grantByHandle(newPlanId(16), stranger, uniqueHandle()),
+        ).toBe("no-user");
         expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
           "granted",
         );

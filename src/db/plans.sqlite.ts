@@ -1,7 +1,11 @@
 import { and, count, desc, eq, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { handleEmail } from "../ids.ts";
-import type { PlanInsert, PlanRepo } from "../services/types.ts";
+import type {
+  PlanInsert,
+  PlanRepo,
+  PlanVisibility,
+} from "../services/types.ts";
 import { user } from "./schema/auth.sqlite.ts";
 import { plan, planGrant } from "./schema/plan.sqlite.ts";
 import type { SqliteSchema } from "./sqlite-shared.ts";
@@ -40,7 +44,17 @@ async function updateOwned(
  */
 async function claimRow(
   db: SqliteDb,
-  row: typeof plan.$inferInsert,
+  // Spelled out rather than `typeof plan.$inferInsert`, which makes the two
+  // defaulted columns optional and would let a caller omit exactly the values
+  // this statement binds. Identical to the Postgres twin on purpose.
+  row: {
+    id: string;
+    userId: string;
+    label: string | null;
+    size: number;
+    visibility: PlanVisibility;
+    shareCodeHash: string | null;
+  },
   maxPlans: number,
 ): Promise<PlanInsert> {
   const claimed = await db.all<{ id: string }>(sql`

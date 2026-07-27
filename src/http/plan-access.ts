@@ -1,5 +1,5 @@
 import type { AppAuth } from "../auth/instance.ts";
-import { type Config, MAX_SHARE_CODE_LENGTH } from "../config.ts";
+import { MAX_SHARE_CODE_LENGTH } from "../config.ts";
 import { isPlanId } from "../ids.ts";
 import type { PlanRepo, PlanVisibility } from "../services/types.ts";
 import { readBoundedBody } from "./bounded-body.ts";
@@ -7,6 +7,7 @@ import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";
 import {
   mintShareCookie,
+  type ShareCookieConfig,
   shareCodeMatches,
   verifyShareCookie,
 } from "./share-auth.ts";
@@ -45,8 +46,6 @@ export type PlanAccess =
   | { kind: "gate"; hasCode: boolean }
   | { kind: "missing" };
 
-type ShareConfig = Pick<Config, "secret" | "publicBaseUrl">;
-
 /**
  * Decides access, stopping at the first thing that grants it.
  *
@@ -57,7 +56,7 @@ type ShareConfig = Pick<Config, "secret" | "publicBaseUrl">;
 export async function resolvePlanAccess(
   auth: AppAuth,
   plans: PlanRepo,
-  config: ShareConfig,
+  config: ShareCookieConfig,
   request: Request,
   planId: string,
 ): Promise<PlanAccess> {
@@ -130,7 +129,7 @@ export async function resolvePlanAccess(
  */
 export async function unlockPlan(
   plans: PlanRepo,
-  config: ShareConfig,
+  config: ShareCookieConfig,
   request: Request,
   planId: string,
 ): Promise<Response> {
