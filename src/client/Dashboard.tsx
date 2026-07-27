@@ -15,9 +15,8 @@ export function Dashboard({ handle }: DashboardProps) {
         <p className="lede muted">
           Uploads are private: only you can open one until you share it with a
           code, with named accounts, or with anyone holding the URL. Replacing
-          or deleting a plan reuses or retires its URL, and turning a public
-          plan private has the same lag - a cached copy of what was public can
-          survive for up to five minutes.
+          or deleting a plan reuses or retires its URL, and making a public plan
+          private takes effect straight away.
         </p>
         <p className="lede">
           You are <span className="mono">{handle}</span>. That is your handle -

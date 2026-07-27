@@ -36,8 +36,11 @@ const MAX_CODE_LENGTH = MAX_SHARE_CODE_LENGTH;
  * raising the ceiling cannot leave this refusing bodies that carry a valid
  * code. The slack covers the JSON wrapper, whitespace, and any percent
  * encoding the transport adds.
+ *
+ * Exported so the test that asserts an over-long body is refused sizes itself
+ * from the real bound rather than a number that could quietly fall under it.
  */
-const MAX_UNLOCK_BODY_BYTES = MAX_SHARE_CODE_LENGTH * 3 + 64;
+export const MAX_UNLOCK_BODY_BYTES = MAX_SHARE_CODE_LENGTH * 3 + 64;
 
 export type PlanAccess =
   | {

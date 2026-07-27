@@ -84,7 +84,7 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
   // are real state that applies again the moment this goes private, and hiding
   // them would read as having cleared them - but nothing here acts.
   const inert = state.visibility === "public";
-  const shared = { plan, guard, reload: load, inert, locked: busy || inert };
+  const shared = { plan, guard, reload: load, locked: busy || inert };
 
   return (
     <div className="sharing">
@@ -132,12 +132,15 @@ function SharingPlaceholder(props: {
   );
 }
 
-/** What both mutating blocks need to act and then refresh. */
+/**
+ * What both mutating blocks need to act and then refresh. `locked` already
+ * folds in the public-plan case, so neither block needs `inert` itself - only
+ * `VisibilityChoice`, which is the one that explains it.
+ */
 interface BlockProps {
   plan: PlanSummary;
   guard: Guard;
   reload: () => Promise<void>;
-  inert: boolean;
   locked: boolean;
 }
 
@@ -190,7 +193,7 @@ function ShareCodeBlock(
     hasShareCode: boolean;
   },
 ) {
-  const { plan, guard, reload, inert, locked } = props;
+  const { plan, guard, reload, locked } = props;
   const [code, setCode] = useState<string | null>(null);
 
   const rotate = () =>
@@ -207,7 +210,7 @@ function ShareCodeBlock(
     });
 
   return (
-    <div className={inert ? "sharing-inert" : undefined}>
+    <div>
       <h3>Share code</h3>
       <div className="row">
         <button
@@ -254,7 +257,7 @@ function ShareCodeBlock(
 }
 
 function GrantsBlock(props: BlockProps & { grants: string[] }) {
-  const { plan, guard, reload, inert, locked } = props;
+  const { plan, guard, reload, locked } = props;
   const [handle, setHandle] = useState("");
 
   const submit = (event: Event) => {
@@ -277,7 +280,7 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
     });
 
   return (
-    <div className={inert ? "sharing-inert" : undefined}>
+    <div>
       <h3>Shared with</h3>
       {props.grants.length === 0 ? (
         <p className="empty">No accounts yet.</p>
@@ -595,9 +598,10 @@ function usePlanUploads(guard: Guard, onError: (reason: string) => void) {
   return {
     submit: (files: FileList | null) => {
       const file = vetFile(files, onError);
-      // Always private. The dashboard never sends `visibility=code`: it
-      // uploads, then mints a code from the row's Share editor, which is the
-      // one place a plaintext code is ever revealed.
+      // Always private. `?visibility=code` is a real upload option on the API
+      // - it stores the plan private and mints a code in the same request -
+      // but the dashboard declines it and mints from the row's Share editor
+      // instead, so there is one place a plaintext code is ever revealed.
       if (file !== null) void guard(() => uploadPlan(file, "private"));
     },
     replace: (id: string, files: FileList | null) => {

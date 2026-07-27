@@ -29,6 +29,13 @@ export const UPLOAD_RATE_WINDOW_SEC = 60;
 /** Below `UPLOAD_RATE_MAX`, so the quota is what refuses and not the limiter. */
 export const MAX_PLANS_PER_USER = 3;
 
+/**
+ * Pinned rather than left to the default, so the test that asserts a minted
+ * code's shape is testing this number and not silently re-deriving whatever
+ * `DEFAULT_SHARE_CODE_LENGTH` happens to be.
+ */
+export const SHARE_CODE_LENGTH = 16;
+
 export const PUBLIC_BASE_URL = "http://localhost";
 
 /**
@@ -117,6 +124,7 @@ export async function startWorker(): Promise<Harness> {
           UPLOAD_RATE_MAX,
           UPLOAD_RATE_WINDOW_SEC,
           MAX_PLANS_PER_USER,
+          SHARE_CODE_LENGTH,
         },
         secrets: {
           // Not a real secret, and never used against real data: this stack is

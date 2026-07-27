@@ -19,6 +19,7 @@ import {
   inlineSchema,
   type JsonSchema,
   PlanCreated,
+  PlanHandleParam,
   PlanIdParam,
   PlanLabelQuery,
   PlanList,
@@ -169,7 +170,7 @@ const HANDLE_PATH_PARAM = {
   in: "path",
   required: true,
   description: "The granted account's handle.",
-  schema: { type: "string" },
+  schema: inlineSchema(PlanHandleParam),
 };
 
 const LOCATION_HEADER = {

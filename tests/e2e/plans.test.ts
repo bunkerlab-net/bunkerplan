@@ -10,6 +10,7 @@ import {
   html,
   MAX_PLANS_PER_USER,
   PUBLIC_BASE_URL,
+  SHARE_CODE_LENGTH,
   startWorker,
   UPLOAD_RATE_MAX,
   upload,
@@ -514,11 +515,12 @@ describe("gated sharing", () => {
     });
     const session = { cookie: owner.cookie };
 
-    await app.fetch(`/api/plans/${created.id}/grants`, {
+    const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { ...session, "content-type": "application/json" },
       body: JSON.stringify({ handle: guest.handle }),
     });
+    expect(granted.status).toBe(204);
 
     const renamed = await app.fetch("/api/auth/update-user", {
       method: "POST",
@@ -633,7 +635,9 @@ describe("gated sharing", () => {
       visibility: "code",
     });
 
-    expect(created.code).toMatch(/^[0-9A-Za-z]{16}$/);
+    expect(created.code).toMatch(
+      new RegExp(`^[0-9A-Za-z]{${SHARE_CODE_LENGTH}}$`),
+    );
 
     const listed = await app.fetch("/api/plans", { headers: { cookie } });
     const body = await listed.text();

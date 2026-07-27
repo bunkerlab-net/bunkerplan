@@ -599,14 +599,6 @@ td.actions {
   min-width: 0;
 }
 
-/* A public plan is readable by anyone holding the URL, so its code and its
-   grants gate nothing. They stay visible - both are real state that applies
-   again the moment it goes private - but they read as inactive. Opacity, the
-   same signal `button:disabled` already uses; no new colour. */
-.sharing-inert {
-  opacity: 0.55;
-}
-
 /* A group label inside the panel. Smaller than `.card-title` on purpose: the
    panel already sits two levels down, and a 24px heading there would outrank
    the card it is nested in. */

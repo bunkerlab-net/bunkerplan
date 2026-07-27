@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { AppAuth } from "../src/auth/instance.ts";
 import { MAX_SHARE_CODE_LENGTH } from "../src/config.ts";
-import { resolvePlanAccess, unlockPlan } from "../src/http/plan-access.ts";
+import {
+  MAX_UNLOCK_BODY_BYTES,
+  resolvePlanAccess,
+  unlockPlan,
+} from "../src/http/plan-access.ts";
 import {
   hashShareCode,
   mintShareCookie,
@@ -494,8 +498,13 @@ describe("unlockPlan", () => {
     ["an empty code", '{"code":""}'],
     // Past MAX_UNLOCK_BODY_BYTES, so `readBoundedBody` refuses and returns
     // null. That collapses into the same 400 rather than a 413: the bound is
-    // a defence on an unauthenticated route, not a second contract.
-    ["a body too large to read", `{"code":"${"x".repeat(4096)}"}`],
+    // a defence on an unauthenticated route, not a second contract. Sized
+    // from the constant, so raising the ceiling cannot leave this body under
+    // the bound and the case quietly asserting nothing.
+    [
+      "a body too large to read",
+      `{"code":"${"x".repeat(MAX_UNLOCK_BODY_BYTES + 1)}"}`,
+    ],
   ])("%s is one 400", async (_, body) => {
     const response = await unlockPlan(
       fakePlans(await codedRow()),

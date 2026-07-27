@@ -435,3 +435,6 @@ export const ShareCodeQuery = ShareCodeValue.meta({
 
 /** The `{id}` path parameter, which is a plan id. */
 export const PlanIdParam = PlanId;
+
+/** The `{handle}` path parameter on a grant, which is an account handle. */
+export const PlanHandleParam = PlanHandle;
