@@ -73,74 +73,111 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
             this is the only thing on the page worth acting on. */}
         <section className="card card-feature">
           {hasCode && (
-            <>
-              <p className="eyebrow">Have a code?</p>
-              <form className="row" onSubmit={submit}>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  spellcheck={false}
-                  placeholder="Share code"
-                  aria-label="Share code"
-                  aria-describedby={error === null ? undefined : ERROR_ID}
-                  maxLength={MAX_SHARE_CODE_LENGTH}
-                  value={code}
-                  disabled={busy}
-                  onChange={(event: Event) => setCode(inputOf(event).value)}
-                />
-                <button
-                  type="submit"
-                  className="btn-clay"
-                  disabled={busy || code === ""}
-                >
-                  Unlock
-                </button>
-              </form>
-              {/* A wrong code is the expected outcome here, so the message has
-                  to reach a screen reader rather than only the page. */}
-              {error !== null && (
-                <p className="error" id={ERROR_ID} role="alert">
-                  {error}
-                </p>
-              )}
-            </>
+            <CodeForm
+              code={code}
+              error={error}
+              busy={busy}
+              onCode={setCode}
+              onSubmit={submit}
+            />
           )}
-
-          {handle === null ? (
-            <div style={hasCode ? { marginTop: "32px" } : undefined}>
-              <p className="eyebrow">{hasCode ? "Or sign in" : "Sign in"}</p>
-              <p>
-                If this plan was shared with your account, signing in is all it
-                takes.
-              </p>
-              <div className="row" style={{ marginTop: "16px" }}>
-                {/* Clay is the single CTA on a page. With no code box there is
-                    only one way in, so it takes the accent; with one, the code
-                    is the primary path and this steps back to a text action. */}
-                <button
-                  type="button"
-                  className={hasCode ? "btn-text" : "btn-clay"}
-                  disabled={isPending || passkey.busy}
-                  onClick={passkey.signIn}
-                >
-                  Sign in with passkey
-                </button>
-              </div>
-              {passkey.error !== null && (
-                <p className="error">{passkey.error}</p>
-              )}
-            </div>
-          ) : (
-            <div style={hasCode ? { marginTop: "32px" } : undefined}>
-              <p className="eyebrow">Signed in as {handle}</p>
-              <p>
-                This account does not have access to this plan. Ask its owner to
-                share it with <span className="mono">{handle}</span>.
-              </p>
-            </div>
-          )}
+          <AccountWay
+            handle={handle}
+            hasCode={hasCode}
+            busy={isPending || passkey.busy}
+            error={passkey.error}
+            onSignIn={passkey.signIn}
+          />
         </section>
       </div>
     </SiteFrame>
+  );
+}
+
+function CodeForm(props: {
+  code: string;
+  error: string | null;
+  busy: boolean;
+  onCode: (value: string) => void;
+  onSubmit: (event: Event) => void;
+}) {
+  return (
+    <>
+      <p className="eyebrow">Have a code?</p>
+      <form className="row" onSubmit={props.onSubmit}>
+        <input
+          type="text"
+          autoComplete="off"
+          spellcheck={false}
+          placeholder="Share code"
+          aria-label="Share code"
+          aria-describedby={props.error === null ? undefined : ERROR_ID}
+          maxLength={MAX_SHARE_CODE_LENGTH}
+          value={props.code}
+          disabled={props.busy}
+          onChange={(event: Event) => props.onCode(inputOf(event).value)}
+        />
+        <button
+          type="submit"
+          className="btn-clay"
+          disabled={props.busy || props.code === ""}
+        >
+          Unlock
+        </button>
+      </form>
+      {/* A wrong code is the expected outcome here, so the message has to
+          reach a screen reader rather than only the page. */}
+      {props.error !== null && (
+        <p className="error" id={ERROR_ID} role="alert">
+          {props.error}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The other way in: the account this plan was shared with. */
+function AccountWay(props: {
+  handle: string | null;
+  hasCode: boolean;
+  busy: boolean;
+  error: string | null;
+  onSignIn: () => void;
+}) {
+  const spacing = props.hasCode ? { marginTop: "32px" } : undefined;
+
+  if (props.handle !== null) {
+    return (
+      <div style={spacing}>
+        <p className="eyebrow">Signed in as {props.handle}</p>
+        <p>
+          This account does not have access to this plan. Ask its owner to share
+          it with <span className="mono">{props.handle}</span>.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={spacing}>
+      <p className="eyebrow">{props.hasCode ? "Or sign in" : "Sign in"}</p>
+      <p>
+        If this plan was shared with your account, signing in is all it takes.
+      </p>
+      <div className="row" style={{ marginTop: "16px" }}>
+        {/* Clay is the single CTA on a page. With no code box there is only
+            one way in, so it takes the accent; with one, the code is the
+            primary path and this steps back to a text action. */}
+        <button
+          type="button"
+          className={props.hasCode ? "btn-text" : "btn-clay"}
+          disabled={props.busy}
+          onClick={props.onSignIn}
+        >
+          Sign in with passkey
+        </button>
+      </div>
+      {props.error !== null && <p className="error">{props.error}</p>}
+    </div>
   );
 }

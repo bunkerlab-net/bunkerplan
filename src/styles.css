@@ -525,6 +525,29 @@ select {
 
 /* --- Tables ------------------------------------------------------------- */
 
+/*
+ * A table is the wrong shape below about 780px - the plans one alone wants
+ * 688px of columns - and left alone it pushes the whole page sideways rather
+ * than staying inside its card. Scrolling the table keeps the overflow local.
+ *
+ * Focusable and labelled because a scrollable region has to be reachable
+ * without a pointer.
+ */
+.table-scroll {
+  overflow-x: auto;
+  /* Load-bearing. The hidden file picker in each row is `position: absolute`,
+     and without a positioned ancestor here its containing block is outside
+     this box - so it escapes the clip and drags the page's scroll area out to
+     the table's full width, which is the whole bug this rule exists to fix. */
+  position: relative;
+}
+
+.table-scroll table {
+  /* Without this the table would shrink to the container instead of
+     scrolling, and every column would collapse into unreadable wrapping. */
+  min-width: max-content;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

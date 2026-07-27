@@ -50,13 +50,7 @@
   },
   "overrides": [
     {
-      "includes": [
-        "**/tests/**",
-        "src/client/**",
-        "packages/ui/**",
-        "apps/me/**",
-        "apps/creds/**"
-      ],
+      "includes": ["**/tests/**"],
       "linter": {
         "rules": {
           "complexity": {
