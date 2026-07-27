@@ -481,7 +481,8 @@ const DOCUMENT_PATH: PathItem = {
           etag: { schema: { type: "string" } },
           "cache-control": {
             description:
-              "`public, max-age=300, must-revalidate` for a public plan; " +
+              "`public, no-cache` for a public plan, which a cache may store " +
+              "but must revalidate on every read; " +
               "`private, no-store` for a private one, which also carries " +
               "`vary: cookie, x-api-key`.",
             schema: { type: "string" },

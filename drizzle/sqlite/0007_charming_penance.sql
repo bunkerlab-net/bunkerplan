@@ -10,4 +10,11 @@ CREATE TABLE `plan_grant` (
 CREATE INDEX `plan_grant_userId_idx` ON `plan_grant` (`user_id`);--> statement-breakpoint
 ALTER TABLE `plan` ADD `visibility` text DEFAULT 'private' NOT NULL;--> statement-breakpoint
 ALTER TABLE `plan` ADD `share_code_hash` text;--> statement-breakpoint
-UPDATE `plan` SET `visibility` = 'public';
+-- Existing plans were world-readable before this migration and stay that way.
+-- Unlike the Postgres twin this cannot be done by adding the column as
+-- 'public' and re-defaulting it, because SQLite has no ALTER COLUMN ... SET
+-- DEFAULT - so the rows are written. One statement rather than batches: the
+-- migration runs inside a single transaction, so batching would give up
+-- atomicity without shortening the lock. The WHERE is a guard, not a bound;
+-- on a fresh 0007 every row matches it.
+UPDATE `plan` SET `visibility` = 'public' WHERE `visibility` <> 'public';

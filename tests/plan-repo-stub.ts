@@ -1,0 +1,36 @@
+import type { PlanRepo } from "../src/services/types.ts";
+
+/**
+ * The sharing half of `PlanRepo`, refusing everything.
+ *
+ * Six unit suites exercise a handler that has nothing to do with sharing -
+ * delete, replace, relabel, the two race tests, and the health probe - but
+ * `PlanRepo` is one interface, so each of them still has to name all seven
+ * methods to satisfy the type. Spreading this is what keeps a new sharing
+ * method from being seven identical edits, and it keeps each fake's own body
+ * down to the methods that suite actually cares about.
+ *
+ * Every answer here is the negative one, so a handler that unexpectedly
+ * reaches into sharing gets "no such plan" rather than a convenient success
+ * that would let a test pass for the wrong reason. A suite that means to
+ * exercise one of these overrides it after the spread; the sharing suite
+ * itself does not use this at all.
+ */
+export const basePlanRepoStub = {
+  findAccess: async () => null,
+  hasGrant: async () => false,
+  setVisibility: async () => false,
+  setShareCodeHash: async () => false,
+  listGrantHandles: async () => null,
+  grantByHandle: async () => "no-plan",
+  revokeByHandle: async () => false,
+} satisfies Pick<
+  PlanRepo,
+  | "findAccess"
+  | "hasGrant"
+  | "setVisibility"
+  | "setShareCodeHash"
+  | "listGrantHandles"
+  | "grantByHandle"
+  | "revokeByHandle"
+>;

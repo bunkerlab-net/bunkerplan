@@ -282,9 +282,10 @@ which is session-only.
 Replacing draws on the same per-user upload allowance as a new upload, and is
 scoped to the caller: an id owned by another account is a `404`, and its object
 is never touched. Everything but the bytes survives - the id, the public URL,
-the label, and the creation timestamp. Plans are served with
-`Cache-Control: public, max-age=300, must-revalidate`, so a cache that already
-holds the old document can keep serving it for up to five minutes.
+the label, and the creation timestamp. A public plan is served with
+`Cache-Control: public, no-cache`, so a cache may keep a copy but has to
+revalidate it on every read; a replacement is therefore picked up at once
+rather than after a freshness window. A private plan is `private, no-store`.
 
 Uploads must be **standalone** HTML: no external scripts, stylesheets, images,
 fonts, iframes, or CSS `url()`/`@import` targets - including relative paths,

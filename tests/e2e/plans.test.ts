@@ -565,7 +565,7 @@ describe("gated sharing", () => {
     expect((await app.fetch(`/p/${bare.id}`)).status).toBe(401);
   });
 
-  test("a public plan is served to anyone, cached as before", async () => {
+  test("a public plan is served to anyone, revalidated on every read", async () => {
     const key = await app.account();
     const created = await createPlan(key, html("open"), {
       visibility: "public",
@@ -573,9 +573,7 @@ describe("gated sharing", () => {
 
     const served = await app.fetch(`/p/${created.id}`);
     expect(served.status).toBe(200);
-    expect(served.headers.get("cache-control")).toBe(
-      "public, max-age=300, must-revalidate",
-    );
+    expect(served.headers.get("cache-control")).toBe("public, no-cache");
   });
 
   test("an unusable visibility is refused before a row is written", async () => {
@@ -694,9 +692,7 @@ describe("gated sharing", () => {
 
     const served = await app.fetch(`/p/${created.id}?code=anything`);
     expect(served.status).toBe(200);
-    expect(served.headers.get("cache-control")).toBe(
-      "public, max-age=300, must-revalidate",
-    );
+    expect(served.headers.get("cache-control")).toBe("public, no-cache");
   });
 
   test("either of the owner's credentials opens the gate; a stranger's does not", async () => {

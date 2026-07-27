@@ -166,7 +166,10 @@ function registerPlanSharing(app: Hono, getServices: GetServices): void {
   });
 
   // Unauthenticated on purpose: this is how someone holding only a share code
-  // gets in. See src/http/plan-access.ts.
+  // gets in. Unthrottled on purpose too - `db.uploadRateLimits` cannot hold
+  // the bucket, because `upload_rate_limit.key` is a foreign key onto
+  // `user.id`, and keying on the plan alone would let a passer-by lock the
+  // owner's own share link out. See `unlockPlan` in src/http/plan-access.ts.
   app.post("/api/plans/:id/unlock", async (c) => {
     const { config, db } = await getServices();
     return await unlockPlan(db.plans, config, c.req.raw, c.req.param("id"));

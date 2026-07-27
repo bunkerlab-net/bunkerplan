@@ -127,10 +127,14 @@ export async function resolvePlanAccess(
 /**
  * Trades a share code for the unlock cookie.
  *
- * Unauthenticated and deliberately unlimited. A code is 16 base62 characters
- * at the floor - about 95 bits - so a rate limiter buys nothing against
- * guessing it, while an anonymous limiter keyed on the plan would hand any
- * passer-by a way to lock the owner's own share link out.
+ * Unauthenticated and deliberately unthrottled. A code is about 95 bits at the
+ * floor, so a limiter adds nothing against guessing it, and this handler is
+ * cheaper than `GET /p/{id}` - unauthenticated too, and additionally reading
+ * an object - so a counter here closes no gap that one leaves open. Neither
+ * existing counter could hold the bucket anyway: `upload_rate_limit.key` is a
+ * foreign key onto `user.id`, and that cascade is the only thing pruning the
+ * table. Keyed on the plan alone a limiter is itself the attack, letting a
+ * passer-by lock the owner's share link out.
  */
 export async function unlockPlan(
   plans: PlanRepo,

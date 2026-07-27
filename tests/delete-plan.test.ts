@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { pino } from "pino";
 import { deletePlan } from "../src/http/delete-plan.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 const OWNER = "user-a";
 const OTHER = "user-b";
@@ -51,13 +52,7 @@ function fakes(
       deleted.order.push("row");
       return true;
     },
-    findAccess: async () => null,
-    hasGrant: async () => false,
-    setVisibility: async () => false,
-    setShareCodeHash: async () => false,
-    listGrantHandles: async () => null,
-    grantByHandle: async () => "no-plan",
-    revokeByHandle: async () => false,
+    ...basePlanRepoStub,
   };
 
   return { storage, plans, deleted } satisfies Fakes;

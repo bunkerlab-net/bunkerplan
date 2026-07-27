@@ -5,6 +5,7 @@ import {
 } from "../src/http/plan-label.ts";
 import { relabelPlan } from "../src/http/relabel-plan.ts";
 import type { PlanRepo } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 const OWNER = "user-a";
 const OTHER = "user-b";
@@ -25,13 +26,7 @@ function fakes() {
     },
     resize: async () => false,
     deleteOwned: async () => false,
-    findAccess: async () => null,
-    hasGrant: async () => false,
-    setVisibility: async () => false,
-    setShareCodeHash: async () => false,
-    listGrantHandles: async () => null,
-    grantByHandle: async () => "no-plan",
-    revokeByHandle: async () => false,
+    ...basePlanRepoStub,
   };
 
   return { plans, stored };

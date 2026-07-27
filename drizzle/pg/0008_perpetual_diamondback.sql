@@ -1,0 +1,1 @@
+ALTER TABLE "plan" ADD CONSTRAINT "plan_visibility_check" CHECK ("visibility" in ('public', 'private'));

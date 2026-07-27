@@ -3,6 +3,7 @@ import { pino } from "pino";
 import { deletePlan } from "../src/http/delete-plan.ts";
 import { replacePlan } from "../src/http/replace-plan.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 const OWNER = "user-a";
 const ID = "plan-1";
@@ -71,13 +72,7 @@ function stores() {
       rows.delete(id);
       return true;
     },
-    findAccess: async () => null,
-    hasGrant: async () => false,
-    setVisibility: async () => false,
-    setShareCodeHash: async () => false,
-    listGrantHandles: async () => null,
-    grantByHandle: async () => "no-plan",
-    revokeByHandle: async () => false,
+    ...basePlanRepoStub,
   };
 
   return { objects, rows, storage, plans, hold: { entered, released } };

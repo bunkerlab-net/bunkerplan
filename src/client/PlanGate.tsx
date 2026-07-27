@@ -177,7 +177,14 @@ function AccountWay(props: {
           Sign in with passkey
         </button>
       </div>
-      {props.error !== null && <p className="error">{props.error}</p>}
+      {/* Announced, like the code error above: a sign-in failure here is the
+          other expected outcome, and it is what tells a reader their account
+          was not the one granted. */}
+      {props.error !== null && (
+        <p className="error" role="alert">
+          {props.error}
+        </p>
+      )}
     </div>
   );
 }

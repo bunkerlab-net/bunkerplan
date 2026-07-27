@@ -216,11 +216,24 @@ export const PlanVisibility = component(
   }),
 );
 
-/** Handles are what a grant is addressed by; `user.name` is the handle. */
-const PlanHandle = z.string().meta({
-  description: "An account handle, as shown in the dashboard.",
-  examples: ["k7mjq2rvxn"],
-});
+/**
+ * Handles are what a grant is addressed by; `user.name` is the handle.
+ *
+ * The handler trims and refuses what is left when it is empty
+ * (`src/http/plan-sharing.ts`, `grantPlan`), so a handle must carry at least
+ * one non-whitespace character. `\S` is that rule; `minLength` is implied by
+ * it and published alongside because it is the part a reader of the document
+ * is looking for. No ceiling: handles are minted at a fixed length, but an
+ * operator who has renamed one must still be able to name it here.
+ */
+const PlanHandle = z
+  .string()
+  .min(1)
+  .regex(/\S/)
+  .meta({
+    description: "An account handle, as shown in the dashboard.",
+    examples: ["k7mjq2rvxn"],
+  });
 
 export const PlanSummary = component(
   "PlanSummary",

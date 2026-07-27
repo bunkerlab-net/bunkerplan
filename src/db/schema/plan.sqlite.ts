@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -30,7 +31,20 @@ export const plan = sqliteTable(
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
   },
-  (table) => [index("plan_userId_idx").on(table.userId)],
+  (table) => [
+    index("plan_userId_idx").on(table.userId),
+    // `$type` is a compile-time claim and the repo is not the only writer -
+    // a migration or a console session can put anything in this column, and
+    // the read gate treats every value that is not "public" as private.
+    //
+    // The column is named unqualified rather than through `table.visibility`
+    // on purpose. SQLite has no `ADD CONSTRAINT`, so drizzle rebuilds the
+    // table: it creates `__new_plan`, copies, drops `plan`, and renames. A
+    // qualified reference is emitted as `"__new_plan"."visibility"` and is
+    // re-parsed after the rename, when that table name no longer exists -
+    // "error in table plan after rename: no such column".
+    check("plan_visibility_check", sql`"visibility" in ('public', 'private')`),
+  ],
 );
 
 export const planGrant = sqliteTable(

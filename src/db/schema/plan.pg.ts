@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   pgTable,
@@ -28,7 +30,15 @@ export const plan = pgTable(
     shareCodeHash: text("share_code_hash"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [index("plan_userId_idx").on(table.userId)],
+  (table) => [
+    index("plan_userId_idx").on(table.userId),
+    // `$type` is a compile-time claim and the repo is not the only writer -
+    // a migration or a console session can put anything in this column, and
+    // the read gate treats every value that is not "public" as private.
+    // Unqualified to match the SQLite twin, where the qualified form breaks
+    // the table rebuild - see the note there.
+    check("plan_visibility_check", sql`"visibility" in ('public', 'private')`),
+  ],
 );
 
 export const planGrant = pgTable(

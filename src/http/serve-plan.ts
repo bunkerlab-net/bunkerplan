@@ -11,10 +11,15 @@ import type { ShareCookieConfig } from "./share-auth.ts";
  * cannot reach a client - see the note there.
  */
 
-// Short max-age rather than `immutable` because plans can be deleted, and
-// replaced: a cache that already has one can serve the old document until the
-// window is up. Only a public plan gets it - see below.
-const CACHE_CONTROL = "public, max-age=300, must-revalidate";
+// `no-cache` means "may be stored, but revalidate before every use" - not
+// "do not cache". Every read therefore comes back through `resolvePlanAccess`
+// and the ETag below, so a plan that is deleted, replaced, or flipped to
+// private stops being served the moment it changes; a validated 304 still
+// costs the reader no body. A freshness window instead of this - the previous
+// `max-age=300` - let a shared cache keep handing out a plan for five minutes
+// after its owner made it private, which is a hole in the one control this
+// feature exists to provide. Only a public plan gets even this - see below.
+const CACHE_CONTROL = "public, no-cache";
 
 /**
  * Serves a plan the visitor is allowed to read.

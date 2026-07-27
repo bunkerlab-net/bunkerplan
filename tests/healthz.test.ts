@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { pino } from "pino";
 import { healthz } from "../src/http/healthz.ts";
 import type { Db, KvStore, PlanStorage } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /** Silent: these tests assert on responses and side effects, not on output. */
 const logger = pino({ level: "silent" });
@@ -47,13 +48,7 @@ function fakes(fails: string[] = []): Fakes {
       relabel: async () => false,
       resize: async () => false,
       deleteOwned: async () => false,
-      findAccess: async () => null,
-      hasGrant: async () => false,
-      setVisibility: async () => false,
-      setShareCodeHash: async () => false,
-      listGrantHandles: async () => null,
-      grantByHandle: async () => "no-plan",
-      revokeByHandle: async () => false,
+      ...basePlanRepoStub,
     },
     uploadRateLimits: {
       consume: async () => ({ allowed: true, retryAfter: 60 }),

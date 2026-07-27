@@ -57,6 +57,13 @@
       "when": 1785150388258,
       "tag": "0007_hard_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785174455246,
+      "tag": "0008_perpetual_diamondback",
+      "breakpoints": true
     }
   ]
 }

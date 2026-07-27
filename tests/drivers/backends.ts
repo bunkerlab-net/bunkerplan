@@ -143,6 +143,17 @@ export interface DbFixture {
   /** Inserts a passkey row; rejects when the credential id is already claimed. */
   addPasskey(userId: string, credentialId: string): Promise<void>;
   countPasskeys(userId: string): Promise<number>;
+  /**
+   * Inserts a plan row with `visibility` set to whatever is asked, bypassing
+   * `PlanRepo` and its `PlanVisibility` type. The CHECK constraint is only
+   * worth having against a writer the type does not cover, so the test needs
+   * a way to be that writer.
+   */
+  insertPlanWithVisibility(
+    id: string,
+    userId: string,
+    visibility: string,
+  ): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -368,6 +379,12 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
         db,
         sql`select count(*) as v from passkey where user_id = ${userId}`,
       ),
+    insertPlanWithVisibility: async (id, userId, visibility) => {
+      await db.run(
+        sql`insert into plan (id, user_id, size, visibility)
+            values (${id}, ${userId}, 1, ${visibility})`,
+      );
+    },
     close,
   };
 }
@@ -486,6 +503,12 @@ export async function postgresDb(): Promise<DbFixture> {
     },
     countPasskeys: (userId) =>
       count(sql`select count(*) as v from passkey where user_id = ${userId}`),
+    insertPlanWithVisibility: async (id, userId, visibility) => {
+      await db.execute(
+        sql`insert into plan (id, user_id, size, visibility)
+            values (${id}, ${userId}, 1, ${visibility})`,
+      );
+    },
     close: async () => {
       await pool.query(`drop schema if exists "${schema}" cascade`);
       await pool.end();
