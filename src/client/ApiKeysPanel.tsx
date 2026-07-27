@@ -165,10 +165,14 @@ function CreateKeyForm(props: {
       <input
         type="text"
         placeholder="Key name"
+        // A placeholder is not a name: it is gone the moment there is a value,
+        // and several screen readers never announce it at all.
+        aria-label="Key name"
         value={props.name}
         onChange={(event: Event) => props.onName(controlValue(event))}
       />
       <select
+        aria-label="How long the key lasts"
         value={props.expiryIndex}
         onChange={(event: Event) =>
           props.onExpiryIndex(Number(controlValue(event)))

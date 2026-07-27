@@ -824,7 +824,10 @@ td.actions {
 @media (max-width: 420px) {
   .nav-inner {
     flex-wrap: wrap;
-    gap: 0 12px;
+    /* The row gap is deliberately smaller than the column one: this only
+       applies once the nav has wrapped, where zero left the two lines
+       touching, and 12px reads as a gap between separate blocks. */
+    gap: 6px 12px;
     padding-top: 8px;
     padding-bottom: 8px;
   }

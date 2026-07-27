@@ -826,7 +826,7 @@ describe("gated sharing", () => {
     });
     expect(minted.status).toBe(201);
     const first = ((await minted.json()) as { code: string }).code;
-    expect(first).toMatch(/^[0-9A-Za-z]{16}$/);
+    expect(first).toMatch(new RegExp(`^[0-9A-Za-z]{${SHARE_CODE_LENGTH}}$`));
 
     const unlocked = await app.fetch(`/api/plans/${created.id}/unlock`, {
       method: "POST",

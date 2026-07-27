@@ -495,6 +495,55 @@ export function describePlanRepo(
         expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
       });
 
+      /**
+       * A grant is read access and nothing else. Every management call is
+       * owner-scoped, so a grantee has to be refused by the same clause a
+       * stranger is - otherwise being shared a plan would let you re-share
+       * it, take its code, or hand it to someone else.
+       */
+      test("a grantee may read the plan but may not manage it", async () => {
+        const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        const grantee = await fixture.seedUser(handle);
+        // A real account, so the handle lookup succeeds and the ownership
+        // clause is what refuses below. An unseeded handle would come back
+        // "no-user" and prove nothing about ownership.
+        const outsiderHandle = uniqueHandle();
+        await fixture.seedUser(outsiderHandle);
+        const created = row(owner);
+        await plans.insert(created, 10);
+        expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
+          "granted",
+        );
+
+        // The read side works: this is what the grant is for.
+        expect(await plans.hasGrant(created.id, grantee)).toBe(true);
+
+        expect(await plans.setVisibility(created.id, grantee, "public")).toBe(
+          false,
+        );
+        expect(
+          await plans.setShareCodeHash(created.id, grantee, "f".repeat(64)),
+        ).toBe(false);
+        expect(await plans.listGrantHandles(created.id, grantee)).toBeNull();
+        expect(
+          await plans.grantByHandle(created.id, grantee, outsiderHandle),
+        ).toBe("no-plan");
+        expect(await plans.revokeByHandle(created.id, grantee, handle)).toBe(
+          false,
+        );
+
+        // Nothing moved, and the grantee is still granted.
+        expect(await plans.findAccess(created.id)).toEqual({
+          ownerId: owner,
+          visibility: "private",
+          shareCodeHash: null,
+        });
+        expect(await plans.listGrantHandles(created.id, owner)).toEqual([
+          handle,
+        ]);
+      });
+
       test("neither setter invents a row for an unknown plan", async () => {
         const userId = await fixture.seedUser();
         const ghost = newPlanId(16);

@@ -47,8 +47,8 @@ export function DangerZone({ handle }: DangerZoneProps) {
       <h2 className="card-title">Delete this account</h2>
       <p>
         This removes the account itself, every plan you have uploaded, every API
-        key, and every passkey. Public URLs stop resolving, though a cached copy
-        can survive for up to five minutes. It cannot be undone.
+        key, and every passkey. Public URLs stop resolving straight away. It
+        cannot be undone.
       </p>
       <div className="row" style={{ marginTop: "24px" }}>
         <label htmlFor="confirm-handle" className="confirm-label">

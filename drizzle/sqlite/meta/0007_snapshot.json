@@ -795,7 +795,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "plan_visibility_check": {
+          "name": "plan_visibility_check",
+          "value": "\"visibility\" in ('public', 'private')"
+        }
+      }
     },
     "plan_grant": {
       "name": "plan_grant",

@@ -228,8 +228,8 @@ function replacePlanOperation(tooLarge: string): Record<string, unknown> {
     summary: "Replace a plan's document",
     description:
       "The id, the public URL, and the label all survive; only the bytes " +
-      "change. Caches hold a plan for five minutes, so a replacement can " +
-      "take that long to reach a reader who has already seen the old one.",
+      "change. A public plan is served `public, no-cache`, so a reader who " +
+      "already has the old one revalidates and picks the new bytes up at once.",
     tags: ["Plans"],
     security: WRITE_AUTH,
     requestBody: UPLOAD_BODY,
@@ -324,8 +324,8 @@ const SET_SHARING_OPERATION = {
   description:
     `${SHARING_NOTE} Giving a plan a share code is a separate request, ` +
     "because that is the one that returns a plaintext code. A plan flipped " +
-    "from public to private may still be served from a shared cache until " +
-    "the public response's five-minute freshness window runs out.",
+    "to private stops being served at once: a public plan carries " +
+    "`public, no-cache`, so every read revalidates against this API.",
   tags: ["Sharing"],
   security: SESSION_AUTH,
   requestBody: {

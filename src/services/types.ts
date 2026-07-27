@@ -58,7 +58,14 @@ export interface RateLimitRepo {
 
 export type PlanVisibility = "public" | "private";
 
-/** What the read gate needs, in one row. `shareCodeHash` never leaves the repo. */
+/**
+ * What the read gate needs, in one row.
+ *
+ * `shareCodeHash` is a digest, and it is here to be compared against a
+ * presented code - `resolvePlanAccess` and the cookie it mints are the only
+ * readers. It MUST NOT reach a response body or a log: it is the one value
+ * that would let a holder forge the unlock cookie for this plan.
+ */
 export interface PlanAccessRow {
   ownerId: string;
   visibility: PlanVisibility;

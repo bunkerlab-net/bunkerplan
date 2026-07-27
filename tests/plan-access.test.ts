@@ -313,13 +313,18 @@ describe("resolvePlanAccess", () => {
     // Bounded at the exported ceiling rather than the current setting, so
     // lowering SHARE_CODE_LENGTH cannot orphan codes already minted. Derived
     // from the constant, so raising the ceiling moves this test with it.
+    const tooLong = "a".repeat(MAX_SHARE_CODE_LENGTH + 1);
+    // The stored digest is this exact code, so a comparison that ran would
+    // succeed. Gating anyway is what shows the length is checked first -
+    // against `codedRow()`'s own code the request would be refused either
+    // way, and the test would pass without the ceiling existing at all.
     const { auth } = fakeAuth();
     expect(
       await resolvePlanAccess(
         auth,
-        fakePlans(await codedRow()),
+        fakePlans(await codedRow(tooLong)),
         CONFIG,
-        get(`/p/x?code=${"a".repeat(MAX_SHARE_CODE_LENGTH + 1)}`),
+        get(`/p/x?code=${tooLong}`),
         PLAN,
       ),
     ).toEqual({ kind: "gate", hasCode: true });

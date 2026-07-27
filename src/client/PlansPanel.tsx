@@ -151,10 +151,14 @@ function VisibilityChoice(props: {
   inert: boolean;
   onChoose: (visibility: PlanVisibility) => void;
 }) {
+  // Several editors can be open at once, so the heading id carries the plan.
+  const headingId = `visibility-heading-${props.planId}`;
   return (
     <div>
-      <h3>Who can open it</h3>
-      <div className="choices">
+      <h3 id={headingId}>Who can open it</h3>
+      {/* Without the role the radios are announced one at a time, with no
+          statement of what the choice is for. */}
+      <div className="choices" role="radiogroup" aria-labelledby={headingId}>
         {(["private", "public"] as const).map((option) => (
           <label className="choice" key={option}>
             <input
@@ -292,6 +296,9 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
               <button
                 type="button"
                 className="btn-text btn-text-clay"
+                // Every row's button reads "Remove" otherwise, so a list of
+                // them is a list of identical controls out of context.
+                aria-label={`Remove ${granted}`}
                 disabled={locked}
                 onClick={() => revoke(granted)}
               >
@@ -481,11 +488,28 @@ function RowActions({
 function useExpandedPlan(plans: PlanSummary[]) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const editorRef = useRef<HTMLElement>(null);
+  /** The Share button that opened the editor, so closing can go back to it. */
+  const openedByRef = useRef<HTMLElement | null>(null);
 
-  // The editor sits below the whole table, which can be well off-screen on a
-  // long list. Move to it, so opening one is not a change to go hunting for.
   useEffect(() => {
-    if (expanded === null) return;
+    if (expanded === null) {
+      // Closing moves focus nowhere on its own, which drops a keyboard user
+      // at the top of the document. Go back to the control they pressed - but
+      // only if it is still on the page, since deleting the row is one of the
+      // ways the editor closes.
+      const opener = openedByRef.current;
+      openedByRef.current = null;
+      if (opener?.isConnected) opener.focus();
+      return;
+    }
+
+    // Runs before focus is moved below, so this is still the Share button.
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) openedByRef.current = active;
+
+    // The editor sits below the whole table, which can be well off-screen on
+    // a long list. Move to it, so opening one is not a change to go hunting
+    // for.
     editorRef.current?.scrollIntoView({ block: "nearest" });
     editorRef.current?.focus();
   }, [expanded]);
@@ -549,9 +573,11 @@ function usePlanList() {
   /**
    * Resolves false when `work` threw, so a caller can undo its optimism.
    *
-   * Memoised because the sharing editor loads through it from an effect: an
-   * identity that changed every render would re-run that effect forever - each
-   * run flips `busy`, which rerenders, which rebuilds `guard`.
+   * Memoised for a stable prop identity: it is handed down to the table and
+   * to the sharing editor on every render. The editor no longer loads through
+   * it - reading a row is not a mutation, so it fetches directly - and
+   * nothing has it in a dependency array today, but a changing identity is
+   * the kind of thing that turns a future `useEffect` here into a loop.
    */
   const guard = useCallback(
     async (work: () => Promise<unknown>): Promise<boolean> => {
