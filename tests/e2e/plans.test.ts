@@ -576,7 +576,7 @@ describe("gated sharing", () => {
     expect(served.status).toBe(200);
     expect(await served.text()).toBe(document);
     expect(served.headers.get("cache-control")).toBe("private, no-store");
-    expect(served.headers.get("vary")).toBe("cookie");
+    expect(served.headers.get("vary")).toBe("cookie, x-api-key");
     // Still sandboxed: the gate does not loosen the policy on the way past.
     expect(served.headers.get("content-security-policy")).toBe(PLAN_CSP);
     expect(served.headers.get("set-cookie")).toContain(`Path=/p/${created.id}`);
@@ -820,7 +820,7 @@ describe("gated sharing", () => {
     expect(initial.status).toBe(200);
     expect(await jsonBody(initial)).toEqual({
       visibility: "private",
-      hasCode: false,
+      hasShareCode: false,
       grants: [],
     });
 
@@ -842,7 +842,7 @@ describe("gated sharing", () => {
     expect(flipped.status).toBe(200);
     expect(await jsonBody(flipped)).toEqual({
       visibility: "public",
-      hasCode: true,
+      hasShareCode: true,
       grants: [guest.handle],
     });
 
@@ -866,9 +866,16 @@ describe("gated sharing", () => {
     });
     const json = { "content-type": "application/json" };
 
-    // `FetchInit` is an optional parameter's type, so it admits `undefined`;
-    // every entry here supplies one.
-    const routes: { path: string; init: NonNullable<FetchInit> }[] = [
+    // Headers typed as a plain record, not `HeadersInit`: the loop below
+    // spreads them to add a cookie, and spreading a `Headers` instance would
+    // silently yield `{}` and drop the content type.
+    type Route = {
+      path: string;
+      init: Omit<NonNullable<FetchInit>, "headers"> & {
+        headers?: Record<string, string>;
+      };
+    };
+    const routes: Route[] = [
       { path: `/api/plans/${created.id}/sharing`, init: { method: "GET" } },
       {
         path: `/api/plans/${created.id}/sharing`,

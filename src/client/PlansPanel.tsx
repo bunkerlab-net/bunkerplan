@@ -57,23 +57,69 @@ interface SharingEditorProps {
  */
 function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
   const [state, setState] = useState<PlanSharing | null>(null);
+  const [failed, setFailed] = useState(false);
   const [handle, setHandle] = useState("");
   const [code, setCode] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setState(await getSharing(plan.id));
+    setFailed(false);
+    try {
+      setState(await getSharing(plan.id));
+    } catch (cause) {
+      // A flag of its own, because `guard` swallows the throw into the panel's
+      // error line - without this the editor would sit on "Loading…" for as
+      // long as the row stayed open. Rethrown so that line still fills in.
+      setFailed(true);
+      throw cause;
+    }
   }, [plan.id]);
 
   useEffect(() => {
     void guard(load);
   }, [load, guard]);
 
-  if (state === null) return <p className="muted">Loading…</p>;
+  if (state === null) {
+    return failed ? (
+      <p className="muted">
+        Could not load sharing for this plan.{" "}
+        <button
+          type="button"
+          className="btn-text"
+          disabled={busy}
+          onClick={() => void guard(load)}
+        >
+          Try again
+        </button>
+      </p>
+    ) : (
+      <p className="muted">Loading…</p>
+    );
+  }
 
   const choose = (visibility: PlanVisibility) =>
     void guard(async () => {
       setState(await setVisibility(plan.id, visibility));
     });
+
+  // A public plan is readable by anyone holding the URL, so neither a code nor
+  // a grant gates anything. Both stay on screen rather than vanishing - they
+  // are real state that applies again the moment this goes private, and
+  // hiding them would read as having cleared them - but nothing here acts.
+  const inert = state.visibility === "public";
+  const locked = busy || inert;
+
+  const submitGrant = (event: Event) => {
+    event.preventDefault();
+    // Enter submits even when the button is disabled, so every guard the
+    // button carries must be repeated here.
+    const wanted = handle.trim();
+    if (locked || wanted === "") return;
+    void guard(async () => {
+      await addGrant(plan.id, wanted);
+      setHandle("");
+      await load();
+    });
+  };
 
   return (
     <div className="sharing">
@@ -98,15 +144,21 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
             </label>
           ))}
         </div>
+        {inert && (
+          <p className="muted">
+            Anyone holding the URL can open this plan, so the code and the
+            accounts below grant nothing extra. Make it private to use them.
+          </p>
+        )}
       </div>
 
-      <div>
+      <div className={inert ? "sharing-inert" : undefined}>
         <h3>Share code</h3>
         <div className="row">
           <button
             type="button"
             className="btn-text"
-            disabled={busy}
+            disabled={locked}
             onClick={() =>
               void guard(async () => {
                 setCode(await rotateShareCode(plan.id));
@@ -114,13 +166,13 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
               })
             }
           >
-            {state.hasCode ? "Regenerate" : "Create code"}
+            {state.hasShareCode ? "Regenerate" : "Create code"}
           </button>
-          {state.hasCode && (
+          {state.hasShareCode && (
             <button
               type="button"
               className="btn-text btn-text-clay"
-              disabled={busy}
+              disabled={locked}
               onClick={() =>
                 void guard(async () => {
                   await clearShareCode(plan.id);
@@ -142,7 +194,7 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
         {code !== null && (
           <code className="snippet">{`${plan.url}?code=${code}`}</code>
         )}
-        {code === null && state.hasCode && (
+        {code === null && state.hasShareCode && (
           <p className="muted">
             A code is set. It cannot be read back - regenerate to get a new one,
             which stops the old link working immediately.
@@ -150,7 +202,7 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
         )}
       </div>
 
-      <div>
+      <div className={inert ? "sharing-inert" : undefined}>
         <h3>Shared with</h3>
         {state.grants.length === 0 ? (
           <p className="empty">No accounts yet.</p>
@@ -162,7 +214,7 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
                 <button
                   type="button"
                   className="btn-text btn-text-clay"
-                  disabled={busy}
+                  disabled={locked}
                   onClick={() =>
                     void guard(async () => {
                       await removeGrant(plan.id, granted);
@@ -181,30 +233,26 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
           <strong>Sign out</strong> on that person's own dashboard - ask them
           for it.
         </p>
-        <div className="row">
+        {/* A real form, not a button beside an input: Enter in a text field
+            submitting its form is native behaviour, and typing a handle then
+            pressing Enter is what anyone will do. */}
+        <form className="row" onSubmit={submitGrant}>
           <input
             type="text"
             placeholder="Account handle"
             aria-label={`Share plan ${plan.id} with an account`}
             value={handle}
-            disabled={busy}
+            disabled={locked}
             onChange={(event: Event) => setHandle(inputOf(event).value)}
           />
           <button
-            type="button"
+            type="submit"
             className="btn-text"
-            disabled={busy || handle.trim() === ""}
-            onClick={() =>
-              void guard(async () => {
-                await addGrant(plan.id, handle.trim());
-                setHandle("");
-                await load();
-              })
-            }
+            disabled={locked || handle.trim() === ""}
           >
             Add
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );
@@ -231,6 +279,8 @@ function PlanRow({
   const [draft, setDraft] = useState(stored);
   const [sharing, setSharing] = useState(false);
   const replaceInput = useRef<HTMLInputElement>(null);
+  // Ids are unique per plan, so this is stable across renders without a hook.
+  const sharingId = `sharing-${plan.id}`;
 
   // A refresh can bring a different label for this row - the id is the React
   // key, so the component survives and the draft has to follow.
@@ -310,6 +360,7 @@ function PlanRow({
             disabled={busy}
             onClick={() => setSharing(!sharing)}
             aria-expanded={sharing}
+            aria-controls={sharingId}
           >
             Share
           </button>
@@ -325,7 +376,7 @@ function PlanRow({
       </tr>
       {sharing && (
         <tr>
-          <td colSpan={6}>
+          <td colSpan={6} id={sharingId}>
             <SharingEditor plan={plan} busy={busy} guard={guard} />
           </td>
         </tr>

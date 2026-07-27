@@ -64,7 +64,7 @@ async function sharingState(
 
   return Response.json({
     visibility: row.visibility,
-    hasCode: row.shareCodeHash !== null,
+    hasShareCode: row.shareCodeHash !== null,
     grants,
   } satisfies PlanSharing);
 }

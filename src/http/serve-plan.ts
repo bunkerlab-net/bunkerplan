@@ -57,10 +57,13 @@ export async function servePlan(
     "referrer-policy": "no-referrer",
     etag: object.etag,
     // A private plan must never land in a shared cache, and its response
-    // varies by the credential that opened the gate.
+    // varies by every credential that can open the gate - the unlock cookie
+    // and a session both ride in `cookie`, an API client sends `x-api-key`.
+    // `?code=` needs no mention: a query string is already part of the cache
+    // key.
     ...(access.visibility === "public"
       ? { "cache-control": CACHE_CONTROL }
-      : { "cache-control": "private, no-store", vary: "cookie" }),
+      : { "cache-control": "private, no-store", vary: "cookie, x-api-key" }),
   };
 
   // On the 304 branch too: a conditional request carrying `?code=` must still

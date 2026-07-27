@@ -284,7 +284,9 @@ export const PlanSharing = component(
   z
     .object({
       visibility: PlanVisibility,
-      hasCode: z.boolean().meta({
+      // Same name as `PlanSummary.hasShareCode`: both are the JSON API
+      // reporting the same fact, and two spellings for one field is a trap.
+      hasShareCode: z.boolean().meta({
         description: "True when a share code is set.",
       }),
       grants: z.array(PlanHandle).meta({

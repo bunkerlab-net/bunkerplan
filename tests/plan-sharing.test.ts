@@ -8,7 +8,12 @@ import {
   rotateShareCode,
   setPlanSharing,
 } from "../src/http/plan-sharing.ts";
-import type { GrantOutcome, PlanRepo } from "../src/services/types.ts";
+import { hashShareCode } from "../src/http/share-auth.ts";
+import type {
+  GrantOutcome,
+  PlanRepo,
+  PlanVisibility,
+} from "../src/services/types.ts";
 
 const OWNER = "user-owner";
 const PLAN = "abcdefgh12345678";
@@ -40,13 +45,36 @@ function fakeAuth(
 interface Calls {
   granted: { planId: string; ownerId: string; handle: string }[];
   revoked: { planId: string; ownerId: string; handle: string }[];
+  /** Every value handed to `setShareCodeHash`; never a plaintext code. */
+  hashes: (string | null)[];
+  visibilities: PlanVisibility[];
 }
 
-function fakePlans(over: { outcome?: GrantOutcome; revokes?: boolean } = {}): {
+function fakePlans(
+  over: {
+    outcome?: GrantOutcome;
+    revokes?: boolean;
+    /** False models a plan that does not exist or is not the caller's. */
+    owned?: boolean;
+  } = {},
+): {
   plans: PlanRepo;
   calls: Calls;
 } {
-  const calls: Calls = { granted: [], revoked: [] };
+  const owned = over.owned ?? true;
+  const calls: Calls = {
+    granted: [],
+    revoked: [],
+    hashes: [],
+    visibilities: [],
+  };
+  // Stateful, so a handler that answers with the new state is actually
+  // checked against it rather than against a constant the fake would have
+  // returned either way.
+  const stored: { visibility: PlanVisibility; shareCodeHash: string | null } = {
+    visibility: "private",
+    shareCodeHash: null,
+  };
   const plans: PlanRepo = {
     insert: async () => "created",
     listByUser: async () => [],
@@ -54,15 +82,19 @@ function fakePlans(over: { outcome?: GrantOutcome; revokes?: boolean } = {}): {
     relabel: async () => false,
     resize: async () => false,
     deleteOwned: async () => false,
-    findAccess: async () => ({
-      ownerId: OWNER,
-      visibility: "private",
-      shareCodeHash: null,
-    }),
+    findAccess: async () => (owned ? { ownerId: OWNER, ...stored } : null),
     hasGrant: async () => false,
-    setVisibility: async () => true,
-    setShareCodeHash: async () => true,
-    listGrantHandles: async () => [],
+    setVisibility: async (_id, _userId, visibility) => {
+      calls.visibilities.push(visibility);
+      if (owned) stored.visibility = visibility;
+      return owned;
+    },
+    setShareCodeHash: async (_id, _userId, hash) => {
+      calls.hashes.push(hash);
+      if (owned) stored.shareCodeHash = hash;
+      return owned;
+    },
+    listGrantHandles: async () => (owned ? [] : null),
     grantByHandle: async (planId, ownerId, handle) => {
       calls.granted.push({ planId, ownerId, handle });
       return over.outcome ?? "granted";
@@ -86,6 +118,164 @@ function post(body: unknown): Request {
 /** `Response.json()` is untyped here; assertions need something to compare. */
 const jsonOf = async (response: Response): Promise<unknown> =>
   await response.json();
+
+const plain = (init: RequestInit = {}): Request =>
+  new Request("https://plans.example.test/x", init);
+
+describe("reading and setting the sharing state", () => {
+  test("getPlanSharing reports the row and its grants", async () => {
+    const { plans } = fakePlans();
+    const response = await getPlanSharing(
+      fakeAuth(OWNER),
+      plans,
+      plain(),
+      PLAN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({
+      visibility: "private",
+      hasShareCode: false,
+      grants: [],
+    });
+  });
+
+  test("setPlanSharing stores the value and answers the new state", async () => {
+    const { plans, calls } = fakePlans();
+    const response = await setPlanSharing(
+      fakeAuth(OWNER),
+      plans,
+      post({ visibility: "public" }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.visibilities).toEqual(["public"]);
+    // The response is the new state, not the state as it was read on the way
+    // in - the dashboard renders the row straight from this.
+    expect(await jsonOf(response)).toEqual({
+      visibility: "public",
+      hasShareCode: false,
+      grants: [],
+    });
+  });
+
+  test("setPlanSharing refuses a value the column cannot hold", async () => {
+    const { plans, calls } = fakePlans();
+    const response = await setPlanSharing(
+      fakeAuth(OWNER),
+      plans,
+      post({ visibility: "code" }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await jsonOf(response)).toEqual({
+      error: "visibility must be public or private",
+    });
+    expect(calls.visibilities).toEqual([]);
+  });
+});
+
+describe("the share code", () => {
+  test("rotateShareCode returns the plaintext and stores only a digest", async () => {
+    const { plans, calls } = fakePlans();
+    const response = await rotateShareCode(
+      fakeAuth(OWNER),
+      plans,
+      { shareCodeLength: 16 },
+      plain({ method: "POST" }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { code: string };
+    expect(body.code).toMatch(/^[0-9A-Za-z]{16}$/);
+
+    // The whole point of the column: what the caller is handed and what the
+    // repository is handed must not be the same string.
+    expect(calls.hashes).toEqual([await hashShareCode(body.code)]);
+    expect(calls.hashes[0]).not.toBe(body.code);
+  });
+
+  test("rotateShareCode honours the deployment's configured length", async () => {
+    const { plans } = fakePlans();
+    const response = await rotateShareCode(
+      fakeAuth(OWNER),
+      plans,
+      { shareCodeLength: 32 },
+      plain({ method: "POST" }),
+      PLAN,
+    );
+
+    expect(((await response.json()) as { code: string }).code).toHaveLength(32);
+  });
+
+  test("clearShareCode stores null", async () => {
+    const { plans, calls } = fakePlans();
+    const response = await clearShareCode(
+      fakeAuth(OWNER),
+      plans,
+      plain({ method: "DELETE" }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(204);
+    expect(calls.hashes).toEqual([null]);
+  });
+});
+
+/**
+ * Not 403, and not a distinct message: the plan API never confirms that
+ * someone else's id exists. Each of these is the repository reporting "no row
+ * matched your id and your ownership".
+ */
+describe("a plan the caller does not own is a 404", () => {
+  test.each([
+    [
+      "getPlanSharing",
+      (plans: PlanRepo) =>
+        getPlanSharing(fakeAuth(OWNER), plans, plain(), PLAN),
+    ],
+    [
+      "setPlanSharing",
+      (plans: PlanRepo) =>
+        setPlanSharing(
+          fakeAuth(OWNER),
+          plans,
+          post({ visibility: "public" }),
+          PLAN,
+        ),
+    ],
+    [
+      "rotateShareCode",
+      (plans: PlanRepo) =>
+        rotateShareCode(
+          fakeAuth(OWNER),
+          plans,
+          { shareCodeLength: 16 },
+          plain({ method: "POST" }),
+          PLAN,
+        ),
+    ],
+    [
+      "clearShareCode",
+      (plans: PlanRepo) =>
+        clearShareCode(
+          fakeAuth(OWNER),
+          plans,
+          plain({ method: "DELETE" }),
+          PLAN,
+        ),
+    ],
+  ])("%s", async (_, run) => {
+    const { plans } = fakePlans({ owned: false });
+    const response = await run(plans);
+
+    expect(response.status).toBe(404);
+    expect(await jsonOf(response)).toEqual({ error: "not found" });
+  });
+});
 
 describe("grantPlan", () => {
   test("passes the handle through and answers 204", async () => {
@@ -303,7 +493,14 @@ describe("every sharing handler refuses an API key", () => {
     expect(await jsonOf(response)).toEqual({
       error: "authentication required",
     });
-    expect(calls).toEqual({ granted: [], revoked: [] });
+    // Nothing reached the repository: not a grant, not a revoke, and not a
+    // write of either column.
+    expect(calls).toEqual({
+      granted: [],
+      revoked: [],
+      hashes: [],
+      visibilities: [],
+    });
   });
 
   test.each([

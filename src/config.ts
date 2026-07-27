@@ -97,8 +97,13 @@ const DEFAULT_SHARE_CODE_LENGTH = 16;
  * bits, and the floor is the default.
  */
 const MIN_SHARE_CODE_LENGTH = 16;
-/** Matches the cap on a `?code=` value the read gate will hash. */
-const MAX_SHARE_CODE_LENGTH = 64;
+/**
+ * The ceiling on a minted code, and so also the longest `?code=` the read gate
+ * will hash. Exported because those two have to be the same number: a gate
+ * bounded lower than this would silently refuse codes this deployment can
+ * mint.
+ */
+export const MAX_SHARE_CODE_LENGTH = 64;
 
 function str(env: Env, key: string): string | undefined {
   const raw = env[key];

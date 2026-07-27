@@ -478,7 +478,7 @@ const DOCUMENT_PATH: PathItem = {
             description:
               "`public, max-age=300, must-revalidate` for a public plan; " +
               "`private, no-store` for a private one, which also carries " +
-              "`vary: cookie`.",
+              "`vary: cookie, x-api-key`.",
             schema: { type: "string" },
           },
           "set-cookie": {

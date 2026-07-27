@@ -12,7 +12,7 @@ export interface PlanSummary {
 
 export interface PlanSharing {
   visibility: PlanVisibility;
-  hasCode: boolean;
+  hasShareCode: boolean;
   /** Handles of the accounts this plan is shared with. */
   grants: string[];
 }

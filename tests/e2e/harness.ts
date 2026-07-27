@@ -178,12 +178,14 @@ export async function startWorker(): Promise<Harness> {
       .run();
 
     // `${value}.${signature}` is the shape Better Auth's own cookie builder
-    // produces. Unprefixed because PUBLIC_BASE_URL is http; over https the
-    // name would be `__Secure-better-auth.session_token`.
-    const cookie = `better-auth.session_token=${token}.${await makeSignature(
-      token,
-      AUTH_SECRET,
-    )}`;
+    // produces. The prefix follows the scheme rather than being hardcoded:
+    // Better Auth names the cookie `__Secure-…` over https, so pinning the
+    // unprefixed name would make every session-only assertion here fail as an
+    // authentication error the moment PUBLIC_BASE_URL gained a `s`.
+    const name = PUBLIC_BASE_URL.startsWith("https:")
+      ? "__Secure-better-auth.session_token"
+      : "better-auth.session_token";
+    const cookie = `${name}=${token}.${await makeSignature(token, AUTH_SECRET)}`;
 
     return { key, cookie, handle };
   };

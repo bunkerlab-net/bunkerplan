@@ -565,6 +565,22 @@ td.actions {
   gap: 24px;
 }
 
+/* A grid item floors at `min-width: auto`, which is its content width. The
+   share link inside is a `white-space: pre` block that must scroll rather
+   than widen its container, and without this it pushes the whole panel - and
+   the table it sits in - past the viewport on a narrow screen. */
+.sharing > * {
+  min-width: 0;
+}
+
+/* A public plan is readable by anyone holding the URL, so its code and its
+   grants gate nothing. They stay visible - both are real state that applies
+   again the moment it goes private - but they read as inactive. Opacity, the
+   same signal `button:disabled` already uses; no new colour. */
+.sharing-inert {
+  opacity: 0.55;
+}
+
 /* A group label inside the panel. Smaller than `.card-title` on purpose: the
    panel already sits two levels down, and a 24px heading there would outrank
    the card it is nested in. */

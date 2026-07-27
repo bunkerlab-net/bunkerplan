@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AppAuth } from "../src/auth/instance.ts";
+import { MAX_SHARE_CODE_LENGTH } from "../src/config.ts";
 import { resolvePlanAccess, unlockPlan } from "../src/http/plan-access.ts";
 import {
   hashShareCode,
@@ -286,23 +287,24 @@ describe("resolvePlanAccess", () => {
     ).toEqual({ kind: "gate", hasCode: true });
   });
 
-  test("an over-long code is ignored without being hashed", async () => {
-    // Bounded at MAX_SHARE_CODE_LENGTH rather than the current setting, so
-    // lowering SHARE_CODE_LENGTH cannot orphan codes already minted.
+  test("a code past the ceiling is ignored without being hashed", async () => {
+    // Bounded at the exported ceiling rather than the current setting, so
+    // lowering SHARE_CODE_LENGTH cannot orphan codes already minted. Derived
+    // from the constant, so raising the ceiling moves this test with it.
     const { auth } = fakeAuth();
     expect(
       await resolvePlanAccess(
         auth,
         fakePlans(await codedRow()),
         CONFIG,
-        get(`/p/x?code=${"a".repeat(65)}`),
+        get(`/p/x?code=${"a".repeat(MAX_SHARE_CODE_LENGTH + 1)}`),
         PLAN,
       ),
     ).toEqual({ kind: "gate", hasCode: true });
   });
 
-  test("a code exactly at the bound is still tested", async () => {
-    const long = "b".repeat(64);
+  test("a code exactly at the ceiling is still tested", async () => {
+    const long = "b".repeat(MAX_SHARE_CODE_LENGTH);
     const { auth } = fakeAuth();
     const access = await resolvePlanAccess(
       auth,
@@ -472,6 +474,10 @@ describe("unlockPlan", () => {
     ["no code field", "{}"],
     ["a non-string code", '{"code":42}'],
     ["an empty code", '{"code":""}'],
+    // Past MAX_UNLOCK_BODY_BYTES, so `readBoundedBody` refuses and returns
+    // null. That collapses into the same 400 rather than a 413: the bound is
+    // a defence on an unauthenticated route, not a second contract.
+    ["a body too large to read", `{"code":"${"x".repeat(4096)}"}`],
   ])("%s is one 400", async (_, body) => {
     const response = await unlockPlan(
       fakePlans(await codedRow()),

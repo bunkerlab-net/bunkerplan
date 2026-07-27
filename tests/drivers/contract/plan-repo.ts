@@ -604,6 +604,29 @@ export function describePlanRepo(
         expect(await plans.listGrantHandles(newPlanId(16), owner)).toBeNull();
       });
 
+      test("listGrantHandles reports only the plan it was asked about", async () => {
+        const owner = await fixture.seedUser();
+        const [oneHandle, twoHandle] = [uniqueHandle(), uniqueHandle()];
+        await fixture.seedUser(oneHandle);
+        await fixture.seedUser(twoHandle);
+        const one = row(owner);
+        const two = row(owner);
+        await plans.insert(one, 10);
+        await plans.insert(two, 10);
+        await plans.grantByHandle(one.id, owner, oneHandle);
+        await plans.grantByHandle(two.id, owner, twoHandle);
+
+        // Both plans belong to the same owner, so only the `plan_id` filter
+        // separates them - a query that dropped it would still pass every
+        // other assertion in this block.
+        expect(await plans.listGrantHandles(one.id, owner)).toEqual([
+          oneHandle,
+        ]);
+        expect(await plans.listGrantHandles(two.id, owner)).toEqual([
+          twoHandle,
+        ]);
+      });
+
       test("deleting the plan takes its grants with it", async () => {
         const owner = await fixture.seedUser();
         const handle = uniqueHandle();

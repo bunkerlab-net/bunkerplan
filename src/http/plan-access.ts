@@ -1,5 +1,5 @@
 import type { AppAuth } from "../auth/instance.ts";
-import type { Config } from "../config.ts";
+import { type Config, MAX_SHARE_CODE_LENGTH } from "../config.ts";
 import { isPlanId } from "../ids.ts";
 import type { PlanRepo, PlanVisibility } from "../services/types.ts";
 import { readBoundedBody } from "./bounded-body.ts";
@@ -20,12 +20,15 @@ import {
  */
 
 /**
- * The longest `?code=` this will hash. Deliberately `MAX_SHARE_CODE_LENGTH`
- * rather than `config.shareCodeLength`: an operator may lower that setting,
- * and codes minted under the old one must keep working. Same looseness, for
- * the same reason, as the plan-id bound in src/ids.ts.
+ * The longest `?code=` this will hash, taken from the same constant that caps
+ * a minted one so the two cannot drift.
+ *
+ * Deliberately the ceiling rather than `config.shareCodeLength`: an operator
+ * may lower that setting, and codes minted under the old one must keep
+ * working. Same looseness, for the same reason, as the plan-id bound in
+ * src/ids.ts.
  */
-const MAX_CODE_LENGTH = 64;
+const MAX_CODE_LENGTH = MAX_SHARE_CODE_LENGTH;
 
 /** Room for `{"code":"…"}` at the longest code, and nothing more. */
 const MAX_UNLOCK_BODY_BYTES = 256;
@@ -133,8 +136,8 @@ export async function unlockPlan(
 ): Promise<Response> {
   // One 400 covers every way the body can fail, because they all mean the
   // same thing to the only caller: the gate page's fetch. The bound is not a
-  // separate contract - a code is at most 64 characters, so a body too large
-  // to read cannot have held one, and this endpoint is unauthenticated.
+  // separate contract - a code cannot exceed the ceiling above, so a body too
+  // large to read cannot have held one, and this endpoint is unauthenticated.
   const encoded = await readBoundedBody(request, MAX_UNLOCK_BODY_BYTES);
   let body: unknown;
   try {
