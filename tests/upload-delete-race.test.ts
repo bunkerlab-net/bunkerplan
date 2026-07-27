@@ -59,6 +59,7 @@ function stores(holdPut = false) {
   };
 
   const plans: PlanRepo = {
+    ...basePlanRepoStub,
     insert: async (row) => {
       if (rows.has(row.id)) return "duplicate";
       rows.set(row.id, { userId: row.userId });
@@ -83,7 +84,6 @@ function stores(holdPut = false) {
       rows.delete(id);
       return true;
     },
-    ...basePlanRepoStub,
   };
 
   const accountClosing: AccountClosingRepo = {

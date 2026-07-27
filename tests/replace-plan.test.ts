@@ -48,6 +48,7 @@ function fakes(
   };
 
   const plans: PlanRepo = {
+    ...basePlanRepoStub,
     insert: async () => "created",
     listByUser: async () => [],
     findOwner: async () => owner,
@@ -59,7 +60,6 @@ function fakes(
       return true;
     },
     deleteOwned: async () => false,
-    ...basePlanRepoStub,
   };
 
   return { storage, plans, written };

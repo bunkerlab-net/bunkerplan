@@ -25,7 +25,11 @@ export const plan = sqliteTable(
       .$type<PlanVisibility>()
       .notNull()
       .default("private"),
-    /** SHA-256 hex of the share code. Never leaves the repo layer. */
+    /**
+     * SHA-256 hex of the share code. The read gate compares against it, so it
+     * does leave the repo - but it MUST NOT reach a response body or a log:
+     * it is what would let a holder forge this plan's unlock cookie.
+     */
     shareCodeHash: text("share_code_hash"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

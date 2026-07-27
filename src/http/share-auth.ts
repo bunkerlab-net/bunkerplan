@@ -43,6 +43,11 @@ export async function hashShareCode(code: string): Promise<string> {
  * that digest is a ~95-bit preimage and useless on its own, so this is hygiene
  * rather than the load-bearing control; it is what makes the guarantee hold at
  * every length rather than only at the floor.
+ *
+ * A length guard before the call would be a step backwards. `constantTimeEqual`
+ * seeds its accumulator with `a.length ^ b.length` and runs to the longer of
+ * the two, so a stored hash of the wrong length is already `false` and never
+ * throws; returning early on the length would leak it through timing.
  */
 export async function shareCodeMatches(
   code: string,

@@ -42,13 +42,13 @@ function fakes(fails: string[] = []): Fakes {
     adapter: {},
     provider: "pg",
     plans: {
+      ...basePlanRepoStub,
       insert: async () => "created",
       listByUser: async () => [],
       findOwner: async () => null,
       relabel: async () => false,
       resize: async () => false,
       deleteOwned: async () => false,
-      ...basePlanRepoStub,
     },
     uploadRateLimits: {
       consume: async () => ({ allowed: true, retryAfter: 60 }),

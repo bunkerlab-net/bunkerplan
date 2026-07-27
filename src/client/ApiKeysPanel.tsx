@@ -50,27 +50,48 @@ function Reveal({
   );
 }
 
-/** Keys, and the three calls that change them. */
-function useApiKeys() {
+/**
+ * The list, and the call that reloads it.
+ *
+ * `refresh` never rejects. Every mutation below awaits it, and each is called
+ * as `void create(...)` from an event handler with no rejection handler - so
+ * a list call that threw would surface as an unhandled rejection and nothing
+ * on screen, rather than as the error line this panel already has.
+ */
+function useKeyList() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
-  const [plaintext, setPlaintext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const result = await authClient().apiKey.list();
-    if (result.error) {
-      setError(result.error.message ?? "could not list API keys");
-      return;
+    try {
+      const result = await authClient().apiKey.list();
+      if (result.error) {
+        setError(result.error.message ?? "could not list API keys");
+        return;
+      }
+      setError(null);
+      setKeys(result.data?.apiKeys ?? []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     }
-    setError(null);
-    setKeys(result.data?.apiKeys ?? []);
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
+  return { keys, error, setError, busy, setBusy, refresh };
+}
+
+/** Keys, and the three calls that change them. */
+function useApiKeys() {
+  const { keys, error, setError, busy, setBusy, refresh } = useKeyList();
+  const [plaintext, setPlaintext] = useState<string | null>(null);
+
+  // Both of these are called as `void create(...)` / `void revoke(...)` from
+  // an event handler, so neither may reject: the call itself can throw before
+  // it ever reaches `refresh`, and there is no handler upstream to catch it.
   const create = async (name: string, expiryIndex: number) => {
     setBusy(true);
     try {
@@ -88,6 +109,9 @@ function useApiKeys() {
       setPlaintext(result.data?.key ?? null);
       await refresh();
       return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -103,6 +127,8 @@ function useApiKeys() {
       }
       setError(null);
       await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }

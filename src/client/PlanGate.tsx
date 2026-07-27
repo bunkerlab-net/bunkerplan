@@ -1,5 +1,4 @@
 import { useState } from "hono/jsx";
-import { MAX_SHARE_CODE_LENGTH } from "../config.ts";
 import { unlockPlan } from "./api.ts";
 import { useSession } from "./auth.ts";
 import { SiteFrame } from "./Chrome.tsx";
@@ -9,6 +8,42 @@ import { usePasskeyAction } from "./passkey.ts";
 
 /** One gate per page, so a constant id is unambiguous. */
 const ERROR_ID = "share-code-error";
+
+/** The code box, and the unlock it performs. */
+function useUnlock(planId: string) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Codes get copied out of chat clients and mail, which is where a stray
+  // space either side comes from. The server compares a digest, so it cannot
+  // forgive one.
+  const trimmed = code.trim();
+
+  const submit = (event: Event) => {
+    event.preventDefault();
+    if (busy || trimmed === "") return;
+    setBusy(true);
+    // The previous attempt's message must go now, or a second try appears to
+    // have failed the moment it starts.
+    setError(null);
+    void (async () => {
+      try {
+        await unlockPlan(planId, trimmed);
+        // A full reload rather than a fetch of the document: the unlock
+        // response set the cookie, so the plan is now simply a normal
+        // navigation - and it must be, because the plan renders under its own
+        // sandboxed CSP.
+        window.location.reload();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        setBusy(false);
+      }
+    })();
+  };
+
+  return { code, setCode, submittable: trimmed !== "", error, busy, submit };
+}
 
 /**
  * What a visitor sees when a plan exists but they are not allowed it yet.
@@ -26,32 +61,7 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
   // came for.
   const passkey = usePasskeyAction(`/p/${planId}`);
   const handle = session?.user.name ?? null;
-
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = (event: Event) => {
-    event.preventDefault();
-    if (busy || code === "") return;
-    setBusy(true);
-    // The previous attempt's message must go now, or a second try appears to
-    // have failed the moment it starts.
-    setError(null);
-    void (async () => {
-      try {
-        await unlockPlan(planId, code);
-        // A full reload rather than a fetch of the document: the unlock
-        // response set the cookie, so the plan is now simply a normal
-        // navigation - and it must be, because the plan renders under its own
-        // sandboxed CSP.
-        window.location.reload();
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-        setBusy(false);
-      }
-    })();
-  };
+  const { code, setCode, submittable, error, busy, submit } = useUnlock(planId);
 
   return (
     <SiteFrame
@@ -75,6 +85,7 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
           {hasCode && (
             <CodeForm
               code={code}
+              submittable={submittable}
               error={error}
               busy={busy}
               onCode={setCode}
@@ -96,6 +107,8 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
 
 function CodeForm(props: {
   code: string;
+  /** Whether the code has anything in it once trimmed. */
+  submittable: boolean;
   error: string | null;
   busy: boolean;
   onCode: (value: string) => void;
@@ -105,6 +118,10 @@ function CodeForm(props: {
     <>
       <p className="eyebrow">Have a code?</p>
       <form className="row" onSubmit={props.onSubmit}>
+        {/* No `maxLength`: it counts the whitespace a paste brings with it, so
+            a code at the ceiling would have its tail cut off before the trim
+            could remove the spaces. The server bounds both the body and the
+            code length, which is where it has to hold anyway. */}
         <input
           type="text"
           autoComplete="off"
@@ -112,7 +129,6 @@ function CodeForm(props: {
           placeholder="Share code"
           aria-label="Share code"
           aria-describedby={props.error === null ? undefined : ERROR_ID}
-          maxLength={MAX_SHARE_CODE_LENGTH}
           value={props.code}
           disabled={props.busy}
           onChange={(event: Event) => props.onCode(inputOf(event).value)}
@@ -120,7 +136,7 @@ function CodeForm(props: {
         <button
           type="submit"
           className="btn-clay"
-          disabled={props.busy || props.code === ""}
+          disabled={props.busy || !props.submittable}
         >
           Unlock
         </button>

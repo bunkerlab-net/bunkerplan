@@ -16,6 +16,7 @@ function fakes() {
   const stored: { label: string | null } = { label: null };
 
   const plans: PlanRepo = {
+    ...basePlanRepoStub,
     insert: async () => "created",
     listByUser: async () => [],
     findOwner: async () => OWNER,
@@ -26,7 +27,6 @@ function fakes() {
     },
     resize: async () => false,
     deleteOwned: async () => false,
-    ...basePlanRepoStub,
   };
 
   return { plans, stored };

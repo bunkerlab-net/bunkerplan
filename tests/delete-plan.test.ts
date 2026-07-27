@@ -40,7 +40,11 @@ function fakes(
     probe: async () => {},
   };
 
+  // Spread first, so anything this suite defines below wins. The stub only
+  // holds sharing methods today, but a later addition that collided with a
+  // recording fake here would silently replace it.
   const plans: PlanRepo = {
+    ...basePlanRepoStub,
     insert: async () => "created",
     listByUser: async () => [],
     findOwner: async () => owner,
@@ -52,7 +56,6 @@ function fakes(
       deleted.order.push("row");
       return true;
     },
-    ...basePlanRepoStub,
   };
 
   return { storage, plans, deleted } satisfies Fakes;

@@ -57,6 +57,7 @@ function stores() {
   };
 
   const plans: PlanRepo = {
+    ...basePlanRepoStub,
     insert: async () => "created",
     listByUser: async () => [],
     findOwner: async (id) => rows.get(id)?.userId ?? null,
@@ -72,7 +73,6 @@ function stores() {
       rows.delete(id);
       return true;
     },
-    ...basePlanRepoStub,
   };
 
   return { objects, rows, storage, plans, hold: { entered, released } };
