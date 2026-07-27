@@ -526,7 +526,7 @@ describe("gated sharing", () => {
     const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { ...session, "content-type": "application/json" },
-      body: JSON.stringify({ handles: guest.handle }),
+      body: JSON.stringify({ accounts: guest.handle }),
     });
     expect(granted.status).toBe(200);
 
@@ -752,7 +752,7 @@ describe("gated sharing", () => {
     const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { cookie: owner.cookie, "content-type": "application/json" },
-      body: JSON.stringify({ handles: guest.handle }),
+      body: JSON.stringify({ accounts: guest.handle }),
     });
     expect(granted.status).toBe(200);
 
@@ -791,7 +791,7 @@ describe("gated sharing", () => {
     const unknown = await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { cookie: owner.cookie, "content-type": "application/json" },
-      body: JSON.stringify({ handles: "nobodyatall" }),
+      body: JSON.stringify({ accounts: "nobodyatall" }),
     });
     // Reported rather than fatal: naming five colleagues and mistyping one
     // must still share the plan with the four.
@@ -814,7 +814,7 @@ describe("gated sharing", () => {
       method: "POST",
       headers: { cookie: owner.cookie, "content-type": "application/json" },
       body: JSON.stringify({
-        handles: ` ${first.handle}, ${second.handle} ,nobodyatall,`,
+        accounts: ` ${first.handle}, ${second.handle} ,nobodyatall,`,
       }),
     });
     expect(granted.status).toBe(200);
@@ -837,6 +837,62 @@ describe("gated sharing", () => {
     expect((await jsonBody(sharing))["grants"]).toEqual(
       expect.arrayContaining([first.handle, second.handle]),
     );
+  });
+
+  test("a list may name accounts by id as readily as by handle", async () => {
+    // The dashboard shows a handle, but `/api/auth/get-session` hands the
+    // signed-in account its id, so a script is likelier to hold that.
+    const owner = await app.accountWithSession();
+    const byId = await app.accountWithSession();
+    const byHandle = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("mixed"), {
+      visibility: "private",
+    });
+
+    const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { cookie: owner.cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        accounts: `${byId.userId}, ${byHandle.handle}`,
+      }),
+    });
+    expect(granted.status).toBe(200);
+    // Echoed back as given, so a caller can match the answer to what it sent.
+    expect(await jsonBody(granted)).toEqual({
+      granted: [byId.userId, byHandle.handle],
+      unknown: [],
+    });
+
+    for (const account of [byId, byHandle]) {
+      const served = await app.fetch(`/p/${created.id}`, {
+        headers: { cookie: account.cookie },
+      });
+      expect(served.status).toBe(200);
+    }
+
+    // The sharing list answers in handles either way: that is the identifier
+    // a person can read off their own dashboard.
+    const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: { cookie: owner.cookie },
+    });
+    expect((await jsonBody(sharing))["grants"]).toEqual(
+      expect.arrayContaining([byId.handle, byHandle.handle]),
+    );
+  });
+
+  test("?grants= takes account ids too", async () => {
+    const owner = await app.accountWithSession();
+    const guest = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("id-at-upload"), {
+      visibility: "private",
+      grants: guest.userId,
+    });
+
+    expect(created.granted).toEqual([guest.userId]);
+    const served = await app.fetch(`/p/${created.id}`, {
+      headers: { cookie: guest.cookie },
+    });
+    expect(served.status).toBe(200);
   });
 
   test("?grants= shares the plan in the request that stores it", async () => {
@@ -1015,7 +1071,7 @@ describe("gated sharing", () => {
     await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { ...session, "content-type": "application/json" },
-      body: JSON.stringify({ handles: guest.handle }),
+      body: JSON.stringify({ accounts: guest.handle }),
     });
 
     const flipped = await app.fetch(`/api/plans/${created.id}/sharing`, {
@@ -1079,7 +1135,7 @@ describe("gated sharing", () => {
       },
       {
         path: `/api/plans/${created.id}/grants`,
-        init: { method: "POST", headers: json, body: '{"handles":"someone"}' },
+        init: { method: "POST", headers: json, body: '{"accounts":"someone"}' },
       },
       {
         path: `/api/plans/${created.id}/grants/${stranger.handle}`,

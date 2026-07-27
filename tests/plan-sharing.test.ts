@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AppAuth } from "../src/auth/instance.ts";
-import { MAX_GRANTS_PER_REQUEST } from "../src/http/handle-list.ts";
+import { MAX_GRANTS_PER_REQUEST } from "../src/http/account-list.ts";
 import {
   clearShareCode,
   getPlanSharing,
@@ -313,7 +313,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: HANDLE }),
+      post({ accounts: HANDLE }),
       PLAN,
     );
 
@@ -331,7 +331,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: `${HANDLE}, second , third` }),
+      post({ accounts: `${HANDLE}, second , third` }),
       PLAN,
     );
 
@@ -352,7 +352,7 @@ describe("grantPlan", () => {
     await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: [`${HANDLE},second`, " third "] }),
+      post({ accounts: [`${HANDLE},second`, " third "] }),
       PLAN,
     );
 
@@ -368,7 +368,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: `${HANDLE}, ${HANDLE}` }),
+      post({ accounts: `${HANDLE}, ${HANDLE}` }),
       PLAN,
     );
 
@@ -381,7 +381,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: `${HANDLE},,` }),
+      post({ accounts: `${HANDLE},,` }),
       PLAN,
     );
 
@@ -396,7 +396,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: `${HANDLE},second` }),
+      post({ accounts: `${HANDLE},second` }),
       PLAN,
     );
 
@@ -415,7 +415,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: `${HANDLE},second,third` }),
+      post({ accounts: `${HANDLE},second,third` }),
       PLAN,
     );
 
@@ -429,7 +429,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: `${HANDLE},second,third` }),
+      post({ accounts: `${HANDLE},second,third` }),
       PLAN,
     );
 
@@ -448,7 +448,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handles: many }),
+      post({ accounts: many }),
       PLAN,
     );
 
@@ -458,13 +458,13 @@ describe("grantPlan", () => {
 
   test.each([
     ["no handles field", {}],
-    ["a null list", { handles: null }],
-    ["a numeric list", { handles: 42 }],
-    ["an array holding a non-string", { handles: ["ok", 7] }],
-    ["an empty string", { handles: "" }],
-    ["a whitespace-only string", { handles: "   " }],
-    ["only commas", { handles: ",,," }],
-    ["an empty array", { handles: [] }],
+    ["a null list", { accounts: null }],
+    ["a numeric list", { accounts: 42 }],
+    ["an array holding a non-string", { accounts: ["ok", 7] }],
+    ["an empty string", { accounts: "" }],
+    ["a whitespace-only string", { accounts: "   " }],
+    ["only commas", { accounts: ",,," }],
+    ["an empty array", { accounts: [] }],
     ["a JSON array body", []],
   ])("refuses %s without touching the repository", async (_, body) => {
     const { plans, calls } = fakePlans();

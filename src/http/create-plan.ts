@@ -13,8 +13,8 @@ import type {
 import {
   applyGrants,
   type GrantOutcomes,
-  parseHandleList,
-} from "./handle-list.ts";
+  parseAccountList,
+} from "./account-list.ts";
 import { parsePlanLabel } from "./plan-label.ts";
 import { planUrl } from "./plan-url.ts";
 import {
@@ -47,7 +47,7 @@ interface Admitted {
   label: string | null;
   requested: UploadVisibility;
   /** Accounts named by `?grants=`; empty when the parameter was absent. */
-  handles: string[];
+  accounts: string[];
 }
 
 /**
@@ -111,18 +111,18 @@ async function admit(
   // Absent means "share with nobody", which is not the same as present and
   // empty - `?grants=` with nothing after it is a mistake worth reporting.
   const raw = query.get("grants");
-  let handles: string[] = [];
+  let accounts: string[] = [];
   if (raw !== null) {
-    const list = parseHandleList(raw);
+    const list = parseAccountList(raw);
     if ("error" in list) return problem(400, list.error);
-    handles = list.handles;
+    accounts = list.accounts;
   }
 
   return {
     userId,
     label: parsed.label,
     requested: wanted.requested,
-    handles,
+    accounts,
   };
 }
 
@@ -154,7 +154,7 @@ function created(
       headers: {
         location: url,
         // `?visibility=code` puts that code in this body, the same secret the
-        // rotate route protects, and `?grants=` puts account handles in it.
+        // rotate route protects, and `?grants=` puts account accounts in it.
         // Unconditional rather than only on those branches, so the upload
         // paths cannot answer differently.
         "cache-control": "no-store",
@@ -171,7 +171,7 @@ export async function createPlan(
 
   const admitted = await admit(deps, request);
   if (admitted instanceof Response) return admitted;
-  const { userId, label, requested, handles } = admitted;
+  const { userId, label, requested, accounts } = admitted;
 
   const body = await readUploadBody(request, config.maxUploadBytes);
   if (body instanceof Response) return body;
@@ -214,7 +214,9 @@ export async function createPlan(
   // name accounts on something that 404s. The owner always owns the plan they
   // just made, so `applyGrants` cannot report "no such plan" here.
   const grants =
-    handles.length === 0 ? null : await applyGrants(plans, id, userId, handles);
+    accounts.length === 0
+      ? null
+      : await applyGrants(plans, id, userId, accounts);
 
   return created(planUrl(config.publicBaseUrl, id), id, label, code, grants);
 }

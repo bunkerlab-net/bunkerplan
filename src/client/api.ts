@@ -140,7 +140,7 @@ export async function clearShareCode(id: string): Promise<void> {
 }
 
 /**
- * Shares a plan with everyone named. `handles` goes over as typed - the
+ * Shares a plan with everyone named. `accounts` goes over as typed - the
  * server splits on commas - so the dashboard field takes a list without the
  * client having to agree separately on how one is written.
  *
@@ -149,12 +149,12 @@ export async function clearShareCode(id: string): Promise<void> {
  */
 export async function addGrants(
   id: string,
-  handles: string,
+  accounts: string,
 ): Promise<GrantResult> {
   const response = await fetch(`/api/plans/${id}/grants`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ handles }),
+    body: JSON.stringify({ accounts }),
   });
   if (!response.ok) throw new Error(await readError(response));
   return (await response.json()) as GrantResult;

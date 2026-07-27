@@ -7,12 +7,12 @@ import type { AppAuth } from "../auth/instance.ts";
 import type { Config } from "../config.ts";
 import { newShareCode } from "../ids.ts";
 import type { PlanRepo } from "../services/types.ts";
-import { readBoundedBody } from "./bounded-body.ts";
 import {
   applyGrants,
-  MAX_HANDLE_LIST_BYTES,
-  parseHandleList,
-} from "./handle-list.ts";
+  MAX_ACCOUNT_LIST_BYTES,
+  parseAccountList,
+} from "./account-list.ts";
+import { readBoundedBody } from "./bounded-body.ts";
 import { parsePlanVisibility } from "./plan-visibility.ts";
 import { problem } from "./problem.ts";
 import { resolveSessionUserId } from "./require-user.ts";
@@ -37,7 +37,7 @@ import { hashShareCode } from "./share-auth.ts";
  */
 
 /** Sized for the handle list this accepts, so the two cannot disagree. */
-const MAX_GRANT_BODY_BYTES = MAX_HANDLE_LIST_BYTES;
+const MAX_GRANT_BODY_BYTES = MAX_ACCOUNT_LIST_BYTES;
 
 /** The same, for `{ "visibility": "private" }`. */
 const MAX_SHARING_BODY_BYTES = 256;
@@ -171,7 +171,7 @@ export async function clearShareCode(
 /**
  * Grants one or more accounts, addressed by handle.
  *
- * `handles` takes a comma-separated string or an array, so sharing with a
+ * `accounts` takes a comma-separated string or an array, so sharing with a
  * whole team is one request rather than one per person. The response names
  * what landed: an unknown handle is reported rather than fatal, because
  * refusing the whole list over one typo would make the owner work out which
@@ -194,13 +194,13 @@ export async function grantPlan(
   if (read instanceof Response) return read;
 
   const { body } = read;
-  if (typeof body !== "object" || body === null || !("handles" in body)) {
-    return problem(400, "handles is required");
+  if (typeof body !== "object" || body === null || !("accounts" in body)) {
+    return problem(400, "accounts is required");
   }
-  const parsed = parseHandleList(body.handles);
+  const parsed = parseAccountList(body.accounts);
   if ("error" in parsed) return problem(400, parsed.error);
 
-  const outcomes = await applyGrants(plans, planId, ownerId, parsed.handles);
+  const outcomes = await applyGrants(plans, planId, ownerId, parsed.accounts);
   if (outcomes === null) return problem(404, "not found");
 
   return Response.json(outcomes satisfies GrantResult, {

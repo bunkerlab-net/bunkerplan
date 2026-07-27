@@ -37,7 +37,7 @@
  */
 import * as z from "zod";
 import { MAX_SHARE_CODE_LENGTH, MIN_SHARE_CODE_LENGTH } from "../config.ts";
-import { MAX_GRANTS_PER_REQUEST } from "../http/handle-list.ts";
+import { MAX_GRANTS_PER_REQUEST } from "../http/account-list.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 
 /**
@@ -236,6 +236,25 @@ const PlanHandle = z
     examples: ["k7mjq2rvxn"],
   });
 
+/**
+ * Either identifier an account answers to.
+ *
+ * Grants are addressed by handle or by account id: the handle is what a
+ * person reads off their own dashboard and passes to a colleague, the id is
+ * what `/api/auth/get-session` returns to the signed-in account and what a
+ * script is likelier to be holding already. Same constraints as a handle,
+ * because the only rule either has to satisfy here is being non-blank.
+ */
+const PlanAccount = z
+  .string()
+  .min(1)
+  .regex(/\S/)
+  .meta({
+    description:
+      "An account handle, as shown in the dashboard, or an account id.",
+    examples: ["k7mjq2rvxn", "PTvWlDlbZeEKHbnAIlscbcyduj6ayFc2"],
+  });
+
 export const PlanSummary = component(
   "PlanSummary",
   z
@@ -290,10 +309,10 @@ export const PlanCreated = component(
       code: z.string().optional(),
       // Both present only when `?grants=` named someone, so an upload that
       // shared with nobody does not carry two empty arrays.
-      granted: z.array(PlanHandle).optional().meta({
+      granted: z.array(PlanAccount).optional().meta({
         description: "Accounts `?grants=` gave access to.",
       }),
-      unknown: z.array(PlanHandle).optional().meta({
+      unknown: z.array(PlanAccount).optional().meta({
         description: "Handles from `?grants=` that no account answers to.",
       }),
     })
@@ -353,20 +372,21 @@ export const UnlockRequest = component(
 /**
  * A comma-separated string or an array; entries in an array are split too, so
  * `"a, b"` and `["a", "b"]` are the same request. One shape rather than a
- * separate single-handle field, because a list of one is not a special case.
+ * separate single-account field, because a list of one is not a special case.
  */
 export const GrantRequest = component(
   "GrantRequest",
   z
     .looseObject({
-      handles: z.union([z.string().min(1), z.array(PlanHandle).min(1)]),
+      accounts: z.union([z.string().min(1), z.array(PlanAccount).min(1)]),
     })
     .meta({
       title: "GrantRequest",
       description:
-        "The accounts to grant, addressed by handle. Blank entries are " +
-        `skipped and duplicates collapse; at most ${MAX_GRANTS_PER_REQUEST} ` +
-        "accounts in one request.",
+        "The accounts to grant. Each entry is a handle or an account id; an " +
+        "exact id wins, and the handle is only consulted when no account " +
+        "carries that id. Blank entries are skipped and duplicates collapse; " +
+        `at most ${MAX_GRANTS_PER_REQUEST} accounts in one request.`,
     }),
 );
 
@@ -374,11 +394,12 @@ export const GrantResult = component(
   "GrantResult",
   z
     .object({
-      granted: z.array(PlanHandle).meta({
+      granted: z.array(PlanAccount).meta({
         description:
-          "Accounts that now have access, including any that already did.",
+          "Accounts that now have access, including any that already did, " +
+          "echoed back as they were given.",
       }),
-      unknown: z.array(PlanHandle).meta({
+      unknown: z.array(PlanAccount).meta({
         description:
           "Handles no account answers to. Reported rather than fatal, so one " +
           "mistyped name does not refuse the rest of the list.",

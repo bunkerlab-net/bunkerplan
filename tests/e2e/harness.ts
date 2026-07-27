@@ -72,6 +72,8 @@ export interface Harness {
     key: string;
     cookie: string;
     handle: string;
+    /** `user.id`, which grants accept in place of the handle. */
+    userId: string;
   }>;
   close(): Promise<void>;
 }
@@ -195,7 +197,7 @@ export async function startWorker(): Promise<Harness> {
       : "better-auth.session_token";
     const cookie = `${name}=${token}.${await makeSignature(token, AUTH_SECRET)}`;
 
-    return { key, cookie, handle };
+    return { key, cookie, handle, userId };
   };
 
   return {

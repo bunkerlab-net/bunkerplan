@@ -1,20 +1,26 @@
 import type { PlanRepo } from "../services/types.ts";
 
 /**
- * One or more account handles, as a caller supplies them.
+ * One or more accounts, as a caller supplies them.
+ *
+ * An account is named by its handle - the value its owner reads off their own
+ * dashboard - or by its account id, which `/api/auth/get-session` hands the
+ * signed-in account and which a script may already hold. One field takes
+ * either, because a caller should not have to say which kind it has; the
+ * repository resolves an exact id first and only then a handle.
  *
  * Shared by the two places a plan can be shared with named accounts: the
  * `?grants=` parameter on upload, where a query string is comma-separated by
- * nature, and the `handles` field of `POST /api/plans/{id}/grants`, which
- * accepts the same comma-separated string so the two read alike. A JSON caller
- * may send an array instead; entries in it are split too, so
+ * nature, and the `accounts` field of `POST /api/plans/{id}/grants`, which
+ * accepts the same comma-separated string so the two read alike. A JSON
+ * caller may send an array instead; entries in it are split too, so
  * `["a,b", "c"]` and `"a, b, c"` mean the same thing.
  */
 
 /**
  * How many accounts one request may name.
  *
- * The work is one statement per handle, so this is what stops a single
+ * The work is one statement per account, so this is what stops a single
  * authenticated request from turning into an unbounded number of them. Fifty
  * is far above what anyone shares a plan with by hand and far below anything
  * that costs the database noticeably.
@@ -22,14 +28,14 @@ import type { PlanRepo } from "../services/types.ts";
 export const MAX_GRANTS_PER_REQUEST = 50;
 
 /**
- * Room for the ceiling above at a generous handle length, plus the JSON
+ * Room for the ceiling above at a generous identifier length, plus the JSON
  * wrapper. Derived, so raising the count cannot leave the body bound refusing
  * a list this module would otherwise accept.
  */
-export const MAX_HANDLE_LIST_BYTES = MAX_GRANTS_PER_REQUEST * 66 + 64;
+export const MAX_ACCOUNT_LIST_BYTES = MAX_GRANTS_PER_REQUEST * 66 + 64;
 
-export type HandleList =
-  | { handles: string[] }
+export type AccountList =
+  | { accounts: string[] }
   /** The message to hand back with a 400. */
   | { error: string };
 
@@ -40,39 +46,39 @@ export type HandleList =
  * idempotent in the repository, but the response reports what was granted, and
  * naming an account twice should not report it twice.
  */
-export function parseHandleList(raw: unknown): HandleList {
+export function parseAccountList(raw: unknown): AccountList {
   const parts: string[] = [];
   if (typeof raw === "string") {
     parts.push(raw);
   } else if (Array.isArray(raw)) {
     for (const entry of raw) {
       if (typeof entry !== "string") {
-        return { error: "handles must be strings" };
+        return { error: "accounts must be strings" };
       }
       parts.push(entry);
     }
   } else {
-    return { error: "handles is required" };
+    return { error: "accounts is required" };
   }
 
-  const handles: string[] = [];
+  const accounts: string[] = [];
   for (const part of parts) {
     for (const candidate of part.split(",")) {
       const handle = candidate.trim();
       // A trailing comma, or `a,,b`, is a typo rather than a request to grant
       // nothing - skipping is kinder than refusing the whole list for it.
-      if (handle === "" || handles.includes(handle)) continue;
-      handles.push(handle);
-      if (handles.length > MAX_GRANTS_PER_REQUEST) {
+      if (handle === "" || accounts.includes(handle)) continue;
+      accounts.push(handle);
+      if (accounts.length > MAX_GRANTS_PER_REQUEST) {
         return {
-          error: `at most ${MAX_GRANTS_PER_REQUEST} handles per request`,
+          error: `at most ${MAX_GRANTS_PER_REQUEST} accounts per request`,
         };
       }
     }
   }
 
-  if (handles.length === 0) return { error: "handles is required" };
-  return { handles };
+  if (accounts.length === 0) return { error: "accounts is required" };
+  return { accounts };
 }
 
 /** What naming a set of accounts did. */
@@ -104,14 +110,14 @@ export async function applyGrants(
   plans: Pick<PlanRepo, "findOwner" | "grantByHandle">,
   planId: string,
   ownerId: string,
-  handles: string[],
+  accounts: string[],
 ): Promise<GrantOutcomes | null> {
   if ((await plans.findOwner(planId)) !== ownerId) return null;
 
   const granted: string[] = [];
   const unknown: string[] = [];
 
-  for (const handle of handles) {
+  for (const handle of accounts) {
     switch (await plans.grantByHandle(planId, ownerId, handle)) {
       case "granted":
         granted.push(handle);

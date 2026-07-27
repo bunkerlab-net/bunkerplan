@@ -605,6 +605,52 @@ export function describePlanRepo(
         expect(await plans.hasGrant(created.id, grantee)).toBe(true);
       });
 
+      test("an account id names the same account as its handle", async () => {
+        // The dashboard shows a handle, but `/api/auth/get-session` hands the
+        // signed-in account its id, so an API caller may hold either.
+        const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        const grantee = await fixture.seedUser(handle);
+        const created = row(owner);
+        await plans.insert(created, 10);
+
+        expect(await plans.grantByHandle(created.id, owner, grantee)).toBe(
+          "granted",
+        );
+        expect(await plans.hasGrant(created.id, grantee)).toBe(true);
+        // Listing still answers in handles: that is the identifier a person
+        // can read off their own dashboard.
+        expect(await plans.listGrantHandles(created.id, owner)).toEqual([
+          handle,
+        ]);
+
+        expect(await plans.revokeByHandle(created.id, owner, grantee)).toBe(
+          true,
+        );
+        expect(await plans.hasGrant(created.id, grantee)).toBe(false);
+      });
+
+      /**
+       * The two identifiers live in different columns, so a token could match
+       * one account by id and a different one by handle. Matching both would
+       * have granted an account the owner never named.
+       */
+      test("an id that is also someone's handle grants only the id's owner", async () => {
+        const owner = await fixture.seedUser();
+        const byId = await fixture.seedUser();
+        // A renamed account whose handle is now the other account's id.
+        const byHandle = await fixture.seedUser(byId);
+        const created = row(owner);
+        await plans.insert(created, 10);
+
+        expect(await plans.grantByHandle(created.id, owner, byId)).toBe(
+          "granted",
+        );
+        expect(await plans.hasGrant(created.id, byId)).toBe(true);
+        // The collision: this account must not have been swept up.
+        expect(await plans.hasGrant(created.id, byHandle)).toBe(false);
+      });
+
       test("a grant is scoped to its own plan and its own account", async () => {
         const owner = await fixture.seedUser();
         const handle = uniqueHandle();

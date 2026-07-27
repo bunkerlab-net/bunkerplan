@@ -1,4 +1,4 @@
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, type SQL, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { handleEmail } from "../ids.ts";
 import type {
@@ -167,6 +167,24 @@ export function createPgPlanRepo(db: PgDb): PlanRepo {
 }
 
 /**
+ * The one account a caller's token names, as a scalar subquery.
+ *
+ * A token is a handle or an account id, and the two live in different
+ * columns, so a plain `email = ... or id = ...` could match two different
+ * people at once - an operator who renamed an account to something that
+ * happens to equal another account's id would have granted both. `coalesce`
+ * of two unique-index lookups yields exactly one id or null: the id wins on
+ * an exact match, and the handle is only consulted when no account carries
+ * that id.
+ */
+function accountId(account: string, email: string): SQL {
+  return sql`coalesce(
+    (select id from ${user} where id = ${account}),
+    (select id from ${user} where email = ${email})
+  )`;
+}
+
+/**
  * The `plan_grant` half, kept apart because it is the only part of this repo
  * that joins `user` - and because the two dialect files stay legible only
  * while each function does one thing.
@@ -192,16 +210,17 @@ function grantMethods(
       return rows.map((r) => r.handle);
     },
 
-    async grantByHandle(planId, ownerId, handle) {
-      const email = handleEmail(handle);
+    async grantByHandle(planId, ownerId, account) {
+      const email = handleEmail(account);
       // One statement: the insert-select carries both the ownership check and
-      // the handle lookup, so nothing is read on the path that succeeds.
+      // the account lookup, so nothing is read on the path that succeeds.
       // `user` is a reserved word here, so it is only ever referenced through
       // the drizzle object, which quotes it.
       const granted = await db.execute<{ user_id: string }>(sql`
         insert into ${planGrant} (plan_id, user_id)
         select p.id, u.id from ${plan} p, ${user} u
-        where p.id = ${planId} and p.user_id = ${ownerId} and u.email = ${email}
+        where p.id = ${planId} and p.user_id = ${ownerId}
+          and u.id = ${accountId(account, email)}
         on conflict do nothing
         returning user_id
       `);
@@ -217,19 +236,19 @@ function grantMethods(
         select
           (select 1 from ${plan}
             where id = ${planId} and user_id = ${ownerId}) as owned,
-          (select id from ${user} where email = ${email}) as uid
+          ${accountId(account, email)} as uid
       `);
       if (!probe.rows[0]?.uid) return "no-user";
       if (!probe.rows[0].owned) return "no-plan";
       return "granted";
     },
 
-    async revokeByHandle(planId, ownerId, handle) {
-      const email = handleEmail(handle);
+    async revokeByHandle(planId, ownerId, account) {
+      const email = handleEmail(account);
       const revoked = await db.execute<{ user_id: string }>(sql`
         delete from ${planGrant}
         where plan_id = ${planId}
-          and user_id = (select id from ${user} where email = ${email})
+          and user_id = ${accountId(account, email)}
           and exists (
             select 1 from ${plan} where id = ${planId} and user_id = ${ownerId}
           )

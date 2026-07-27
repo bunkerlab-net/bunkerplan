@@ -297,7 +297,7 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
       <p className="muted">
         A handle is the value shown as <strong>Handle</strong> beside{" "}
         <strong>Sign out</strong> on that person's own dashboard - ask them for
-        it. Separate several with commas.
+        it. An account id works too. Separate several with commas.
       </p>
       {unknown.length > 0 && (
         <p className="error" role="alert">
@@ -311,7 +311,7 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
       <form className="row" onSubmit={submit}>
         <input
           type="text"
-          placeholder="Account handles, comma-separated"
+          placeholder="Handles or account ids, comma-separated"
           aria-label={`Share plan ${plan.id} with accounts`}
           value={handle}
           disabled={locked}
