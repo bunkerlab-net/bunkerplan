@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "hono/jsx";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import {
+  addGrant,
+  clearShareCode,
   deletePlan,
+  getSharing,
   listPlans,
+  type PlanSharing,
   type PlanSummary,
+  type PlanVisibility,
   relabelPlan,
+  removeGrant,
   replacePlan,
+  rotateShareCode,
+  setVisibility,
   uploadPlan,
 } from "./api.ts";
 import { inputOf } from "./dom.ts";
+
+/** What the Sharing column says at a glance. */
+function describeSharing(plan: PlanSummary): string {
+  if (plan.visibility === "public") return "Public";
+  return plan.hasShareCode ? "Private + code" : "Private";
+}
 
 function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -25,17 +39,197 @@ function isHtml(file: File): boolean {
   return file.type === "text/html" || /\.html?$/i.test(file.name);
 }
 
+/** Runs work through the panel's one busy flag and one error line. */
+type Guard = (work: () => Promise<unknown>) => Promise<boolean>;
+
+interface SharingEditorProps {
+  plan: PlanSummary;
+  busy: boolean;
+  guard: Guard;
+}
+
+/**
+ * The three ways to share one plan, opened inline under its row.
+ *
+ * A minted code is held here and nowhere else: the server returns the
+ * plaintext once and stores only a digest, so closing this editor is the last
+ * time anyone can read it.
+ */
+function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
+  const [state, setState] = useState<PlanSharing | null>(null);
+  const [handle, setHandle] = useState("");
+  const [code, setCode] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setState(await getSharing(plan.id));
+  }, [plan.id]);
+
+  useEffect(() => {
+    void guard(load);
+  }, [load, guard]);
+
+  if (state === null) return <p className="muted">Loading…</p>;
+
+  const choose = (visibility: PlanVisibility) =>
+    void guard(async () => {
+      setState(await setVisibility(plan.id, visibility));
+    });
+
+  return (
+    <div className="sharing">
+      <div>
+        <h3>Who can open it</h3>
+        <div className="choices">
+          {(["private", "public"] as const).map((option) => (
+            <label className="choice" key={option}>
+              <input
+                type="radio"
+                name={`visibility-${plan.id}`}
+                value={option}
+                checked={state.visibility === option}
+                disabled={busy}
+                onChange={() => choose(option)}
+              />
+              <span>
+                {option === "private"
+                  ? "Private - you, granted accounts, and anyone with the code"
+                  : "Public - anyone holding the URL"}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h3>Share code</h3>
+        <div className="row">
+          <button
+            type="button"
+            className="btn-text"
+            disabled={busy}
+            onClick={() =>
+              void guard(async () => {
+                setCode(await rotateShareCode(plan.id));
+                await load();
+              })
+            }
+          >
+            {state.hasCode ? "Regenerate" : "Create code"}
+          </button>
+          {state.hasCode && (
+            <button
+              type="button"
+              className="btn-text btn-text-clay"
+              disabled={busy}
+              onClick={() =>
+                void guard(async () => {
+                  await clearShareCode(plan.id);
+                  setCode(null);
+                  await load();
+                })
+              }
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        {code !== null && (
+          <p>
+            <strong>This is the only time the code is shown.</strong> Copy the
+            link:
+          </p>
+        )}
+        {code !== null && (
+          <code className="snippet">{`${plan.url}?code=${code}`}</code>
+        )}
+        {code === null && state.hasCode && (
+          <p className="muted">
+            A code is set. It cannot be read back - regenerate to get a new one,
+            which stops the old link working immediately.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <h3>Shared with</h3>
+        {state.grants.length === 0 ? (
+          <p className="empty">No accounts yet.</p>
+        ) : (
+          <ul className="tag-list">
+            {state.grants.map((granted) => (
+              <li key={granted}>
+                <span className="mono">{granted}</span>
+                <button
+                  type="button"
+                  className="btn-text btn-text-clay"
+                  disabled={busy}
+                  onClick={() =>
+                    void guard(async () => {
+                      await removeGrant(plan.id, granted);
+                      await load();
+                    })
+                  }
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="muted">
+          A handle is the value shown as <strong>Handle</strong> beside{" "}
+          <strong>Sign out</strong> on that person's own dashboard - ask them
+          for it.
+        </p>
+        <div className="row">
+          <input
+            type="text"
+            placeholder="Account handle"
+            aria-label={`Share plan ${plan.id} with an account`}
+            value={handle}
+            disabled={busy}
+            onChange={(event: Event) => setHandle(inputOf(event).value)}
+          />
+          <button
+            type="button"
+            className="btn-text"
+            disabled={busy || handle.trim() === ""}
+            onClick={() =>
+              void guard(async () => {
+                await addGrant(plan.id, handle.trim());
+                setHandle("");
+                await load();
+              })
+            }
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface RowProps {
   plan: PlanSummary;
   busy: boolean;
+  guard: Guard;
   onRelabel: (id: string, label: string | null) => Promise<boolean>;
   onReplace: (id: string, files: FileList | null) => void;
   onDelete: (id: string) => void;
 }
 
-function PlanRow({ plan, busy, onRelabel, onReplace, onDelete }: RowProps) {
+function PlanRow({
+  plan,
+  busy,
+  guard,
+  onRelabel,
+  onReplace,
+  onDelete,
+}: RowProps) {
   const stored = plan.label ?? "";
   const [draft, setDraft] = useState(stored);
+  const [sharing, setSharing] = useState(false);
   const replaceInput = useRef<HTMLInputElement>(null);
 
   // A refresh can bring a different label for this row - the id is the React
@@ -59,65 +253,84 @@ function PlanRow({ plan, busy, onRelabel, onReplace, onDelete }: RowProps) {
   };
 
   return (
-    <tr>
-      <td>
-        <input
-          className="label-input"
-          type="text"
-          placeholder="Add a label"
-          aria-label={`Label for plan ${plan.id}`}
-          maxLength={MAX_PLAN_LABEL_LENGTH}
-          value={draft}
-          disabled={busy}
-          onChange={(event: Event) => setDraft(inputOf(event).value)}
-          onBlur={commit}
-          onKeyDown={(event: KeyboardEvent) => {
-            if (event.key === "Enter") inputOf(event).blur();
-            if (event.key === "Escape") setDraft(stored);
-          }}
-        />
-      </td>
-      <td>
-        <a className="mono" href={plan.url}>
-          {plan.id}
-        </a>
-      </td>
-      <td>{formatBytes(plan.size)}</td>
-      <td>{new Date(plan.createdAt).toLocaleString()}</td>
-      <td className="actions">
-        <button
-          type="button"
-          className="btn-text"
-          disabled={busy}
-          onClick={() => replaceInput.current?.click()}
-        >
-          Replace
-        </button>
-        {/* The button above is the accessible control; this only carries the
+    <>
+      <tr>
+        <td>
+          <input
+            className="label-input"
+            type="text"
+            placeholder="Add a label"
+            aria-label={`Label for plan ${plan.id}`}
+            maxLength={MAX_PLAN_LABEL_LENGTH}
+            value={draft}
+            disabled={busy}
+            onChange={(event: Event) => setDraft(inputOf(event).value)}
+            onBlur={commit}
+            onKeyDown={(event: KeyboardEvent) => {
+              if (event.key === "Enter") inputOf(event).blur();
+              if (event.key === "Escape") setDraft(stored);
+            }}
+          />
+        </td>
+        <td>
+          <a className="mono" href={plan.url}>
+            {plan.id}
+          </a>
+        </td>
+        <td>{formatBytes(plan.size)}</td>
+        <td>{new Date(plan.createdAt).toLocaleString()}</td>
+        <td>{describeSharing(plan)}</td>
+        <td className="actions">
+          <button
+            type="button"
+            className="btn-text"
+            disabled={busy}
+            onClick={() => replaceInput.current?.click()}
+          >
+            Replace
+          </button>
+          {/* The button above is the accessible control; this only carries the
             picker, so it stays out of the tab order. */}
-        <input
-          ref={replaceInput}
-          className="file-input"
-          type="file"
-          accept=".html,.htm,text/html"
-          tabIndex={-1}
-          aria-hidden="true"
-          onChange={(event: Event) => {
-            const input = inputOf(event);
-            onReplace(plan.id, input.files);
-            input.value = "";
-          }}
-        />
-        <button
-          type="button"
-          className="btn-text btn-text-clay"
-          disabled={busy}
-          onClick={() => onDelete(plan.id)}
-        >
-          Delete
-        </button>
-      </td>
-    </tr>
+          <input
+            ref={replaceInput}
+            className="file-input"
+            type="file"
+            accept=".html,.htm,text/html"
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(event: Event) => {
+              const input = inputOf(event);
+              onReplace(plan.id, input.files);
+              input.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="btn-text"
+            disabled={busy}
+            onClick={() => setSharing(!sharing)}
+            aria-expanded={sharing}
+          >
+            Share
+          </button>
+          <button
+            type="button"
+            className="btn-text btn-text-clay"
+            disabled={busy}
+            onClick={() => onDelete(plan.id)}
+          >
+            Delete
+          </button>
+        </td>
+      </tr>
+      {sharing && (
+        <tr>
+          <td colSpan={6}>
+            <SharingEditor plan={plan} busy={busy} guard={guard} />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -161,23 +374,32 @@ export function PlansPanel() {
     };
   }, []);
 
-  /** Resolves false when `work` threw, so a caller can undo its optimism. */
-  const guard = async (work: () => Promise<unknown>): Promise<boolean> => {
-    setBusy(true);
-    try {
-      await work();
-      setError(null);
-      await refresh();
-      return true;
-    } catch (cause) {
-      // The validator's reason is rendered verbatim so a rejection is
-      // actionable rather than a bare 422.
-      setError(cause instanceof Error ? cause.message : String(cause));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
+  /**
+   * Resolves false when `work` threw, so a caller can undo its optimism.
+   *
+   * Memoised because the sharing editor loads through it from an effect: an
+   * identity that changed every render would re-run that effect forever -
+   * each run flips `busy`, which rerenders, which rebuilds `guard`.
+   */
+  const guard = useCallback(
+    async (work: () => Promise<unknown>): Promise<boolean> => {
+      setBusy(true);
+      try {
+        await work();
+        setError(null);
+        await refresh();
+        return true;
+      } catch (cause) {
+        // The validator's reason is rendered verbatim so a rejection is
+        // actionable rather than a bare 422.
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh],
+  );
 
   /** The one HTML file in `files`, or null with the reason already shown. */
   const vet = (files: FileList | null): File | null => {
@@ -196,7 +418,10 @@ export function PlansPanel() {
 
   const submit = (files: FileList | null) => {
     const file = vet(files);
-    if (file !== null) void guard(() => uploadPlan(file));
+    // Always private. The dashboard never sends `visibility=code`: it uploads,
+    // then mints a code from the row's Share editor, which is the one place a
+    // plaintext code is ever revealed.
+    if (file !== null) void guard(() => uploadPlan(file, "private"));
   };
 
   const replace = (id: string, files: FileList | null) => {
@@ -209,7 +434,8 @@ export function PlansPanel() {
       <h2 className="card-title">Plans</h2>
       <p className="muted">
         Upload a standalone HTML document. External scripts, stylesheets,
-        images, fonts, and iframes are all refused.
+        images, fonts, and iframes are all refused. A new plan is private - use{" "}
+        <strong>Share</strong> on its row to open it up.
       </p>
       <label
         className={dragging ? "dropzone is-dragging" : "dropzone"}
@@ -270,6 +496,7 @@ export function PlansPanel() {
               <th>Id</th>
               <th>Size</th>
               <th>Created</th>
+              <th>Sharing</th>
               <th />
             </tr>
           </thead>
@@ -279,6 +506,7 @@ export function PlansPanel() {
                 key={item.id}
                 plan={item}
                 busy={busy}
+                guard={guard}
                 onRelabel={(id, label) => guard(() => relabelPlan(id, label))}
                 onReplace={replace}
                 onDelete={(id) => void guard(() => deletePlan(id))}

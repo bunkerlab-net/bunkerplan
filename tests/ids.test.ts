@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { isPlanId, newPlanId, newUserHandle } from "../src/ids.ts";
+import {
+  handleEmail,
+  isPlanId,
+  newPlanId,
+  newShareCode,
+  newUserHandle,
+} from "../src/ids.ts";
 
 const SAMPLE = 500;
 
@@ -92,5 +98,46 @@ describe("newUserHandle", () => {
         /^[23456789abcdefghjkmnpqrstuvwxyz]{10}$/,
       );
     }
+  });
+});
+
+describe("newShareCode", () => {
+  test("is mixed-case alphanumeric, never - or _", () => {
+    // A code rides inside a URL that chat clients autolink: a trailing `-` is
+    // clipped and `_` vanishes under underline styling.
+    for (let i = 0; i < SAMPLE; i += 1) {
+      expect(newShareCode(16)).toMatch(/^[0-9A-Za-z]{16}$/);
+    }
+  });
+
+  test("honours the requested length", () => {
+    for (const length of [16, 24, 64]) {
+      expect(newShareCode(length)).toHaveLength(length);
+    }
+  });
+
+  test("does not repeat within a sample", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < SAMPLE; i += 1) seen.add(newShareCode(16));
+    expect(seen.size).toBe(SAMPLE);
+  });
+
+  test("uses case, which is where the extra entropy comes from", () => {
+    // Base62 carries ~5.95 bits a character against lowercase-alnum's ~5.17;
+    // a generator that had drifted to the plan alphabet would still pass the
+    // pattern test above.
+    const sample = Array.from({ length: SAMPLE }, () => newShareCode(16)).join(
+      "",
+    );
+    expect(sample).toMatch(/[A-Z]/);
+    expect(sample).toMatch(/[a-z]/);
+  });
+});
+
+describe("handleEmail", () => {
+  test("builds the reserved address a passkey signup gets", () => {
+    // `user.email` is unique while `user.name` is not, which is what makes
+    // this the lookup key a grant is addressed by.
+    expect(handleEmail("k7mjq2rvxn")).toBe("k7mjq2rvxn@passkey.invalid");
   });
 });

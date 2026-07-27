@@ -69,8 +69,54 @@ export function ref(schema: z.ZodType): { $ref: string } {
 /** A JSON Schema object, as it appears inside the OpenAPI document. */
 export type JsonSchema = Record<string, unknown>;
 
-/** Every registered component, as OpenAPI 3.1 schema objects. */
-export function componentSchemas(): Record<string, JsonSchema> {
+/**
+ * The one sentence describing a share code's shape. Only the running
+ * deployment knows the length, and `SHARE_CODE_LENGTH` is an operator
+ * setting, so this cannot be baked into the module-level schema.
+ */
+export function shareCodeFormat(length: number): string {
+  return `Mixed-case alphanumeric, ${length} characters on this deployment.`;
+}
+
+/**
+ * Writes the deployment's own code format onto the two schemas that carry a
+ * plaintext code, after generation. Throws rather than silently doing nothing
+ * if either shape is renamed - a description that quietly vanished would be
+ * indistinguishable from one that was never wanted.
+ */
+function describeShareCode(
+  schemas: Record<string, JsonSchema>,
+  id: string,
+  length: number,
+): void {
+  const properties = schemas[id]?.["properties"];
+  if (
+    typeof properties !== "object" ||
+    properties === null ||
+    !("code" in properties)
+  ) {
+    throw new Error(`${id} has no code property to describe`);
+  }
+  const code = properties.code;
+  if (typeof code !== "object" || code === null) {
+    throw new Error(`${id}.code is not a schema object`);
+  }
+  Object.assign(code, {
+    description:
+      "The plaintext share code, returned this once and never again - the " +
+      `column holds a digest. ${shareCodeFormat(length)}`,
+  });
+}
+
+/**
+ * Every registered component, as OpenAPI 3.1 schema objects.
+ *
+ * `shareCodeLength` is the deployment's `SHARE_CODE_LENGTH`, so a self-hosted
+ * instance publishes its own value rather than this repository's default.
+ */
+export function componentSchemas(
+  shareCodeLength: number,
+): Record<string, JsonSchema> {
   const { schemas } = z.toJSONSchema(components, {
     // OpenAPI 3.1's Schema Object *is* JSON Schema 2020-12.
     target: "draft-2020-12",
@@ -94,6 +140,9 @@ export function componentSchemas(): Record<string, JsonSchema> {
     delete schema.$schema;
   }
 
+  describeShareCode(schemas, "PlanCreated", shareCodeLength);
+  describeShareCode(schemas, "ShareCodeCreated", shareCodeLength);
+
   return schemas;
 }
 
@@ -116,7 +165,9 @@ const PlanId = z.string().meta({
 });
 
 const PlanUrl = z.url().meta({
-  description: "Where the document is publicly readable.",
+  description:
+    "Where the document is served. Who may read it depends on the plan's " +
+    "visibility; a private one gates this URL.",
   examples: ["https://plan.example.com/p/k3mp7q2xr9vt4nzb"],
 });
 
@@ -150,6 +201,26 @@ export const ErrorBody = component(
  */
 export type ErrorBody = z.infer<typeof ErrorBody>;
 
+/**
+ * What a plan's `visibility` column holds. `code` is an upload intent, not a
+ * stored state - see `PlanVisibilityQuery`.
+ */
+export const PlanVisibility = component(
+  "PlanVisibility",
+  z.enum(["public", "private"]).meta({
+    title: "PlanVisibility",
+    description:
+      "public: anyone holding the URL may read it. private: only the owner, " +
+      "the accounts it has been granted to, and anyone holding its share code.",
+  }),
+);
+
+/** Handles are what a grant is addressed by; `user.name` is the handle. */
+const PlanHandle = z.string().meta({
+  description: "An account handle, as shown in the dashboard.",
+  examples: ["k7mjq2rvxn"],
+});
+
 export const PlanSummary = component(
   "PlanSummary",
   z
@@ -164,6 +235,12 @@ export const PlanSummary = component(
         .meta({ description: "Size of the stored document, in bytes." }),
       createdAt: z.iso.datetime().meta({
         description: "When the plan was created, as RFC 3339 UTC.",
+      }),
+      visibility: PlanVisibility,
+      hasShareCode: z.boolean().meta({
+        description:
+          "True when a share code is set. The code itself is stored as a " +
+          "digest and is never returned after the request that minted it.",
       }),
     })
     .meta({ title: "PlanSummary", description: "One row of the plan list." }),
@@ -189,11 +266,72 @@ export type PlanList = z.infer<typeof PlanList>;
 export const PlanCreated = component(
   "PlanCreated",
   z
-    .object({ id: PlanId, url: PlanUrl, label: PlanLabel })
+    .object({
+      id: PlanId,
+      url: PlanUrl,
+      label: PlanLabel,
+      // `describeShareCode` writes this field's description at document
+      // build time, because it names a per-deployment length.
+      code: z.string().optional(),
+    })
     .meta({ title: "PlanCreated" }),
 );
 
 export type PlanCreated = z.infer<typeof PlanCreated>;
+
+export const PlanSharing = component(
+  "PlanSharing",
+  z
+    .object({
+      visibility: PlanVisibility,
+      hasCode: z.boolean().meta({
+        description: "True when a share code is set.",
+      }),
+      grants: z.array(PlanHandle).meta({
+        description: "Handles of the accounts this plan is shared with.",
+      }),
+    })
+    .meta({ title: "PlanSharing" }),
+);
+
+export type PlanSharing = z.infer<typeof PlanSharing>;
+
+export const ShareCodeCreated = component(
+  "ShareCodeCreated",
+  z
+    .object({
+      code: z.string(),
+    })
+    .meta({ title: "ShareCodeCreated" }),
+);
+
+export type ShareCodeCreated = z.infer<typeof ShareCodeCreated>;
+
+export const UnlockRequest = component(
+  "UnlockRequest",
+  z
+    .looseObject({ code: z.string() })
+    .meta({ title: "UnlockRequest", description: "A plaintext share code." }),
+);
+
+export const GrantRequest = component(
+  "GrantRequest",
+  z.looseObject({ handle: PlanHandle }).meta({
+    title: "GrantRequest",
+    description: "The account to grant, addressed by handle.",
+  }),
+);
+
+export const SharingRequest = component(
+  "SharingRequest",
+  z.looseObject({ visibility: PlanVisibility }).meta({
+    title: "SharingRequest",
+    description:
+      "Flips a plan between public and private. Giving a plan a share code " +
+      "is POST /api/plans/{id}/share-code, because that is the request that " +
+      "returns the plaintext.",
+  }),
+);
 
 export const PlanReplaced = component(
   "PlanReplaced",
@@ -249,6 +387,24 @@ export const PlanLabelQuery = z
     description: `Owner-facing name for the new plan, at most ${MAX_PLAN_LABEL_LENGTH} characters after trimming.`,
     examples: ["Q3 rollout"],
   });
+
+/**
+ * The optional `?visibility=` on upload. `code` is an intent rather than a
+ * stored state: it stores `private` and mints a share code in the same
+ * statement.
+ */
+export const PlanVisibilityQuery = z.enum(["public", "private", "code"]).meta({
+  description:
+    "Who may read the new plan. Defaults to private. `code` stores it " +
+    "private and mints a share code, returned once in the response body.",
+});
+
+/** The optional `?code=` on a plan document. */
+export const ShareCodeQuery = z.string().meta({
+  description:
+    "A share code. Grants access to this one plan and sets a path-scoped " +
+    "cookie, so the parameter is only needed once per reader.",
+});
 
 /** The `{id}` path parameter, which is a plan id. */
 export const PlanIdParam = PlanId;

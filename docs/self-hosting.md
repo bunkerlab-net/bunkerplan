@@ -62,6 +62,7 @@ These names are the API. They are not renamed across releases.
 | `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
 | `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | clamped to a minimum of 60                                               |
 | `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                 |
+| `SHARE_CODE_LENGTH`      | no              | `16`                          | characters in a share code; mixed-case alphanumeric, 16 to 64            |
 | `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                    |
 | `LOG_LEVEL`              | no              | `info`                        | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent` |
 | `LOG_COLOR`              | no              | `false`                       | colourises `LOG_FORMAT=plain` only                                       |
@@ -224,11 +225,18 @@ deployment's own configuration - so a self-hosted instance publishes its
 limits, not this repository's defaults. Both pages are unauthenticated, and
 neither loads anything off-origin.
 
-Authentication for writes is an API key in the `x-api-key` header. Keys are
-minted from the dashboard; there is no limit on how many, and expiry is
-optional. A key authorises upload, replacement, and delete for its owner's
-plans and nothing else - listing plans, relabelling them, managing keys, and
-deleting the account all require a session.
+Authentication is an API key in the `x-api-key` header. Keys are minted from
+the dashboard; there is no limit on how many, and expiry is optional. A key
+authorises upload, replacement, delete, and reading any plan its owner may
+read. Listing plans, relabelling them, every sharing route, managing keys, and
+deleting the account all require a session - a leaked key must not be able to
+hand out access to other people.
+
+A plan is private unless its upload said otherwise. `?visibility=` takes
+`public`, `private` (the default), or `code`; `code` stores the plan private
+and mints a share code, returned once in the 201 body and never readable
+afterwards. An unauthorised visitor to a private plan gets `401` and a gate
+page offering a code box and a sign-in button.
 
 ```sh
 # Upload, optionally labelled
@@ -237,6 +245,14 @@ curl -X PUT "https://plans.example.com/api/plans?label=Q3%20rollout" \
   -H "content-type: text/html" \
   --data-binary @plan.html
 # 201 {"id":"...","url":"https://plans.example.com/p/...","label":"Q3 rollout"}
+
+# Publish, or mint a share link in the same request
+curl -X PUT "https://plans.example.com/api/plans?visibility=code" \
+  -H "x-api-key: bkp_..." \
+  -H "content-type: text/html" \
+  --data-binary @plan.html
+# 201 {"id":"...","url":"...","label":null,"code":"9wRaReOwG14Cw0ko"}
+# Share ${url}?code=${code} - the code is never returned again.
 
 # Replace the document behind an id you own - same URL, same label
 curl -X PUT https://plans.example.com/api/plans/<id> \

@@ -1,0 +1,179 @@
+import type { AppAuth } from "../auth/instance.ts";
+import type { Config } from "../config.ts";
+import { isPlanId } from "../ids.ts";
+import type { PlanRepo, PlanVisibility } from "../services/types.ts";
+import { readBoundedBody } from "./bounded-body.ts";
+import { problem } from "./problem.ts";
+import { resolveUserId } from "./require-user.ts";
+import {
+  mintShareCookie,
+  shareCodeMatches,
+  verifyShareCookie,
+} from "./share-auth.ts";
+
+/**
+ * Who may read a plan, and the endpoint that trades a share code for a cookie.
+ *
+ * Every plan is private unless its owner said otherwise, so `/p/{id}` can no
+ * longer be a bare object read. What replaces it is one row read and, only
+ * when that row says the plan is not public, at most one credential lookup.
+ */
+
+/**
+ * The longest `?code=` this will hash. Deliberately `MAX_SHARE_CODE_LENGTH`
+ * rather than `config.shareCodeLength`: an operator may lower that setting,
+ * and codes minted under the old one must keep working. Same looseness, for
+ * the same reason, as the plan-id bound in src/ids.ts.
+ */
+const MAX_CODE_LENGTH = 64;
+
+/** Room for `{"code":"…"}` at the longest code, and nothing more. */
+const MAX_UNLOCK_BODY_BYTES = 256;
+
+export type PlanAccess =
+  | {
+      kind: "granted";
+      /** Decides the cache headers, so it is carried out of here. */
+      visibility: PlanVisibility;
+      /** Present only when `?code=` was what granted access. */
+      setCookie?: string;
+    }
+  /** The plan exists but this visitor may not read it. */
+  | { kind: "gate"; hasCode: boolean }
+  | { kind: "missing" };
+
+type ShareConfig = Pick<Config, "secret" | "publicBaseUrl">;
+
+/**
+ * Decides access, stopping at the first thing that grants it.
+ *
+ * The order is a cost order. A public plan and a returning code holder never
+ * reach a credential lookup at all; an API client sends `x-api-key` and never
+ * reaches `getSession`. Only a browser holding a session pays for one.
+ */
+export async function resolvePlanAccess(
+  auth: AppAuth,
+  plans: PlanRepo,
+  config: ShareConfig,
+  request: Request,
+  planId: string,
+): Promise<PlanAccess> {
+  // Only ids this app could have issued are routable, so a path carrying a
+  // percent-encoded separator never reaches storage.
+  if (!isPlanId(planId)) return { kind: "missing" };
+
+  const row = await plans.findAccess(planId);
+  if (row === null) return { kind: "missing" };
+  if (row.visibility === "public") {
+    return { kind: "granted", visibility: "public" };
+  }
+
+  const storedHash = row.shareCodeHash;
+  if (storedHash !== null) {
+    const code = new URL(request.url).searchParams.get("code");
+    // A wrong code falls through rather than short-circuiting to the gate: an
+    // owner who follows a stale link must still get in on their own
+    // credential.
+    if (
+      code !== null &&
+      code.length <= MAX_CODE_LENGTH &&
+      (await shareCodeMatches(code, storedHash))
+    ) {
+      return {
+        kind: "granted",
+        visibility: "private",
+        // So the next request to this plan works without the parameter.
+        setCookie: await mintShareCookie(
+          config,
+          planId,
+          storedHash,
+          Date.now(),
+        ),
+      };
+    }
+
+    if (
+      await verifyShareCookie(
+        config.secret,
+        planId,
+        storedHash,
+        request.headers.get("cookie"),
+        Date.now(),
+      )
+    ) {
+      return { kind: "granted", visibility: "private" };
+    }
+  }
+
+  const userId = await resolveUserId(auth, request);
+  if (userId === null) return { kind: "gate", hasCode: storedHash !== null };
+  if (userId === row.ownerId) {
+    return { kind: "granted", visibility: "private" };
+  }
+  if (await plans.hasGrant(planId, userId)) {
+    return { kind: "granted", visibility: "private" };
+  }
+
+  return { kind: "gate", hasCode: storedHash !== null };
+}
+
+/**
+ * Trades a share code for the unlock cookie.
+ *
+ * Unauthenticated and deliberately unlimited. A code is 16 base62 characters
+ * at the floor - about 95 bits - so a rate limiter buys nothing against
+ * guessing it, while an anonymous limiter keyed on the plan would hand any
+ * passer-by a way to lock the owner's own share link out.
+ */
+export async function unlockPlan(
+  plans: PlanRepo,
+  config: ShareConfig,
+  request: Request,
+  planId: string,
+): Promise<Response> {
+  // One 400 covers every way the body can fail, because they all mean the
+  // same thing to the only caller: the gate page's fetch. The bound is not a
+  // separate contract - a code is at most 64 characters, so a body too large
+  // to read cannot have held one, and this endpoint is unauthenticated.
+  const encoded = await readBoundedBody(request, MAX_UNLOCK_BODY_BYTES);
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(encoded ?? new Uint8Array(0)));
+  } catch {
+    return problem(400, "code is required");
+  }
+
+  if (typeof body !== "object" || body === null || !("code" in body)) {
+    return problem(400, "code is required");
+  }
+  const code = body.code;
+  if (typeof code !== "string" || code === "") {
+    return problem(400, "code is required");
+  }
+
+  const row = isPlanId(planId) ? await plans.findAccess(planId) : null;
+  // A plan with no code is indistinguishable from one that does not exist:
+  // this endpoint must not report which private plans are code-shared.
+  if (row === null || row.shareCodeHash === null) {
+    return problem(404, "not found");
+  }
+
+  if (
+    code.length > MAX_CODE_LENGTH ||
+    !(await shareCodeMatches(code, row.shareCodeHash))
+  ) {
+    return problem(401, "invalid code");
+  }
+
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "set-cookie": await mintShareCookie(
+        config,
+        planId,
+        row.shareCodeHash,
+        Date.now(),
+      ),
+    },
+  });
+}

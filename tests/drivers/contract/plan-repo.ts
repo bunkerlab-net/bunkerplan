@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { newPlanId } from "../../../src/ids.ts";
-import type { PlanRepo } from "../../../src/services/types.ts";
+import type { PlanRepo, PlanVisibility } from "../../../src/services/types.ts";
 import { type DbFixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
 
 /**
@@ -25,13 +25,26 @@ export function describePlanRepo(
 
     const row = (
       userId: string,
-      over: { label?: string; size?: number } = {},
+      over: {
+        label?: string;
+        size?: number;
+        visibility?: PlanVisibility;
+        shareCodeHash?: string;
+      } = {},
     ) => ({
       id: newPlanId(16),
       userId,
       label: over.label ?? null,
       size: over.size ?? 1,
+      visibility: over.visibility ?? ("private" as const),
+      shareCodeHash: over.shareCodeHash ?? null,
     });
+
+    /**
+     * A grant is addressed by handle, and `user.email` is unique, so every
+     * seeded handle in this suite has to be distinct from every other.
+     */
+    const uniqueHandle = () => `h${crypto.randomUUID().replaceAll("-", "")}`;
 
     beforeAll(async () => {
       fixture = await open();
@@ -394,6 +407,213 @@ export function describePlanRepo(
 
         await fixture.deleteUser(doomed);
         expect(await fixture.countPlans(kept)).toBe(1);
+      });
+
+      test("removing a grantee removes the grant, not the plan", async () => {
+        const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        const grantee = await fixture.seedUser(handle);
+        const created = row(owner);
+        await plans.insert(created, 10);
+        expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
+          "granted",
+        );
+
+        // Without the cascade this delete either fails on the foreign key or
+        // leaves a row naming an account that no longer exists.
+        await fixture.deleteUser(grantee);
+        expect(await plans.hasGrant(created.id, grantee)).toBe(false);
+        expect(await fixture.countPlans(owner)).toBe(1);
+      });
+    });
+
+    describe("visibility and the share code", () => {
+      test("insert persists both in the claiming statement", async () => {
+        const userId = await fixture.seedUser();
+        const created = row(userId, {
+          visibility: "public",
+          shareCodeHash: "a".repeat(64),
+        });
+        expect(await plans.insert(created, 10)).toBe("created");
+
+        expect(await plans.findAccess(created.id)).toEqual({
+          ownerId: userId,
+          visibility: "public",
+          shareCodeHash: "a".repeat(64),
+        });
+      });
+
+      test("findAccess reports null for an id nobody claimed", async () => {
+        expect(await plans.findAccess(newPlanId(16))).toBeNull();
+      });
+
+      test("listByUser reports the code as a flag, never the hash", async () => {
+        const userId = await fixture.seedUser();
+        const created = row(userId, { shareCodeHash: "b".repeat(64) });
+        await plans.insert(created, 10);
+
+        const [listed] = await plans.listByUser(userId, 1);
+        expect(listed?.visibility).toBe("private");
+        expect(listed?.hasShareCode).toBe(true);
+        // The digest is a preimage target; nothing outside the repo needs it.
+        expect(JSON.stringify(listed)).not.toContain("b".repeat(64));
+      });
+
+      test("setVisibility and setShareCodeHash refuse a stranger", async () => {
+        const owner = await fixture.seedUser();
+        const stranger = await fixture.seedUser();
+        const created = row(owner);
+        await plans.insert(created, 10);
+
+        expect(await plans.setVisibility(created.id, stranger, "public")).toBe(
+          false,
+        );
+        expect(await plans.setShareCodeHash(created.id, stranger, "c")).toBe(
+          false,
+        );
+        expect((await plans.findAccess(created.id))?.visibility).toBe(
+          "private",
+        );
+        expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
+
+        expect(await plans.setVisibility(created.id, owner, "public")).toBe(
+          true,
+        );
+        expect(
+          await plans.setShareCodeHash(created.id, owner, "d".repeat(64)),
+        ).toBe(true);
+        expect(await plans.findAccess(created.id)).toEqual({
+          ownerId: owner,
+          visibility: "public",
+          shareCodeHash: "d".repeat(64),
+        });
+
+        // Null clears it, which is how a code is removed.
+        expect(await plans.setShareCodeHash(created.id, owner, null)).toBe(
+          true,
+        );
+        expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
+      });
+
+      test("neither setter invents a row for an unknown plan", async () => {
+        const userId = await fixture.seedUser();
+        const ghost = newPlanId(16);
+        expect(await plans.setVisibility(ghost, userId, "public")).toBe(false);
+        expect(await plans.setShareCodeHash(ghost, userId, "e")).toBe(false);
+        expect(await fixture.countPlans(userId)).toBe(0);
+      });
+    });
+
+    describe("grants", () => {
+      test("an unknown handle is distinguishable from an unowned plan", async () => {
+        const owner = await fixture.seedUser();
+        const stranger = await fixture.seedUser();
+        const handle = uniqueHandle();
+        await fixture.seedUser(handle);
+        const created = row(owner);
+        await plans.insert(created, 10);
+
+        // Three outcomes, because the caller renders three messages.
+        expect(
+          await plans.grantByHandle(created.id, owner, uniqueHandle()),
+        ).toBe("no-user");
+        expect(await plans.grantByHandle(created.id, stranger, handle)).toBe(
+          "no-plan",
+        );
+        expect(await plans.grantByHandle(newPlanId(16), owner, handle)).toBe(
+          "no-plan",
+        );
+        expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
+          "granted",
+        );
+      });
+
+      test("granting the same handle twice is idempotent", async () => {
+        const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        const grantee = await fixture.seedUser(handle);
+        const created = row(owner);
+        await plans.insert(created, 10);
+
+        expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
+          "granted",
+        );
+        // The second call must not report a failure the caller would surface
+        // as an error; the state it asks for already holds.
+        expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
+          "granted",
+        );
+        expect(await plans.listGrantHandles(created.id, owner)).toEqual([
+          handle,
+        ]);
+        expect(await plans.hasGrant(created.id, grantee)).toBe(true);
+      });
+
+      test("a grant is scoped to its own plan and its own account", async () => {
+        const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        const grantee = await fixture.seedUser(handle);
+        const outsider = await fixture.seedUser();
+        const granted = row(owner);
+        const other = row(owner);
+        await plans.insert(granted, 10);
+        await plans.insert(other, 10);
+        await plans.grantByHandle(granted.id, owner, handle);
+
+        expect(await plans.hasGrant(granted.id, grantee)).toBe(true);
+        expect(await plans.hasGrant(other.id, grantee)).toBe(false);
+        expect(await plans.hasGrant(granted.id, outsider)).toBe(false);
+      });
+
+      test("revoke removes once, then reports nothing to remove", async () => {
+        const owner = await fixture.seedUser();
+        const stranger = await fixture.seedUser();
+        const handle = uniqueHandle();
+        const grantee = await fixture.seedUser(handle);
+        const created = row(owner);
+        await plans.insert(created, 10);
+        await plans.grantByHandle(created.id, owner, handle);
+
+        // A stranger must not be able to strip somebody else's grants.
+        expect(await plans.revokeByHandle(created.id, stranger, handle)).toBe(
+          false,
+        );
+        expect(await plans.hasGrant(created.id, grantee)).toBe(true);
+
+        expect(await plans.revokeByHandle(created.id, owner, handle)).toBe(
+          true,
+        );
+        expect(await plans.revokeByHandle(created.id, owner, handle)).toBe(
+          false,
+        );
+        expect(
+          await plans.revokeByHandle(created.id, owner, uniqueHandle()),
+        ).toBe(false);
+        expect(await plans.hasGrant(created.id, grantee)).toBe(false);
+      });
+
+      test("listGrantHandles separates no grants from no plan", async () => {
+        const owner = await fixture.seedUser();
+        const stranger = await fixture.seedUser();
+        const created = row(owner);
+        await plans.insert(created, 10);
+
+        // Empty is a real answer; null is a refusal.
+        expect(await plans.listGrantHandles(created.id, owner)).toEqual([]);
+        expect(await plans.listGrantHandles(created.id, stranger)).toBeNull();
+        expect(await plans.listGrantHandles(newPlanId(16), owner)).toBeNull();
+      });
+
+      test("deleting the plan takes its grants with it", async () => {
+        const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        const grantee = await fixture.seedUser(handle);
+        const created = row(owner);
+        await plans.insert(created, 10);
+        await plans.grantByHandle(created.id, owner, handle);
+
+        expect(await plans.deleteOwned(created.id, owner)).toBe(true);
+        expect(await plans.hasGrant(created.id, grantee)).toBe(false);
       });
     });
   });

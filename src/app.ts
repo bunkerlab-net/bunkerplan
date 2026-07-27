@@ -5,13 +5,19 @@ import { createPlan } from "./http/create-plan.ts";
 import { deletePlan } from "./http/delete-plan.ts";
 import { healthz } from "./http/healthz.ts";
 import { listPlans } from "./http/list-plans.ts";
+import { unlockPlan } from "./http/plan-access.ts";
+import {
+  clearShareCode,
+  getPlanSharing,
+  grantPlan,
+  revokePlanGrant,
+  rotateShareCode,
+  setPlanSharing,
+} from "./http/plan-sharing.ts";
 import { problem } from "./http/problem.ts";
 import { relabelPlan } from "./http/relabel-plan.ts";
 import { replacePlan } from "./http/replace-plan.ts";
-import {
-  resolveSessionUserId,
-  resolveWriteUserId,
-} from "./http/require-user.ts";
+import { resolveSessionUserId, resolveUserId } from "./http/require-user.ts";
 import { applySecurityHeaders } from "./http/security-headers.ts";
 import { servePlan } from "./http/serve-plan.ts";
 import { checkUploadRate } from "./http/upload-rate-limit.ts";
@@ -20,6 +26,7 @@ import {
   renderDashboard,
   renderLanding,
   renderNotFound,
+  renderPlanGate,
 } from "./server/pages.tsx";
 import type { RuntimeTarget, Services } from "./services/types.ts";
 
@@ -64,7 +71,7 @@ function registerPlanItem(app: Hono, getServices: GetServices): void {
   app.put("/api/plans/:id", async (c) => {
     const { auth, config, db, logger, storage } = await getServices();
 
-    const userId = await resolveWriteUserId(auth, c.req.raw);
+    const userId = await resolveUserId(auth, c.req.raw);
     if (userId === null) return problem(401, "authentication required");
 
     const limited = await checkUploadRate(db.uploadRateLimits, config, userId);
@@ -95,7 +102,7 @@ function registerPlanItem(app: Hono, getServices: GetServices): void {
   app.delete("/api/plans/:id", async (c) => {
     const { auth, db, logger, storage } = await getServices();
 
-    const userId = await resolveWriteUserId(auth, c.req.raw);
+    const userId = await resolveUserId(auth, c.req.raw);
     if (userId === null) return problem(401, "authentication required");
 
     return await deletePlan(
@@ -105,6 +112,64 @@ function registerPlanItem(app: Hono, getServices: GetServices): void {
       c.req.param("id"),
       userId,
     );
+  });
+}
+
+/**
+ * Who may read one plan.
+ *
+ * Under `/api/`, not `/p/`, so the gate page's fetch is governed by the app
+ * policy rather than the plan sandbox. Each handler resolves its own session;
+ * see src/http/plan-sharing.ts for why a key is not accepted here.
+ */
+function registerPlanSharing(app: Hono, getServices: GetServices): void {
+  app.get("/api/plans/:id/sharing", async (c) => {
+    const { auth, db } = await getServices();
+    return await getPlanSharing(auth, db.plans, c.req.raw, c.req.param("id"));
+  });
+
+  app.put("/api/plans/:id/sharing", async (c) => {
+    const { auth, db } = await getServices();
+    return await setPlanSharing(auth, db.plans, c.req.raw, c.req.param("id"));
+  });
+
+  app.post("/api/plans/:id/share-code", async (c) => {
+    const { auth, config, db } = await getServices();
+    return await rotateShareCode(
+      auth,
+      db.plans,
+      config,
+      c.req.raw,
+      c.req.param("id"),
+    );
+  });
+
+  app.delete("/api/plans/:id/share-code", async (c) => {
+    const { auth, db } = await getServices();
+    return await clearShareCode(auth, db.plans, c.req.raw, c.req.param("id"));
+  });
+
+  app.post("/api/plans/:id/grants", async (c) => {
+    const { auth, db } = await getServices();
+    return await grantPlan(auth, db.plans, c.req.raw, c.req.param("id"));
+  });
+
+  app.delete("/api/plans/:id/grants/:handle", async (c) => {
+    const { auth, db } = await getServices();
+    return await revokePlanGrant(
+      auth,
+      db.plans,
+      c.req.raw,
+      c.req.param("id"),
+      c.req.param("handle"),
+    );
+  });
+
+  // Unauthenticated on purpose: this is how someone holding only a share code
+  // gets in. See src/http/plan-access.ts.
+  app.post("/api/plans/:id/unlock", async (c) => {
+    const { config, db } = await getServices();
+    return await unlockPlan(db.plans, config, c.req.raw, c.req.param("id"));
   });
 }
 
@@ -139,11 +204,30 @@ function registerSite(app: Hono, deps: AppDeps): void {
   app.get("/healthz", () => healthz(runtime, getServices));
 
   app.get("/p/:planId", async (c) => {
-    const { storage } = await getServices();
-    const served = await servePlan(storage, c.req.raw, c.req.param("planId"));
+    const { auth, config, db, storage } = await getServices();
+    const planId = c.req.param("planId");
+    const served = await servePlan(
+      storage,
+      db.plans,
+      auth,
+      config,
+      c.req.raw,
+      planId,
+    );
     // A miss renders the site's own 404 page, which is trusted HTML and takes
     // the app policy rather than the plan one.
-    return served ?? c.html(renderNotFound(assets), 404);
+    if (served === null) return c.html(renderNotFound(assets), 404);
+    // 401 rather than 200 is load-bearing: `applySecurityHeaders` pins the
+    // plan sandbox onto `/p/*` only at 200 and 304, and under it this page
+    // could neither sign in nor post a code.
+    if ("gate" in served) {
+      return c.html(
+        renderPlanGate(assets, planId, served.hasCode, config.publicBaseUrl),
+        401,
+        { "cache-control": "no-store" },
+      );
+    }
+    return served;
   });
 
   // The origin comes from the configured public base URL, not from the
@@ -199,6 +283,7 @@ export function createApp(deps: AppDeps): Hono {
   registerAuthAndDocs(app, deps.getServices);
   registerPlanCollection(app, deps.getServices);
   registerPlanItem(app, deps.getServices);
+  registerPlanSharing(app, deps.getServices);
   registerSite(app, deps);
 
   return app;

@@ -1,9 +1,20 @@
+export type PlanVisibility = "public" | "private";
+
 export interface PlanSummary {
   id: string;
   url: string;
   label: string | null;
   size: number;
   createdAt: string;
+  visibility: PlanVisibility;
+  hasShareCode: boolean;
+}
+
+export interface PlanSharing {
+  visibility: PlanVisibility;
+  hasCode: boolean;
+  /** Handles of the accounts this plan is shared with. */
+  grants: string[];
 }
 
 async function readError(response: Response): Promise<string> {
@@ -30,8 +41,11 @@ export async function listPlans(): Promise<PlanSummary[]> {
   return body.plans;
 }
 
-export async function uploadPlan(file: File): Promise<PlanSummary> {
-  const response = await fetch("/api/plans", {
+export async function uploadPlan(
+  file: File,
+  visibility: PlanVisibility,
+): Promise<PlanSummary> {
+  const response = await fetch(`/api/plans?visibility=${visibility}`, {
     method: "PUT",
     headers: { "content-type": "text/html" },
     body: await file.arrayBuffer(),
@@ -44,6 +58,8 @@ export async function uploadPlan(file: File): Promise<PlanSummary> {
     label: null,
     size: file.size,
     createdAt: new Date().toISOString(),
+    visibility,
+    hasShareCode: false,
   };
 }
 
@@ -70,6 +86,72 @@ export async function replacePlan(id: string, file: File): Promise<void> {
     method: "PUT",
     headers: { "content-type": "text/html" },
     body: await file.arrayBuffer(),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
+export async function getSharing(id: string): Promise<PlanSharing> {
+  const response = await fetch(`/api/plans/${id}/sharing`);
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as PlanSharing;
+}
+
+export async function setVisibility(
+  id: string,
+  visibility: PlanVisibility,
+): Promise<PlanSharing> {
+  const response = await fetch(`/api/plans/${id}/sharing`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ visibility }),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as PlanSharing;
+}
+
+/**
+ * Mints a code and returns the plaintext. This is the only time it is ever
+ * returned - there is no endpoint that reads it back.
+ */
+export async function rotateShareCode(id: string): Promise<string> {
+  const response = await fetch(`/api/plans/${id}/share-code`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  const body = (await response.json()) as { code: string };
+  return body.code;
+}
+
+export async function clearShareCode(id: string): Promise<void> {
+  const response = await fetch(`/api/plans/${id}/share-code`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
+export async function addGrant(id: string, handle: string): Promise<void> {
+  const response = await fetch(`/api/plans/${id}/grants`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ handle }),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
+export async function removeGrant(id: string, handle: string): Promise<void> {
+  const response = await fetch(
+    `/api/plans/${id}/grants/${encodeURIComponent(handle)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw new Error(await readError(response));
+}
+
+/** Trades a share code for the unlock cookie. Unauthenticated by design. */
+export async function unlockPlan(id: string, code: string): Promise<void> {
+  const response = await fetch(`/api/plans/${id}/unlock`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code }),
   });
   if (!response.ok) throw new Error(await readError(response));
 }

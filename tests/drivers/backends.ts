@@ -48,6 +48,7 @@ import { createSqlitePlanRepo } from "../../src/db/plans.sqlite.ts";
 import { createPgRateLimitRepo } from "../../src/db/rate-limits.pg.ts";
 import { createSqliteRateLimitRepo } from "../../src/db/rate-limits.sqlite.ts";
 import { sqliteSchema } from "../../src/db/sqlite-shared.ts";
+import { handleEmail } from "../../src/ids.ts";
 import { createValkeyKv } from "../../src/kv/valkey.ts";
 import { createWorkersKv } from "../../src/kv/workers-kv.ts";
 import type {
@@ -122,8 +123,12 @@ export interface DbFixture {
   plans: PlanRepo;
   rateLimits: RateLimitRepo;
   accountClosing: AccountClosingRepo;
-  /** Creates a `user` row and returns its id; every repo needs one for the FK. */
-  seedUser(): Promise<string>;
+  /**
+   * Creates a `user` row and returns its id; every repo needs one for the FK.
+   * A `handle` sets `name` and the `@passkey.invalid` address grants are
+   * addressed by, which the grant contract needs.
+   */
+  seedUser(handle?: string): Promise<string>;
   /** Removes the user, exercising the ON DELETE CASCADE the schema declares. */
   deleteUser(userId: string): Promise<void>;
   /** Rewrites a plan's `created_at`, so ordering is asserted without waiting. */
@@ -306,11 +311,14 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
     rateLimits: createSqliteRateLimitRepo(db),
     accountClosing: createSqliteAccountClosingRepo(db),
 
-    seedUser: async () => {
+    seedUser: async (handle) => {
       const id = `u-${crypto.randomUUID()}`;
+      const name = handle ?? id;
+      const email =
+        handle === undefined ? `${id}@example.test` : handleEmail(handle);
       await db.run(
         sql`insert into user (id, name, email, email_verified, created_at, updated_at)
-            values (${id}, ${id}, ${`${id}@example.test`}, 0, ${Date.now()}, ${Date.now()})`,
+            values (${id}, ${name}, ${email}, 0, ${Date.now()}, ${Date.now()})`,
       );
       return id;
     },
@@ -427,11 +435,14 @@ export async function postgresDb(): Promise<DbFixture> {
     rateLimits: createPgRateLimitRepo(db),
     accountClosing: createPgAccountClosingRepo(db),
 
-    seedUser: async () => {
+    seedUser: async (handle) => {
       const id = `u-${crypto.randomUUID()}`;
+      const name = handle ?? id;
+      const email =
+        handle === undefined ? `${id}@example.test` : handleEmail(handle);
       await db.execute(
         sql`insert into "user" (id, name, email, email_verified, created_at, updated_at)
-            values (${id}, ${id}, ${`${id}@example.test`}, false, now(), now())`,
+            values (${id}, ${name}, ${email}, false, now(), now())`,
       );
       return id;
     },

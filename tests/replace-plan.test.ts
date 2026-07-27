@@ -58,6 +58,13 @@ function fakes(
       return true;
     },
     deleteOwned: async () => false,
+    findAccess: async () => null,
+    hasGrant: async () => false,
+    setVisibility: async () => false,
+    setShareCodeHash: async () => false,
+    listGrantHandles: async () => null,
+    grantByHandle: async () => "no-plan",
+    revokeByHandle: async () => false,
   };
 
   return { storage, plans, written };

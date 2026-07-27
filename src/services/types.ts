@@ -56,12 +56,30 @@ export interface RateLimitRepo {
   ): Promise<RateLimitResult>;
 }
 
+export type PlanVisibility = "public" | "private";
+
+/** What the read gate needs, in one row. `shareCodeHash` never leaves the repo. */
+export interface PlanAccessRow {
+  ownerId: string;
+  visibility: PlanVisibility;
+  shareCodeHash: string | null;
+}
+
+/**
+ * Why `grantByHandle` reports three outcomes: the caller renders a different
+ * message for an unknown handle than for a plan it does not own.
+ */
+export type GrantOutcome = "granted" | "no-plan" | "no-user";
+
 export interface PlanRow {
   id: string;
   /** Owner-facing text, null until one is set. */
   label: string | null;
   size: number;
   createdAt: Date;
+  visibility: PlanVisibility;
+  /** Whether a share code is set. The hash itself never leaves the repo. */
+  hasShareCode: boolean;
 }
 
 /**
@@ -85,6 +103,8 @@ export interface PlanRepo {
       userId: string;
       label: string | null;
       size: number;
+      visibility: PlanVisibility;
+      shareCodeHash: string | null;
     },
     maxPlans: number,
   ): Promise<PlanInsert>;
@@ -110,6 +130,34 @@ export interface PlanRepo {
   resize(id: string, userId: string, size: number): Promise<boolean>;
   /** False means not found or not owned by `userId`. */
   deleteOwned(id: string, userId: string): Promise<boolean>;
+  /** One read for the gate. Null means no such plan. */
+  findAccess(id: string): Promise<PlanAccessRow | null>;
+  hasGrant(planId: string, userId: string): Promise<boolean>;
+  /** False means not found or not owned by `userId`. */
+  setVisibility(
+    id: string,
+    userId: string,
+    visibility: PlanVisibility,
+  ): Promise<boolean>;
+  /** `hash` null clears the code. False means not found or not owned. */
+  setShareCodeHash(
+    id: string,
+    userId: string,
+    hash: string | null,
+  ): Promise<boolean>;
+  /** Handles of every granted account. Null means not found or not owned. */
+  listGrantHandles(planId: string, ownerId: string): Promise<string[] | null>;
+  grantByHandle(
+    planId: string,
+    ownerId: string,
+    handle: string,
+  ): Promise<GrantOutcome>;
+  /** False means not found, not owned, or the handle held no grant. */
+  revokeByHandle(
+    planId: string,
+    ownerId: string,
+    handle: string,
+  ): Promise<boolean>;
 }
 
 /**

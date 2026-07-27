@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { defaultKeyHasher } from "@better-auth/api-key";
+import { makeSignature } from "better-auth/crypto";
 import { createTestHarness, type TestHarness } from "wrangler";
+import { handleEmail } from "../../src/ids.ts";
 
 /**
  * The real Worker on the real local stack: workerd via Miniflare, with D1, R2,
@@ -30,6 +32,12 @@ export const MAX_PLANS_PER_USER = 3;
 export const PUBLIC_BASE_URL = "http://localhost";
 
 /**
+ * Not a real secret. Shared with `accountWithSession`, which signs a session
+ * cookie with it - the same key the Worker verifies with.
+ */
+const AUTH_SECRET = "e2e-0123456789abcdef0123456789abcdef";
+
+/**
  * The dispatch signature is taken from the harness rather than restated: the
  * ambient `RequestInit`/`Response` here are the Workers ones, which are not
  * the types Miniflare dispatches with.
@@ -46,6 +54,18 @@ export interface Harness {
   bucket: R2Bucket;
   /** Seeds a fresh account and returns its API key. */
   account(): Promise<string>;
+  /**
+   * Both credentials for one fresh account, plus its handle.
+   *
+   * A session cannot be faked by inserting a row and sending the raw token:
+   * Better Auth reads the cookie with `getSignedCookie` and writes it with
+   * `setSignedCookie`, so an unsigned value is silently unauthenticated.
+   */
+  accountWithSession(): Promise<{
+    key: string;
+    cookie: string;
+    handle: string;
+  }>;
   close(): Promise<void>;
 }
 
@@ -101,7 +121,7 @@ export async function startWorker(): Promise<Harness> {
         secrets: {
           // Not a real secret, and never used against real data: this stack is
           // an empty D1 file that the harness throws away.
-          BETTER_AUTH_SECRET: "e2e-0123456789abcdef0123456789abcdef",
+          BETTER_AUTH_SECRET: AUTH_SECRET,
         },
       },
     ],
@@ -114,43 +134,66 @@ export async function startWorker(): Promise<Harness> {
 
   let seeded = 0;
 
+  const accountWithSession = async () => {
+    seeded += 1;
+    const userId = `e2e-user-${seeded}`;
+    const handle = `e2euser${seeded}`;
+    const now = Date.now();
+    const key = `bkp_${userId}_${crypto.randomUUID()}`;
+
+    // The handle is `user.name`, and grants are addressed by the synthetic
+    // `@passkey.invalid` address a passkey signup gets - so this row has to
+    // carry both the way the real registration path writes them.
+    await DB.prepare(
+      `insert into user (id, name, email, email_verified, created_at, updated_at)
+       values (?1, ?2, ?3, 0, ?4, ?4)`,
+    )
+      .bind(userId, handle, handleEmail(handle), now)
+      .run();
+
+    // `rate_limit_enabled` off to match the plugin configuration in
+    // src/auth/options.ts; its default of 10 requests a day would refuse
+    // uploads long before the app's own limit did.
+    await DB.prepare(
+      `insert into apikey
+         (id, config_id, name, prefix, reference_id, key, enabled,
+          rate_limit_enabled, request_count, created_at, updated_at)
+       values (?1, 'default', ?2, 'bkp_', ?3, ?4, 1, 0, 0, ?5, ?5)`,
+    )
+      .bind(
+        crypto.randomUUID(),
+        `${userId} key`,
+        userId,
+        await defaultKeyHasher(key),
+        now,
+      )
+      .run();
+
+    const token = crypto.randomUUID();
+    await DB.prepare(
+      `insert into session (id, token, user_id, expires_at, created_at, updated_at)
+       values (?1, ?2, ?3, ?4, ?5, ?5)`,
+    )
+      .bind(crypto.randomUUID(), token, userId, now + 86_400_000, now)
+      .run();
+
+    // `${value}.${signature}` is the shape Better Auth's own cookie builder
+    // produces. Unprefixed because PUBLIC_BASE_URL is http; over https the
+    // name would be `__Secure-better-auth.session_token`.
+    const cookie = `better-auth.session_token=${token}.${await makeSignature(
+      token,
+      AUTH_SECRET,
+    )}`;
+
+    return { key, cookie, handle };
+  };
+
   return {
     fetch: (path, init) => worker.fetch(path, init),
     db: DB,
     bucket: BUCKET,
-    async account() {
-      seeded += 1;
-      const userId = `e2e-user-${seeded}`;
-      const now = Date.now();
-      const key = `bkp_${userId}_${crypto.randomUUID()}`;
-
-      await DB.prepare(
-        `insert into user (id, name, email, email_verified, created_at, updated_at)
-         values (?1, ?1, ?2, 0, ?3, ?3)`,
-      )
-        .bind(userId, `${userId}@example.test`, now)
-        .run();
-
-      // `rate_limit_enabled` off to match the plugin configuration in
-      // src/auth/options.ts; its default of 10 requests a day would refuse
-      // uploads long before the app's own limit did.
-      await DB.prepare(
-        `insert into apikey
-           (id, config_id, name, prefix, reference_id, key, enabled,
-            rate_limit_enabled, request_count, created_at, updated_at)
-         values (?1, 'default', ?2, 'bkp_', ?3, ?4, 1, 0, 0, ?5, ?5)`,
-      )
-        .bind(
-          crypto.randomUUID(),
-          `${userId} key`,
-          userId,
-          await defaultKeyHasher(key),
-          now,
-        )
-        .run();
-
-      return key;
-    },
+    account: async () => (await accountWithSession()).key,
+    accountWithSession,
     close: () => server.close(),
   };
 }

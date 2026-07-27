@@ -6,6 +6,7 @@ import { createApp } from "../src/app.ts";
 const CONFIG = {
   publicBaseUrl: "https://plans.example.test",
   maxUploadBytes: 1234,
+  shareCodeLength: 24,
 };
 
 const doc = openApiDocument(CONFIG);
@@ -147,6 +148,11 @@ describe("coverage of the routes the app actually serves", () => {
       "/api/openapi.json",
       "/api/plans",
       "/api/plans/{id}",
+      "/api/plans/{id}/grants",
+      "/api/plans/{id}/grants/{handle}",
+      "/api/plans/{id}/share-code",
+      "/api/plans/{id}/sharing",
+      "/api/plans/{id}/unlock",
       "/dashboard",
       "/healthz",
       "/p/{id}",

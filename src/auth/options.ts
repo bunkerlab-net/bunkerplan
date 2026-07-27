@@ -3,7 +3,7 @@ import type { SecondaryStorage } from "@better-auth/core/db";
 import { passkey } from "@better-auth/passkey";
 import type { BetterAuthOptions } from "better-auth";
 import { setSessionCookie } from "better-auth/cookies";
-import { newUserHandle } from "../ids.ts";
+import { handleEmail, newUserHandle } from "../ids.ts";
 import type { Logger } from "../log.ts";
 
 /**
@@ -70,7 +70,7 @@ function passkeyPlugin(input: AuthOptionsInput) {
           name: handle,
           // RFC 2606 reserved TLD: a synthetic address that can never resolve
           // or be mailed.
-          email: `${handle}@passkey.invalid`,
+          email: handleEmail(handle),
           emailVerified: false,
         });
         // Registration signs the user straight in. Without this the browser

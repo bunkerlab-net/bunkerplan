@@ -166,3 +166,35 @@ describe("planIdLength", () => {
     expect(loadConfig(REQUIRED, { workers: true }).planIdLength).toBe(16);
   });
 });
+
+/**
+ * A share code is the only thing gating an unauthenticated read, so unlike a
+ * plan id there is no short end worth allowing: the floor is the default.
+ */
+describe("shareCodeLength", () => {
+  test("defaults to 16 when unset", () => {
+    expect(loadConfig(REQUIRED, { workers: true }).shareCodeLength).toBe(16);
+  });
+
+  test("accepts the longest code the read gate will hash", () => {
+    const config = loadConfig(
+      { ...REQUIRED, SHARE_CODE_LENGTH: 64 },
+      { workers: true },
+    );
+    expect(config.shareCodeLength).toBe(64);
+  });
+
+  test("refuses to boot below the floor", () => {
+    expect(() =>
+      loadConfig({ ...REQUIRED, SHARE_CODE_LENGTH: 15 }, { workers: true }),
+    ).toThrow(/SHARE_CODE_LENGTH must be an integer between 16 and 64/);
+  });
+
+  test("refuses to boot past what the gate would accept", () => {
+    // A code longer than this is ignored unhashed by the read gate, so a
+    // deployment could mint codes that never open anything.
+    expect(() =>
+      loadConfig({ ...REQUIRED, SHARE_CODE_LENGTH: 65 }, { workers: true }),
+    ).toThrow(/SHARE_CODE_LENGTH must be an integer between 16 and 64/);
+  });
+});

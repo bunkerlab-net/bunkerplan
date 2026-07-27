@@ -62,9 +62,10 @@ function HowItWorks({
           dashboard, or <code>PUT</code> it from a script with an API key.
         </li>
         <li>
-          <span className="step-lead">Paste the link.</span> You get back a
-          short <code>/p/</code> URL. Anyone holding it can read the page; it is
-          listed nowhere else.
+          <span className="step-lead">Share the link.</span> You get back a
+          short <code>/p/</code> URL. It is private until you say otherwise -
+          open it to anyone holding the link, hand out a share code, or name the
+          accounts that may read it.
         </li>
         <li>
           <span className="step-lead">Revised it? Upload again.</span> Replacing

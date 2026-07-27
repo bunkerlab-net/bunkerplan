@@ -66,7 +66,14 @@ function stores(holdPut = false) {
     listByUser: async (userId) =>
       [...rows.entries()]
         .filter(([, row]) => row.userId === userId)
-        .map(([id]) => ({ id, label: null, size: 0, createdAt: new Date() })),
+        .map(([id]) => ({
+          id,
+          label: null,
+          size: 0,
+          createdAt: new Date(),
+          visibility: "private" as const,
+          hasShareCode: false,
+        })),
     findOwner: async (id) => rows.get(id)?.userId ?? null,
     relabel: async () => false,
     resize: async () => false,
@@ -75,6 +82,13 @@ function stores(holdPut = false) {
       rows.delete(id);
       return true;
     },
+    findAccess: async () => null,
+    hasGrant: async () => false,
+    setVisibility: async () => false,
+    setShareCodeHash: async () => false,
+    listGrantHandles: async () => null,
+    grantByHandle: async () => "no-plan",
+    revokeByHandle: async () => false,
   };
 
   const accountClosing: AccountClosingRepo = {
@@ -124,7 +138,17 @@ function cascade(
 
 async function claim(plans: PlanRepo, id: string): Promise<void> {
   expect(
-    await plans.insert({ id, userId: OWNER, label: null, size: 5 }, 10),
+    await plans.insert(
+      {
+        id,
+        userId: OWNER,
+        label: null,
+        size: 5,
+        visibility: "private",
+        shareCodeHash: null,
+      },
+      10,
+    ),
   ).toBe("created");
 }
 
@@ -221,7 +245,14 @@ describe("upload racing account deletion", () => {
 
     for (let i = 0; i < 5; i += 1) {
       await plans.insert(
-        { id: `p${i}`, userId: OWNER, label: null, size: 1 },
+        {
+          id: `p${i}`,
+          userId: OWNER,
+          label: null,
+          size: 1,
+          visibility: "private",
+          shareCodeHash: null,
+        },
         100,
       );
       await storage.put(`p${i}`, new Uint8Array(1));
@@ -239,7 +270,14 @@ describe("upload racing account deletion", () => {
     await claim(plans, "mine");
     await storage.put("mine", new Uint8Array(1));
     await plans.insert(
-      { id: "theirs", userId: "user-b", label: null, size: 1 },
+      {
+        id: "theirs",
+        userId: "user-b",
+        label: null,
+        size: 1,
+        visibility: "private",
+        shareCodeHash: null,
+      },
       10,
     );
     await storage.put("theirs", new Uint8Array(1));

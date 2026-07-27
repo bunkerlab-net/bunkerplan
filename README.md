@@ -1,13 +1,17 @@
 # BunkerPlan
 
-Upload a standalone HTML document, get a public URL at `https://{host}/p/{id}`.
+Upload a standalone HTML document, get a URL at `https://{host}/p/{id}`.
 
+- **Private by default.** A plan is readable by its owner alone until it is
+  shared - with anyone holding the URL, with a share code, or with named
+  accounts. A code keeps working until it is regenerated or removed; only its
+  plaintext is shown once, at the moment it is minted.
 - **Passkeys only.** No email, no username, no password, no OAuth. A brand-new
   visitor registers with nothing but a passkey, and one WebAuthn prompt signs
   them straight in.
 - **API keys** for automation - as many as you want, expiry optional. A key
-  authorises upload, replacement, and delete for its owner's plans and nothing
-  else.
+  authorises upload, replacement, delete, and reading any plan its owner may
+  read; it cannot change who a plan is shared with.
 - **Runs on Cloudflare or your own box** from one source tree: R2/D1/KV on
   Workers, any S3-compatible store + Postgres/SQLite + Valkey when self-hosted.
 

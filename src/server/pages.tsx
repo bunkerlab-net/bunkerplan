@@ -2,6 +2,7 @@ import type { Child } from "hono/jsx";
 import { SiteFrame } from "../client/Chrome.tsx";
 import { PAGE_PROPS_ID, ROOT_ID } from "../client/mount.ts";
 import { NotFound } from "../client/NotFound.tsx";
+import { PlanGate } from "../client/PlanGate.tsx";
 import type { PageProps } from "../client/pages.tsx";
 import { DashboardPage, LandingPage } from "../client/pages.tsx";
 import type { AssetManifest } from "./assets.ts";
@@ -123,6 +124,28 @@ export function renderDashboard(
   return document(
     <Document assets={assets} social={{ origin, path }} page={page}>
       <DashboardPage {...page} />
+    </Document>,
+  );
+}
+
+/**
+ * The page a visitor gets when a plan exists but they may not read it.
+ *
+ * `social` is omitted deliberately, so `Document` emits `robots: noindex`: a
+ * gate carries no content worth indexing, and an indexed one would advertise
+ * that a private plan exists at that URL.
+ */
+export function renderPlanGate(
+  assets: AssetManifest,
+  planId: string,
+  hasCode: boolean,
+  origin: string,
+): string {
+  const path = `/p/${planId}`;
+  const page: PageProps = { name: "gate", path, origin, planId, hasCode };
+  return document(
+    <Document assets={assets} page={page}>
+      <PlanGate {...page} />
     </Document>,
   );
 }

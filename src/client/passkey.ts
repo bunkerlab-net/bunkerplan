@@ -19,8 +19,13 @@ function messageOf(failure: unknown): string {
 /**
  * One passkey ceremony runner shared by the nav and the sign-in card, so a
  * failure surfaces in a single place rather than once per component.
+ *
+ * `destination` is where a successful ceremony lands. The gate page passes
+ * its own plan URL: signing in there is how an owner or a grantee gets past
+ * the gate, and bouncing them to the dashboard would lose the plan they came
+ * for.
  */
-export function usePasskeyAction() {
+export function usePasskeyAction(destination = "/dashboard") {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -34,13 +39,13 @@ export function usePasskeyAction() {
         setBusy(false);
         return;
       }
-      // Both ceremonies end on the dashboard, and by a full document load
-      // rather than a client-side transition: registration signs the user in
-      // via a Set-Cookie on the verify-registration response, but `addPasskey`
-      // does not notify the client's session store (it normally runs with a
-      // session already present), so an in-page transition would arrive still
-      // believing it is signed out and bounce straight back off the guard.
-      window.location.assign("/dashboard");
+      // Both ceremonies end by a full document load rather than a client-side
+      // transition: registration signs the user in via a Set-Cookie on the
+      // verify-registration response, but `addPasskey` does not notify the
+      // client's session store (it normally runs with a session already
+      // present), so an in-page transition would arrive still believing it is
+      // signed out and bounce straight back off the guard.
+      window.location.assign(destination);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setBusy(false);

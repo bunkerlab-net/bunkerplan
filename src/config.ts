@@ -34,6 +34,7 @@ export interface Config {
   clientIpHeader: string;
   maxUploadBytes: number;
   planIdLength: number;
+  shareCodeLength: number;
   /**
    * Per-account ceiling on stored plans. Bounds total storage at this times
    * `maxUploadBytes`, which the upload rate limit alone cannot do - that caps
@@ -73,9 +74,11 @@ const MIN_RATE_WINDOW_SEC = 60;
 const DEFAULT_MAX_UPLOAD_BYTES = 2_097_152;
 const DEFAULT_PLAN_ID_LENGTH = 16;
 /**
- * Plan URLs are public and unlisted, so the id is the only thing keeping a
- * document from being found by guessing. Eight lowercase alphanumeric
- * characters is about 41 bits, which is the floor worth allowing.
+ * A public plan URL is unlisted, so the id is the only thing keeping that
+ * document from being found by guessing - and for a private one the id still
+ * bounds what the gate leaks, since a 401 confirms a plan exists. Eight
+ * lowercase alphanumeric characters is about 41 bits, the floor worth
+ * allowing.
  */
 const MIN_PLAN_ID_LENGTH = 8;
 /**
@@ -87,6 +90,15 @@ const MIN_PLAN_ID_LENGTH = 8;
  * to `{id}.{host}` stays a redirect instead of a re-encoding.
  */
 const MAX_PLAN_ID_LENGTH = 63;
+const DEFAULT_SHARE_CODE_LENGTH = 16;
+/**
+ * A share code is the only thing gating an unauthenticated read, so unlike a
+ * plan id there is no short end worth allowing: 16 base62 characters is ~95
+ * bits, and the floor is the default.
+ */
+const MIN_SHARE_CODE_LENGTH = 16;
+/** Matches the cap on a `?code=` value the read gate will hash. */
+const MAX_SHARE_CODE_LENGTH = 64;
 
 function str(env: Env, key: string): string | undefined {
   const raw = env[key];
@@ -290,6 +302,7 @@ function parseLogging(env: Env, problems: string[]): LogSettings {
 interface Limits {
   maxUploadBytes: number;
   planIdLength: number;
+  shareCodeLength: number;
   maxPlansPerUser: number;
   uploadRateMax: number;
   uploadRateWindowSec: number;
@@ -311,6 +324,14 @@ function parseLimits(env: Env, problems: string[]): Limits {
       MIN_PLAN_ID_LENGTH,
       problems,
       MAX_PLAN_ID_LENGTH,
+    ),
+    shareCodeLength: int(
+      env,
+      "SHARE_CODE_LENGTH",
+      DEFAULT_SHARE_CODE_LENGTH,
+      MIN_SHARE_CODE_LENGTH,
+      problems,
+      MAX_SHARE_CODE_LENGTH,
     ),
     maxPlansPerUser: int(env, "MAX_PLANS_PER_USER", 250, 1, problems),
     uploadRateMax: int(env, "UPLOAD_RATE_MAX", 30, 1, problems),

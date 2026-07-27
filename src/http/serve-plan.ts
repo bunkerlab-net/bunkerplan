@@ -1,5 +1,7 @@
-import { isPlanId } from "../ids.ts";
-import type { PlanStorage } from "../services/types.ts";
+import type { AppAuth } from "../auth/instance.ts";
+import type { Config } from "../config.ts";
+import type { PlanRepo, PlanStorage } from "../services/types.ts";
+import { resolvePlanAccess } from "./plan-access.ts";
 import { PLAN_CSP } from "./security-headers.ts";
 
 /**
@@ -11,26 +13,35 @@ import { PLAN_CSP } from "./security-headers.ts";
 
 // Short max-age rather than `immutable` because plans can be deleted, and
 // replaced: a cache that already has one can serve the old document until the
-// window is up.
+// window is up. Only a public plan gets it - see below.
 const CACHE_CONTROL = "public, max-age=300, must-revalidate";
 
 /**
- * Serves a published plan, or `null` when there is nothing to serve.
+ * Serves a plan the visitor is allowed to read.
  *
  * `null` means "render the site's own 404 page" - the same page an unknown
  * route gets, so a plan that was deleted is indistinguishable from an id that
- * was never issued.
+ * was never issued. The gate marker means the plan is there but this visitor
+ * is not allowed it yet; the caller renders the gate page at 401, which is
+ * load-bearing (see src/app.ts).
+ *
+ * Access is resolved before storage is touched, so an unauthorised visitor
+ * costs one row read and never an object read.
  */
 export async function servePlan(
   storage: PlanStorage,
+  plans: PlanRepo,
+  auth: AppAuth,
+  config: Pick<Config, "secret" | "publicBaseUrl">,
   request: Request,
   planId: string,
-): Promise<Response | null> {
-  // Only ids this app could have issued are routable. Anything else takes the
-  // same path as a plan that is not there.
-  if (!isPlanId(planId)) return null;
+): Promise<Response | { gate: true; hasCode: boolean } | null> {
+  const access = await resolvePlanAccess(auth, plans, config, request, planId);
+  if (access.kind === "missing") return null;
+  if (access.kind === "gate") {
+    return { gate: true, hasCode: access.hasCode };
+  }
 
-  // No auth, no database read: serving a plan is a single object read.
   const object = await storage.get(planId);
   if (object === null) return null;
 
@@ -44,9 +55,18 @@ export async function servePlan(
     "content-security-policy": PLAN_CSP,
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
-    "cache-control": CACHE_CONTROL,
     etag: object.etag,
+    // A private plan must never land in a shared cache, and its response
+    // varies by the credential that opened the gate.
+    ...(access.visibility === "public"
+      ? { "cache-control": CACHE_CONTROL }
+      : { "cache-control": "private, no-store", vary: "cookie" }),
   };
+
+  // On the 304 branch too: a conditional request carrying `?code=` must still
+  // leave the reader holding the cookie, or the parameter would be needed on
+  // every subsequent request.
+  if (access.setCookie !== undefined) headers["set-cookie"] = access.setCookie;
 
   if (request.headers.get("if-none-match") === object.etag) {
     return new Response(null, { status: 304, headers });
