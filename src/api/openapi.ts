@@ -448,7 +448,12 @@ const CODE_QUERY_PARAM = {
   in: "query",
   required: false,
   description:
-    "A share code. Needed once: the response also sets the unlock cookie.",
+    "A share code. Needed once: the response also sets a path-scoped cookie, " +
+    "so a reader that keeps cookies never sends it again. Being a query " +
+    "parameter it does travel in the URL, where it can reach browser " +
+    "history, a `Referer` header, and any proxy that logs query strings - " +
+    "regenerate the code to invalidate a link that has leaked. This app logs " +
+    "no URLs. `POST /api/plans/{id}/unlock` redeems a code in a body instead.",
   schema: inlineSchema(ShareCodeQuery),
 };
 

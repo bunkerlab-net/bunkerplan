@@ -7,6 +7,9 @@ import { inputOf } from "./dom.ts";
 import type { GateProps } from "./pages.tsx";
 import { usePasskeyAction } from "./passkey.ts";
 
+/** One gate per page, so a constant id is unambiguous. */
+const ERROR_ID = "share-code-error";
+
 /**
  * What a visitor sees when a plan exists but they are not allowed it yet.
  *
@@ -79,6 +82,7 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
                   spellcheck={false}
                   placeholder="Share code"
                   aria-label="Share code"
+                  aria-describedby={error === null ? undefined : ERROR_ID}
                   maxLength={MAX_SHARE_CODE_LENGTH}
                   value={code}
                   disabled={busy}
@@ -92,7 +96,13 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
                   Unlock
                 </button>
               </form>
-              {error !== null && <p className="error">{error}</p>}
+              {/* A wrong code is the expected outcome here, so the message has
+                  to reach a screen reader rather than only the page. */}
+              {error !== null && (
+                <p className="error" id={ERROR_ID} role="alert">
+                  {error}
+                </p>
+              )}
             </>
           )}
 

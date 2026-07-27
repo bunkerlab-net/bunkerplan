@@ -466,13 +466,18 @@ describe("the reference UI", () => {
   });
 });
 
-/** The `bkp_share_*` cookie from a `set-cookie`, as a browser would send it. */
+/**
+ * The `bkp_share_*` cookie from a response, as a browser would send it back.
+ *
+ * `getSetCookie()` rather than `get("set-cookie")`: several cookies can share
+ * one response, and `get` folds them into a single comma-joined string that
+ * splitting on `;` would mangle.
+ */
 function shareCookie(response: FetchResponse): string {
-  const header = response.headers.get("set-cookie");
-  expect(header).not.toBeNull();
-  const pair = (header ?? "").split(";")[0] ?? "";
-  expect(pair).toStartWith("bkp_share_");
-  return pair;
+  const values = response.headers.getSetCookie();
+  const share = values.find((value) => value.startsWith("bkp_share_"));
+  expect(share).toBeDefined();
+  return (share ?? "").split(";")[0] ?? "";
 }
 
 describe("gated sharing", () => {
@@ -595,6 +600,33 @@ describe("gated sharing", () => {
     // Nothing was claimed: the parse happens before the body is even read, so
     // a refusal cannot leave a row behind with no object.
     expect(await countPlans()).toBe(before);
+  });
+
+  test("no response carrying a plaintext code may be cached", async () => {
+    const { key, cookie } = await app.accountWithSession();
+
+    // The upload that mints one.
+    const upload201 = await app.fetch(
+      "/api/plans?visibility=code",
+      upload(key, html("uncacheable")),
+    );
+    expect(upload201.status).toBe(201);
+    expect(upload201.headers.get("cache-control")).toBe("no-store");
+    const created = (await upload201.json()) as Created;
+
+    // And the rotate that mints another.
+    const rotated = await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(rotated.status).toBe(201);
+    expect(rotated.headers.get("cache-control")).toBe("no-store");
+
+    // The sharing state names every account a plan is shared with.
+    const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: { cookie },
+    });
+    expect(sharing.headers.get("cache-control")).toBe("no-store");
   });
 
   test("?visibility=code returns the plaintext once and stores it private", async () => {

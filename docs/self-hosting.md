@@ -228,9 +228,14 @@ neither loads anything off-origin.
 Authentication is an API key in the `x-api-key` header. Keys are minted from
 the dashboard; there is no limit on how many, and expiry is optional. A key
 authorises upload, replacement, delete, and reading any plan its owner may
-read. Listing plans, relabelling them, every sharing route, managing keys, and
-deleting the account all require a session - a leaked key must not be able to
-hand out access to other people.
+read. Listing plans, relabelling them, changing who a plan is shared with,
+managing keys, and deleting the account all require a session - a leaked key
+must not be able to hand out access to other people.
+
+Two routes are deliberately unauthenticated, because they are how someone
+holding only a share code gets in: `GET /p/{id}?code=...` and
+`POST /api/plans/{id}/unlock`. Both authorise on the code itself. Redeeming a
+code is not the same as managing sharing, which stays session-only.
 
 A plan is private unless its upload said otherwise. `?visibility=` takes
 `public`, `private` (the default), or `code`; `code` stores the plan private

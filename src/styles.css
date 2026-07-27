@@ -162,7 +162,10 @@ main {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   margin-right: 6px;
-  color: var(--cloud-dark);
+  /* Not `--cloud-dark`: at 12px that is 3.15:1 on the canvas, under the
+     4.5:1 this size needs - and the reference reserves that token for
+     borders and dividers rather than text. `--text-muted` is 9.38:1. */
+  color: var(--text-muted);
 }
 
 /* --- Type --------------------------------------------------------------- */

@@ -38,9 +38,13 @@ async function updateOwned(
  * One statement decides both questions. `select ... where` makes the quota
  * part of the claim rather than something read beforehand, which two
  * concurrent uploads would both pass at the boundary; `on conflict do nothing`
- * keeps the id collision behaviour. SQLite serialises writers, so this is
- * atomic for free - the Postgres twin needs an advisory lock for the same
- * guarantee.
+ * keeps the id collision behaviour.
+ *
+ * The atomicity is statement-level: count-and-claim cannot be interleaved
+ * because it is one statement, and SQLite serialises writers. It says nothing
+ * about two calls to this function, which are two statements and not one
+ * unit. The Postgres twin needs an advisory lock to get the same
+ * statement-level guarantee, because it counts against a snapshot.
  */
 async function claimRow(
   db: SqliteDb,

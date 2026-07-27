@@ -61,22 +61,22 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
   const [handle, setHandle] = useState("");
   const [code, setCode] = useState<string | null>(null);
 
+  // Reads its own state directly rather than through `guard`: opening a row
+  // is not a mutation, and routing it through the panel would flip the shared
+  // busy flag and refetch every plan just to fill in one editor. A failure
+  // shows the retry below instead of the panel's error line.
   const load = useCallback(async () => {
     setFailed(false);
     try {
       setState(await getSharing(plan.id));
-    } catch (cause) {
-      // A flag of its own, because `guard` swallows the throw into the panel's
-      // error line - without this the editor would sit on "Loading…" for as
-      // long as the row stayed open. Rethrown so that line still fills in.
+    } catch {
       setFailed(true);
-      throw cause;
     }
   }, [plan.id]);
 
   useEffect(() => {
-    void guard(load);
-  }, [load, guard]);
+    void load();
+  }, [load]);
 
   if (state === null) {
     // The same container as the loaded state, so opening a row does not shift
@@ -90,7 +90,7 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
               type="button"
               className="btn-text"
               disabled={busy}
-              onClick={() => void guard(load)}
+              onClick={() => void load()}
             >
               Try again
             </button>

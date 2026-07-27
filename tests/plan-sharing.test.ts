@@ -453,7 +453,13 @@ describe("revokePlanGrant", () => {
  */
 describe("every sharing handler refuses an API key", () => {
   const keyOnly = fakeAuth(null, OWNER);
-  const keyed = (init: RequestInit = {}): Request =>
+  // Headers typed as a plain record, not `HeadersInit`: the spread below adds
+  // the key, and spreading a `Headers` instance would silently yield `{}`.
+  const keyed = (
+    init: Omit<RequestInit, "headers"> & {
+      headers?: Record<string, string>;
+    } = {},
+  ): Request =>
     new Request("https://plans.example.test/x", {
       ...init,
       headers: { ...(init.headers ?? {}), "x-api-key": "bkp_valid" },

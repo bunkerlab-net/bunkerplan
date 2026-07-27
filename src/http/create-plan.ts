@@ -104,6 +104,38 @@ async function admit(
   return { userId, label: parsed.label, requested: wanted.requested };
 }
 
+/**
+ * The 201, which is the only response in the app that can carry a plaintext
+ * share code.
+ */
+function created(
+  url: string,
+  id: string,
+  label: string | null,
+  code: string | null,
+): Response {
+  return Response.json(
+    {
+      id,
+      url,
+      label,
+      // The only time the plaintext is ever returned; there is no way to read
+      // it back. The caller composes `${url}?code=${code}`.
+      ...(code === null ? {} : { code }),
+    } satisfies PlanCreated,
+    {
+      status: 201,
+      headers: {
+        location: url,
+        // `?visibility=code` puts that code in this body, the same secret the
+        // rotate route protects. Unconditional rather than only on that
+        // branch, so the two upload paths cannot answer differently.
+        "cache-control": "no-store",
+      },
+    },
+  );
+}
+
 export async function createPlan(
   deps: CreatePlanDeps,
   request: Request,
@@ -151,16 +183,5 @@ export async function createPlan(
   }
   if (failure === "withdrawn") return problem(404, "not found");
 
-  const url = planUrl(config.publicBaseUrl, id);
-  return Response.json(
-    {
-      id,
-      url,
-      label,
-      // The only time the plaintext is ever returned; there is no way to read
-      // it back. The caller composes `${url}?code=${code}`.
-      ...(code === null ? {} : { code }),
-    } satisfies PlanCreated,
-    { status: 201, headers: { location: url } },
-  );
+  return created(planUrl(config.publicBaseUrl, id), id, label, code);
 }
