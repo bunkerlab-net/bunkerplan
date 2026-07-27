@@ -94,9 +94,11 @@ const DEFAULT_SHARE_CODE_LENGTH = 16;
 /**
  * A share code is the only thing gating an unauthenticated read, so unlike a
  * plan id there is no short end worth allowing: 16 base62 characters is ~95
- * bits, and the floor is the default.
+ * bits, and the floor is the default. Exported for the same reason as the
+ * ceiling - it is the stable bound the API documents accepting, independent
+ * of what this deployment mints.
  */
-const MIN_SHARE_CODE_LENGTH = 16;
+export const MIN_SHARE_CODE_LENGTH = 16;
 /**
  * The ceiling on a minted code, and so also the longest `?code=` the read gate
  * will hash. Exported because those two have to be the same number: a gate

@@ -218,13 +218,24 @@ describe("resolvePlanAccess", () => {
       await resolvePlanAccess(bySession.auth, plans, CONFIG, get("/p/x"), PLAN),
     ).toEqual({ kind: "granted", visibility: "private" });
 
-    const refused = fakeAuth({ keyUser: STRANGER });
+    const refusedKey = fakeAuth({ keyUser: STRANGER });
     expect(
       await resolvePlanAccess(
-        refused.auth,
+        refusedKey.auth,
         plans,
         CONFIG,
         get("/p/x", { "x-api-key": "k" }),
+        PLAN,
+      ),
+    ).toEqual({ kind: "gate", hasCode: false });
+
+    const refusedSession = fakeAuth({ sessionUser: STRANGER });
+    expect(
+      await resolvePlanAccess(
+        refusedSession.auth,
+        plans,
+        CONFIG,
+        get("/p/x"),
         PLAN,
       ),
     ).toEqual({ kind: "gate", hasCode: false });

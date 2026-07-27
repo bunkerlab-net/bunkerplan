@@ -36,6 +36,7 @@
  * identical code.
  */
 import * as z from "zod";
+import { MAX_SHARE_CODE_LENGTH, MIN_SHARE_CODE_LENGTH } from "../config.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 
 /**
@@ -309,10 +310,21 @@ export const ShareCodeCreated = component(
 
 export type ShareCodeCreated = z.infer<typeof ShareCodeCreated>;
 
+/**
+ * The bounds are the stable ones, not this deployment's
+ * `SHARE_CODE_LENGTH`: lowering that setting must not stop a code minted
+ * under the old one from being redeemed.
+ */
+const ShareCodeValue = z
+  .string()
+  .regex(/^[0-9A-Za-z]+$/)
+  .min(MIN_SHARE_CODE_LENGTH)
+  .max(MAX_SHARE_CODE_LENGTH);
+
 export const UnlockRequest = component(
   "UnlockRequest",
   z
-    .looseObject({ code: z.string() })
+    .looseObject({ code: ShareCodeValue })
     .meta({ title: "UnlockRequest", description: "A plaintext share code." }),
 );
 
@@ -402,7 +414,7 @@ export const PlanVisibilityQuery = z.enum(["public", "private", "code"]).meta({
 });
 
 /** The optional `?code=` on a plan document. */
-export const ShareCodeQuery = z.string().meta({
+export const ShareCodeQuery = ShareCodeValue.meta({
   description:
     "A share code. Grants access to this one plan and sets a path-scoped " +
     "cookie, so the parameter is only needed once per reader.",

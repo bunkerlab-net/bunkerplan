@@ -140,4 +140,13 @@ describe("handleEmail", () => {
     // this the lookup key a grant is addressed by.
     expect(handleEmail("k7mjq2rvxn")).toBe("k7mjq2rvxn@passkey.invalid");
   });
+
+  test("passes casing straight through, so lookup is case-sensitive", () => {
+    // Handles are minted lowercase, so this never differs in practice - but
+    // `u.email = ?` is an equality comparison, and a caller that upper-cased
+    // a handle would silently resolve nobody. Pinned so the contract is a
+    // decision rather than an accident.
+    expect(handleEmail("K7MJQ2RVXN")).toBe("K7MJQ2RVXN@passkey.invalid");
+    expect(handleEmail("K7MJQ2RVXN")).not.toBe(handleEmail("k7mjq2rvxn"));
+  });
 });

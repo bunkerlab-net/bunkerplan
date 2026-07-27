@@ -175,6 +175,33 @@ describe("reading and setting the sharing state", () => {
     });
     expect(calls.visibilities).toEqual([]);
   });
+
+  test("setPlanSharing refuses a body that is not JSON", async () => {
+    const { plans, calls } = fakePlans();
+    const response = await setPlanSharing(
+      fakeAuth(OWNER),
+      plans,
+      post(undefined),
+      PLAN,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await jsonOf(response)).toEqual({ error: "body must be JSON" });
+    expect(calls.visibilities).toEqual([]);
+  });
+
+  test("setPlanSharing refuses a body too large to be a visibility", async () => {
+    const { plans, calls } = fakePlans();
+    const response = await setPlanSharing(
+      fakeAuth(OWNER),
+      plans,
+      post({ visibility: "public", padding: "x".repeat(4096) }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(413);
+    expect(calls.visibilities).toEqual([]);
+  });
 });
 
 describe("the share code", () => {

@@ -31,8 +31,13 @@ import {
  */
 const MAX_CODE_LENGTH = MAX_SHARE_CODE_LENGTH;
 
-/** Room for `{"code":"…"}` at the longest code, and nothing more. */
-const MAX_UNLOCK_BODY_BYTES = 256;
+/**
+ * Room for `{"code":"…"}` at the longest code, and nothing more. Derived, so
+ * raising the ceiling cannot leave this refusing bodies that carry a valid
+ * code. The slack covers the JSON wrapper, whitespace, and any percent
+ * encoding the transport adds.
+ */
+const MAX_UNLOCK_BODY_BYTES = MAX_SHARE_CODE_LENGTH * 3 + 64;
 
 export type PlanAccess =
   | {

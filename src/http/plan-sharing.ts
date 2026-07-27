@@ -62,11 +62,16 @@ async function sharingState(
   const row = await plans.findAccess(planId);
   if (row === null) return problem(404, "not found");
 
-  return Response.json({
-    visibility: row.visibility,
-    hasShareCode: row.shareCodeHash !== null,
-    grants,
-  } satisfies PlanSharing);
+  return Response.json(
+    {
+      visibility: row.visibility,
+      hasShareCode: row.shareCodeHash !== null,
+      grants,
+    } satisfies PlanSharing,
+    // Names every account a plan is shared with, so it belongs in no cache.
+    // `applySecurityHeaders` sets no cache directive of its own.
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 export async function getPlanSharing(
@@ -132,7 +137,11 @@ export async function rotateShareCode(
   );
   if (!stored) return problem(404, "not found");
 
-  return Response.json({ code } satisfies ShareCodeCreated, { status: 201 });
+  // The one response that ever carries a plaintext code.
+  return Response.json({ code } satisfies ShareCodeCreated, {
+    status: 201,
+    headers: { "cache-control": "no-store" },
+  });
 }
 
 export async function clearShareCode(

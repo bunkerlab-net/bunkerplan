@@ -79,20 +79,26 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
   }, [load, guard]);
 
   if (state === null) {
-    return failed ? (
-      <p className="muted">
-        Could not load sharing for this plan.{" "}
-        <button
-          type="button"
-          className="btn-text"
-          disabled={busy}
-          onClick={() => void guard(load)}
-        >
-          Try again
-        </button>
-      </p>
-    ) : (
-      <p className="muted">Loading…</p>
+    // The same container as the loaded state, so opening a row does not shift
+    // the table as the panel arrives.
+    return (
+      <div className="sharing">
+        {failed ? (
+          <p className="muted">
+            Could not load sharing for this plan.{" "}
+            <button
+              type="button"
+              className="btn-text"
+              disabled={busy}
+              onClick={() => void guard(load)}
+            >
+              Try again
+            </button>
+          </p>
+        ) : (
+          <p className="muted">Loading…</p>
+        )}
+      </div>
     );
   }
 
