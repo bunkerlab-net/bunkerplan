@@ -243,6 +243,15 @@ and mints a share code, returned once in the 201 body and never readable
 afterwards. An unauthorised visitor to a private plan gets `401` and a gate
 page offering a code box and a sign-in button.
 
+A private plan can be shared with named accounts in the same request that
+stores it, using `?grants=` with a comma-separated list of handles, so it need
+never exist unshared. The same list can be given later to
+`POST /api/plans/{id}/grants` as `handles`, either comma-separated or as a
+JSON array. Both report which handles landed and which no account answers to;
+one mistyped name does not refuse the rest. At most 50 accounts per request.
+Sharing with accounts is session-only after upload - a key can name accounts
+on a plan it is creating, but cannot hand out access to an existing one.
+
 ```sh
 # Upload, optionally labelled
 curl -X PUT "https://plans.example.com/api/plans?label=Q3%20rollout" \
@@ -258,6 +267,20 @@ curl -X PUT "https://plans.example.com/api/plans?visibility=code" \
   --data-binary @plan.html
 # 201 {"id":"...","url":"...","label":null,"code":"9wRaReOwG14Cw0ko"}
 # Share ${url}?code=${code} - the code is never returned again.
+
+# Share with a whole team while storing the plan
+curl -X PUT "https://plans.example.com/api/plans?visibility=private&grants=k7mjq2rvxn,q5qkesmr5v" \
+  -H "x-api-key: bkp_..." \
+  -H "content-type: text/html" \
+  --data-binary @plan.html
+# 201 {"id":"...","url":"...","label":null,
+#      "granted":["k7mjq2rvxn","q5qkesmr5v"],"unknown":[]}
+
+# Or afterwards, with a session
+curl -X POST https://plans.example.com/api/plans/<id>/grants \
+  -H "cookie: ..." -H "content-type: application/json" \
+  -d '{"handles":"k7mjq2rvxn, q5qkesmr5v"}'
+# 200 {"granted":["k7mjq2rvxn","q5qkesmr5v"],"unknown":[]}
 
 # Replace the document behind an id you own - same URL, same label
 curl -X PUT https://plans.example.com/api/plans/<id> \

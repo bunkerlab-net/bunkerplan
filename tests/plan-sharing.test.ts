@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AppAuth } from "../src/auth/instance.ts";
+import { MAX_GRANTS_PER_REQUEST } from "../src/http/handle-list.ts";
 import {
   clearShareCode,
   getPlanSharing,
@@ -78,7 +79,9 @@ function fakePlans(
   const plans: PlanRepo = {
     insert: async () => "created",
     listByUser: async () => [],
-    findOwner: async () => null,
+    // `applyGrants` resolves ownership here before it touches a handle, so
+    // this has to follow `owned` like the rest of the fake.
+    findOwner: async () => (owned ? OWNER : null),
     relabel: async () => false,
     resize: async () => false,
     deleteOwned: async () => false,
@@ -305,68 +308,169 @@ describe("a plan the caller does not own is a 404", () => {
 });
 
 describe("grantPlan", () => {
-  test("passes the handle through and answers 204", async () => {
+  test("grants one handle and reports it", async () => {
     const { plans, calls } = fakePlans();
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handle: HANDLE }),
+      post({ handles: HANDLE }),
       PLAN,
     );
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({ granted: [HANDLE], unknown: [] });
     expect(calls.granted).toEqual([
       { planId: PLAN, ownerId: OWNER, handle: HANDLE },
     ]);
   });
 
-  test("trims the handle before it reaches the repository", async () => {
-    // A handle is copied out of a chat message as often as it is typed, so it
-    // arrives with whitespace. Untrimmed it would miss the `user.email`
-    // equality the grant is resolved by and report "no such account" for an
-    // account that plainly exists.
+  test("splits a comma-separated list into one grant each", async () => {
+    // The whole point of the field: naming five colleagues is one request,
+    // not five.
     const { plans, calls } = fakePlans();
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handle: `  ${HANDLE}\n` }),
+      post({ handles: `${HANDLE}, second , third` }),
       PLAN,
     );
 
-    expect(response.status).toBe(204);
-    expect(calls.granted[0]?.handle).toBe(HANDLE);
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({
+      granted: [HANDLE, "second", "third"],
+      unknown: [],
+    });
+    expect(calls.granted.map((call) => call.handle)).toEqual([
+      HANDLE,
+      "second",
+      "third",
+    ]);
   });
 
-  test.each([
-    ["granted", 204, null],
-    ["no-user", 404, { error: "no such account" }],
-    ["no-plan", 404, { error: "not found" }],
-  ] as const)("maps %s to %i", async (outcome, status, body) => {
-    const { plans } = fakePlans({ outcome });
+  test("takes an array as readily as a string", async () => {
+    const { plans, calls } = fakePlans();
+    await grantPlan(
+      fakeAuth(OWNER),
+      plans,
+      post({ handles: [`${HANDLE},second`, " third "] }),
+      PLAN,
+    );
+
+    expect(calls.granted.map((call) => call.handle)).toEqual([
+      HANDLE,
+      "second",
+      "third",
+    ]);
+  });
+
+  test("collapses a repeated handle rather than reporting it twice", async () => {
+    const { plans, calls } = fakePlans();
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handle: HANDLE }),
+      post({ handles: `${HANDLE}, ${HANDLE}` }),
       PLAN,
     );
 
-    expect(response.status).toBe(status);
-    if (body !== null) expect(await jsonOf(response)).toEqual(body);
+    expect(await jsonOf(response)).toEqual({ granted: [HANDLE], unknown: [] });
+    expect(calls.granted).toHaveLength(1);
+  });
+
+  test("skips blank entries a trailing comma leaves behind", async () => {
+    const { plans, calls } = fakePlans();
+    const response = await grantPlan(
+      fakeAuth(OWNER),
+      plans,
+      post({ handles: `${HANDLE},,` }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.granted.map((call) => call.handle)).toEqual([HANDLE]);
+  });
+
+  test("an unknown handle is reported, not fatal", async () => {
+    // One mistyped name must not refuse the rest: the owner would have to
+    // work out which of five it was.
+    const { plans } = fakePlans({ outcome: "no-user" });
+    const response = await grantPlan(
+      fakeAuth(OWNER),
+      plans,
+      post({ handles: `${HANDLE},second` }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({
+      granted: [],
+      unknown: [HANDLE, "second"],
+    });
+  });
+
+  test("a plan the caller does not own is a 404, before any handle", async () => {
+    // The security property: `grantByHandle` resolves the handle before the
+    // plan, so a stranger naming a handle that does not exist would get a 200
+    // describing their typo unless ownership is settled first.
+    const { plans, calls } = fakePlans({ owned: false });
+    const response = await grantPlan(
+      fakeAuth(OWNER),
+      plans,
+      post({ handles: `${HANDLE},second,third` }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(404);
+    expect(await jsonOf(response)).toEqual({ error: "not found" });
+    expect(calls.granted).toEqual([]);
+  });
+
+  test("a plan deleted mid-request is the same 404, and stops there", async () => {
+    const { plans, calls } = fakePlans({ outcome: "no-plan" });
+    const response = await grantPlan(
+      fakeAuth(OWNER),
+      plans,
+      post({ handles: `${HANDLE},second,third` }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(404);
+    // Stopped at the first, rather than asking three times about a plan that
+    // has gone.
+    expect(calls.granted).toHaveLength(1);
+  });
+
+  test("refuses more handles than one request may carry", async () => {
+    const { plans, calls } = fakePlans();
+    const many = Array.from(
+      { length: MAX_GRANTS_PER_REQUEST + 1 },
+      (_, index) => `handle${index}`,
+    ).join(",");
+    const response = await grantPlan(
+      fakeAuth(OWNER),
+      plans,
+      post({ handles: many }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(400);
+    expect(calls.granted).toEqual([]);
   });
 
   test.each([
-    ["no handle field", {}],
-    ["a null handle", { handle: null }],
-    ["a non-string handle", { handle: 42 }],
-    ["an empty handle", { handle: "" }],
-    ["a whitespace-only handle", { handle: "   " }],
-    ["a JSON array", []],
+    ["no handles field", {}],
+    ["a null list", { handles: null }],
+    ["a numeric list", { handles: 42 }],
+    ["an array holding a non-string", { handles: ["ok", 7] }],
+    ["an empty string", { handles: "" }],
+    ["a whitespace-only string", { handles: "   " }],
+    ["only commas", { handles: ",,," }],
+    ["an empty array", { handles: [] }],
+    ["a JSON array body", []],
   ])("refuses %s without touching the repository", async (_, body) => {
     const { plans, calls } = fakePlans();
     const response = await grantPlan(fakeAuth(OWNER), plans, post(body), PLAN);
 
     expect(response.status).toBe(400);
-    expect(await jsonOf(response)).toEqual({ error: "handle is required" });
     expect(calls.granted).toEqual([]);
   });
 

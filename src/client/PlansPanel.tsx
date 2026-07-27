@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "hono/jsx";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import {
-  addGrant,
+  addGrants,
   clearShareCode,
   deletePlan,
   getSharing,
@@ -263,6 +263,8 @@ function ShareCodeBlock(
 function GrantsBlock(props: BlockProps & { grants: string[] }) {
   const { plan, guard, reload, locked } = props;
   const [handle, setHandle] = useState("");
+  /** Handles the last submission named that no account answers to. */
+  const [unknown, setUnknown] = useState<string[]>([]);
 
   const submit = (event: Event) => {
     event.preventDefault();
@@ -271,8 +273,13 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
     const wanted = handle.trim();
     if (locked || wanted === "") return;
     void guard(async () => {
-      await addGrant(plan.id, wanted);
-      setHandle("");
+      // Sent as typed: the server splits on commas, so a list written here
+      // and a list written against the API are parsed by the same code.
+      const result = await addGrants(plan.id, wanted);
+      setUnknown(result.unknown);
+      // Keep the field when nothing landed, so a single mistyped handle can
+      // be corrected rather than retyped.
+      if (result.granted.length > 0) setHandle("");
       await reload();
     });
   };
@@ -286,41 +293,26 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
   return (
     <div>
       <h3>Shared with</h3>
-      {props.grants.length === 0 ? (
-        <p className="empty">No accounts yet.</p>
-      ) : (
-        <ul className="tag-list">
-          {props.grants.map((granted) => (
-            <li key={granted}>
-              <span className="mono">{granted}</span>
-              <button
-                type="button"
-                className="btn-text btn-text-clay"
-                // Every row's button reads "Remove" otherwise, so a list of
-                // them is a list of identical controls out of context.
-                aria-label={`Remove ${granted}`}
-                disabled={locked}
-                onClick={() => revoke(granted)}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <GrantedList grants={props.grants} locked={locked} onRevoke={revoke} />
       <p className="muted">
         A handle is the value shown as <strong>Handle</strong> beside{" "}
         <strong>Sign out</strong> on that person's own dashboard - ask them for
-        it.
+        it. Separate several with commas.
       </p>
+      {unknown.length > 0 && (
+        <p className="error" role="alert">
+          No account holds {unknown.join(", ")}. Everyone else on that list was
+          added.
+        </p>
+      )}
       {/* A real form, not a button beside an input: Enter in a text field
           submitting its form is native behaviour, and typing a handle then
           pressing Enter is what anyone will do. */}
       <form className="row" onSubmit={submit}>
         <input
           type="text"
-          placeholder="Account handle"
-          aria-label={`Share plan ${plan.id} with an account`}
+          placeholder="Account handles, comma-separated"
+          aria-label={`Share plan ${plan.id} with accounts`}
           value={handle}
           disabled={locked}
           onChange={(event: Event) => setHandle(inputOf(event).value)}
@@ -334,6 +326,37 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
         </button>
       </form>
     </div>
+  );
+}
+
+/** The accounts a plan is already shared with, each with a way out. */
+function GrantedList(props: {
+  grants: string[];
+  locked: boolean;
+  onRevoke: (handle: string) => void;
+}) {
+  if (props.grants.length === 0) {
+    return <p className="empty">No accounts yet.</p>;
+  }
+  return (
+    <ul className="tag-list">
+      {props.grants.map((granted) => (
+        <li key={granted}>
+          <span className="mono">{granted}</span>
+          <button
+            type="button"
+            className="btn-text btn-text-clay"
+            // Every row's button reads "Remove" otherwise, so a list of them
+            // is a list of identical controls out of context.
+            aria-label={`Remove ${granted}`}
+            disabled={props.locked}
+            onClick={() => props.onRevoke(granted)}
+          >
+            Remove
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

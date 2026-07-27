@@ -42,6 +42,9 @@ interface Created {
   label: string | null;
   /** Present only for `?visibility=code`; the plaintext, shown once. */
   code?: string;
+  /** Both present only for `?grants=`. */
+  granted?: string[];
+  unknown?: string[];
 }
 
 /** `Response.json()` erases the body; assertions need something to compare. */
@@ -59,10 +62,15 @@ async function jsonBody(
 async function createPlan(
   key: string,
   body: string,
-  over: { label?: string; visibility?: "public" | "private" | "code" } = {},
+  over: {
+    label?: string;
+    visibility?: "public" | "private" | "code";
+    grants?: string;
+  } = {},
 ): Promise<Created> {
   const query = new URLSearchParams();
   if (over.label !== undefined) query.set("label", over.label);
+  if (over.grants !== undefined) query.set("grants", over.grants);
   query.set("visibility", over.visibility ?? "public");
   const response = await app.fetch(
     `/api/plans?${query.toString()}`,
@@ -518,9 +526,9 @@ describe("gated sharing", () => {
     const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { ...session, "content-type": "application/json" },
-      body: JSON.stringify({ handle: guest.handle }),
+      body: JSON.stringify({ handles: guest.handle }),
     });
-    expect(granted.status).toBe(204);
+    expect(granted.status).toBe(200);
 
     const renamed = await app.fetch("/api/auth/update-user", {
       method: "POST",
@@ -744,9 +752,9 @@ describe("gated sharing", () => {
     const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { cookie: owner.cookie, "content-type": "application/json" },
-      body: JSON.stringify({ handle: guest.handle }),
+      body: JSON.stringify({ handles: guest.handle }),
     });
-    expect(granted.status).toBe(204);
+    expect(granted.status).toBe(200);
 
     // The gate authorises the user behind a credential, not a credential type.
     for (const headers of [
@@ -783,10 +791,103 @@ describe("gated sharing", () => {
     const unknown = await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { cookie: owner.cookie, "content-type": "application/json" },
-      body: JSON.stringify({ handle: "nobodyatall" }),
+      body: JSON.stringify({ handles: "nobodyatall" }),
     });
-    expect(unknown.status).toBe(404);
-    expect(await jsonBody(unknown)).toEqual({ error: "no such account" });
+    // Reported rather than fatal: naming five colleagues and mistyping one
+    // must still share the plan with the four.
+    expect(unknown.status).toBe(200);
+    expect(await jsonBody(unknown)).toEqual({
+      granted: [],
+      unknown: ["nobodyatall"],
+    });
+  });
+
+  test("one request shares a plan with a whole list", async () => {
+    const owner = await app.accountWithSession();
+    const first = await app.accountWithSession();
+    const second = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("team"), {
+      visibility: "private",
+    });
+
+    const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { cookie: owner.cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        handles: ` ${first.handle}, ${second.handle} ,nobodyatall,`,
+      }),
+    });
+    expect(granted.status).toBe(200);
+    expect(await jsonBody(granted)).toEqual({
+      granted: [first.handle, second.handle],
+      unknown: ["nobodyatall"],
+    });
+
+    // Both can actually read it, which is the point of the request.
+    for (const account of [first, second]) {
+      const served = await app.fetch(`/p/${created.id}`, {
+        headers: { cookie: account.cookie },
+      });
+      expect(served.status).toBe(200);
+    }
+
+    const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: { cookie: owner.cookie },
+    });
+    expect((await jsonBody(sharing))["grants"]).toEqual(
+      expect.arrayContaining([first.handle, second.handle]),
+    );
+  });
+
+  test("?grants= shares the plan in the request that stores it", async () => {
+    // So a private plan never has to exist unshared, even briefly.
+    const owner = await app.accountWithSession();
+    const guest = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("born-shared"), {
+      visibility: "private",
+      grants: `${guest.handle},nobodyatall`,
+    });
+
+    expect(created.granted).toEqual([guest.handle]);
+    expect(created.unknown).toEqual(["nobodyatall"]);
+
+    const served = await app.fetch(`/p/${created.id}`, {
+      headers: { cookie: guest.cookie },
+    });
+    expect(served.status).toBe(200);
+
+    // Still private: naming accounts is not the same as publishing.
+    const gated = await app.fetch(`/p/${created.id}`);
+    expect(gated.status).toBe(401);
+  });
+
+  test("an upload naming nobody carries no grant fields at all", async () => {
+    const owner = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("solo"), {
+      visibility: "private",
+    });
+    expect(created.granted).toBeUndefined();
+    expect(created.unknown).toBeUndefined();
+  });
+
+  test("an unusable ?grants= is refused before a row is written", async () => {
+    const owner = await app.accountWithSession();
+    const countPlans = async () =>
+      (
+        await app.db
+          .prepare("select count(*) as total from plan")
+          .first<{ total: number }>()
+      )?.total ?? -1;
+
+    const before = await countPlans();
+    // Present but empty: `?grants=` with nothing usable after it is a typo,
+    // not a request to share with nobody.
+    const response = await app.fetch(
+      "/api/plans?visibility=private&grants=%20%2C%20",
+      upload(owner.key, html("rejected")),
+    );
+    expect(response.status).toBe(400);
+    expect(await countPlans()).toBe(before);
   });
 
   test("a key is not a skeleton key for sharing management", async () => {
@@ -914,7 +1015,7 @@ describe("gated sharing", () => {
     await app.fetch(`/api/plans/${created.id}/grants`, {
       method: "POST",
       headers: { ...session, "content-type": "application/json" },
-      body: JSON.stringify({ handle: guest.handle }),
+      body: JSON.stringify({ handles: guest.handle }),
     });
 
     const flipped = await app.fetch(`/api/plans/${created.id}/sharing`, {
@@ -978,7 +1079,7 @@ describe("gated sharing", () => {
       },
       {
         path: `/api/plans/${created.id}/grants`,
-        init: { method: "POST", headers: json, body: '{"handle":"someone"}' },
+        init: { method: "POST", headers: json, body: '{"handles":"someone"}' },
       },
       {
         path: `/api/plans/${created.id}/grants/${stranger.handle}`,

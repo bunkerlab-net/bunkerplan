@@ -17,6 +17,16 @@ export interface PlanSharing {
   grants: string[];
 }
 
+/**
+ * What naming a set of accounts did. Declared here rather than imported from
+ * src/api/schemas.ts, like every other shape in this module: that one pulls
+ * in zod, which has no business in the browser bundle.
+ */
+export interface GrantResult {
+  granted: string[];
+  unknown: string[];
+}
+
 async function readError(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json();
@@ -129,13 +139,25 @@ export async function clearShareCode(id: string): Promise<void> {
   if (!response.ok) throw new Error(await readError(response));
 }
 
-export async function addGrant(id: string, handle: string): Promise<void> {
+/**
+ * Shares a plan with everyone named. `handles` goes over as typed - the
+ * server splits on commas - so the dashboard field takes a list without the
+ * client having to agree separately on how one is written.
+ *
+ * Returns the handles that landed and the ones no account answers to; a
+ * mistyped name is reported rather than refusing the rest.
+ */
+export async function addGrants(
+  id: string,
+  handles: string,
+): Promise<GrantResult> {
   const response = await fetch(`/api/plans/${id}/grants`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ handle }),
+    body: JSON.stringify({ handles }),
   });
   if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as GrantResult;
 }
 
 export async function removeGrant(id: string, handle: string): Promise<void> {

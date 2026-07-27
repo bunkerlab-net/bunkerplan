@@ -10,6 +10,11 @@ import type {
   PlanVisibility,
   RateLimitRepo,
 } from "../services/types.ts";
+import {
+  applyGrants,
+  type GrantOutcomes,
+  parseHandleList,
+} from "./handle-list.ts";
 import { parsePlanLabel } from "./plan-label.ts";
 import { planUrl } from "./plan-url.ts";
 import {
@@ -36,11 +41,13 @@ export interface CreatePlanDeps {
   logger: Logger;
 }
 
-/** What survived `admit`: the caller, and the two parsed query parameters. */
+/** What survived `admit`: the caller, and the parsed query parameters. */
 interface Admitted {
   userId: string;
   label: string | null;
   requested: UploadVisibility;
+  /** Accounts named by `?grants=`; empty when the parameter was absent. */
+  handles: string[];
 }
 
 /**
@@ -101,7 +108,22 @@ async function admit(
   const wanted = parseUploadVisibility(query.get("visibility"));
   if (!wanted.ok) return problem(400, wanted.reason);
 
-  return { userId, label: parsed.label, requested: wanted.requested };
+  // Absent means "share with nobody", which is not the same as present and
+  // empty - `?grants=` with nothing after it is a mistake worth reporting.
+  const raw = query.get("grants");
+  let handles: string[] = [];
+  if (raw !== null) {
+    const list = parseHandleList(raw);
+    if ("error" in list) return problem(400, list.error);
+    handles = list.handles;
+  }
+
+  return {
+    userId,
+    label: parsed.label,
+    requested: wanted.requested,
+    handles,
+  };
 }
 
 /**
@@ -113,6 +135,7 @@ function created(
   id: string,
   label: string | null,
   code: string | null,
+  grants: GrantOutcomes | null,
 ): Response {
   return Response.json(
     {
@@ -122,14 +145,18 @@ function created(
       // The only time the plaintext is ever returned; there is no way to read
       // it back. The caller composes `${url}?code=${code}`.
       ...(code === null ? {} : { code }),
+      // Only when `?grants=` asked for them, so an upload that named nobody
+      // does not carry two empty arrays.
+      ...(grants === null ? {} : grants),
     } satisfies PlanCreated,
     {
       status: 201,
       headers: {
         location: url,
         // `?visibility=code` puts that code in this body, the same secret the
-        // rotate route protects. Unconditional rather than only on that
-        // branch, so the two upload paths cannot answer differently.
+        // rotate route protects, and `?grants=` puts account handles in it.
+        // Unconditional rather than only on those branches, so the upload
+        // paths cannot answer differently.
         "cache-control": "no-store",
       },
     },
@@ -144,7 +171,7 @@ export async function createPlan(
 
   const admitted = await admit(deps, request);
   if (admitted instanceof Response) return admitted;
-  const { userId, label, requested } = admitted;
+  const { userId, label, requested, handles } = admitted;
 
   const body = await readUploadBody(request, config.maxUploadBytes);
   if (body instanceof Response) return body;
@@ -183,5 +210,11 @@ export async function createPlan(
   }
   if (failure === "withdrawn") return problem(404, "not found");
 
-  return created(planUrl(config.publicBaseUrl, id), id, label, code);
+  // After the object lands: a grant on a plan whose bytes never arrived would
+  // name accounts on something that 404s. The owner always owns the plan they
+  // just made, so `applyGrants` cannot report "no such plan" here.
+  const grants =
+    handles.length === 0 ? null : await applyGrants(plans, id, userId, handles);
+
+  return created(planUrl(config.publicBaseUrl, id), id, label, code, grants);
 }

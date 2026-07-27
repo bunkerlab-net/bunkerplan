@@ -37,6 +37,7 @@
  */
 import * as z from "zod";
 import { MAX_SHARE_CODE_LENGTH, MIN_SHARE_CODE_LENGTH } from "../config.ts";
+import { MAX_GRANTS_PER_REQUEST } from "../http/handle-list.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 
 /**
@@ -287,6 +288,14 @@ export const PlanCreated = component(
       // `describeShareCode` writes this field's description at document
       // build time, because it names a per-deployment length.
       code: z.string().optional(),
+      // Both present only when `?grants=` named someone, so an upload that
+      // shared with nobody does not carry two empty arrays.
+      granted: z.array(PlanHandle).optional().meta({
+        description: "Accounts `?grants=` gave access to.",
+      }),
+      unknown: z.array(PlanHandle).optional().meta({
+        description: "Handles from `?grants=` that no account answers to.",
+      }),
     })
     .meta({ title: "PlanCreated" }),
 );
@@ -341,13 +350,44 @@ export const UnlockRequest = component(
     .meta({ title: "UnlockRequest", description: "A plaintext share code." }),
 );
 
+/**
+ * A comma-separated string or an array; entries in an array are split too, so
+ * `"a, b"` and `["a", "b"]` are the same request. One shape rather than a
+ * separate single-handle field, because a list of one is not a special case.
+ */
 export const GrantRequest = component(
   "GrantRequest",
-  z.looseObject({ handle: PlanHandle }).meta({
-    title: "GrantRequest",
-    description: "The account to grant, addressed by handle.",
-  }),
+  z
+    .looseObject({
+      handles: z.union([z.string().min(1), z.array(PlanHandle).min(1)]),
+    })
+    .meta({
+      title: "GrantRequest",
+      description:
+        "The accounts to grant, addressed by handle. Blank entries are " +
+        `skipped and duplicates collapse; at most ${MAX_GRANTS_PER_REQUEST} ` +
+        "accounts in one request.",
+    }),
 );
+
+export const GrantResult = component(
+  "GrantResult",
+  z
+    .object({
+      granted: z.array(PlanHandle).meta({
+        description:
+          "Accounts that now have access, including any that already did.",
+      }),
+      unknown: z.array(PlanHandle).meta({
+        description:
+          "Handles no account answers to. Reported rather than fatal, so one " +
+          "mistyped name does not refuse the rest of the list.",
+      }),
+    })
+    .meta({ title: "GrantResult" }),
+);
+
+export type GrantResult = z.infer<typeof GrantResult>;
 
 export const SharingRequest = component(
   "SharingRequest",

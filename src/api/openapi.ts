@@ -8,6 +8,7 @@
  */
 import type { ZodType } from "zod";
 import type { Config } from "../config.ts";
+import { MAX_GRANTS_PER_REQUEST } from "../http/handle-list.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import { MAX_LABEL_BODY_BYTES } from "../http/relabel-plan.ts";
 import { PLAN_PAGE_SIZE } from "../services/types.ts";
@@ -15,6 +16,7 @@ import {
   componentSchemas,
   ErrorBody,
   GrantRequest,
+  GrantResult,
   Health,
   inlineSchema,
   type JsonSchema,
@@ -173,6 +175,17 @@ const HANDLE_PATH_PARAM = {
   schema: inlineSchema(PlanHandleParam),
 };
 
+const GRANTS_QUERY_PARAM = {
+  name: "grants",
+  in: "query",
+  required: false,
+  description:
+    "Accounts to share the new plan with, comma-separated. Names them in " +
+    "the same request that stores the plan, so a private plan need never " +
+    "exist unshared. The 201 reports which handles landed.",
+  schema: { type: "string", examples: ["k7mjq2rvxn,q5qkesmr5v"] },
+};
+
 const LOCATION_HEADER = {
   location: {
     description: "The plan's public URL, same as `url`.",
@@ -195,7 +208,7 @@ function createPlanOperation(
       `returned once as \`code\` in the response body (${codeFormat}) ` +
       "and never readable afterwards. Compose the share link by appending " +
       "`?code=` to `url`.",
-    parameters: [LABEL_QUERY_PARAM, VISIBILITY_QUERY_PARAM],
+    parameters: [LABEL_QUERY_PARAM, VISIBILITY_QUERY_PARAM, GRANTS_QUERY_PARAM],
     requestBody: UPLOAD_BODY,
     responses: {
       "201": {
@@ -375,10 +388,13 @@ const CLEAR_SHARE_CODE_OPERATION = {
 
 const GRANT_PLAN_OPERATION = {
   operationId: "grantPlan",
-  summary: "Share a plan with an account",
+  summary: "Share a plan with one or more accounts",
   description:
-    `${SHARING_NOTE} Granting the same handle twice succeeds: the state ` +
-    "asked for already holds.",
+    `${SHARING_NOTE} \`handles\` takes a comma-separated string or an array, ` +
+    `so a whole team is one request; at most ${MAX_GRANTS_PER_REQUEST} ` +
+    "accounts. Granting the same handle twice succeeds: the state asked for " +
+    "already holds. A handle no account answers to is reported in " +
+    "`unknown` rather than refusing the rest of the list.",
   tags: ["Sharing"],
   security: SESSION_AUTH,
   requestBody: {
@@ -386,11 +402,11 @@ const GRANT_PLAN_OPERATION = {
     content: { "application/json": { schema: ref(GrantRequest) } },
   },
   responses: {
-    "204": { description: "The account may now read this plan. No body." },
+    "200": json(GrantResult, "Which of the named accounts now have access."),
     ...failures({
-      400: "The body is not JSON, or `handle` is missing or blank.",
+      400: "The body is not JSON, or `handles` is missing, empty, or too long.",
       401: UNAUTHORISED,
-      404: `${NOT_FOUND} Also returned, with a distinct message, when no account holds that handle.`,
+      404: NOT_FOUND,
       413: "The body is too large to be this request.",
     }),
   },

@@ -1,9 +1,18 @@
-import type { PlanSharing, ShareCodeCreated } from "../api/schemas.ts";
+import type {
+  GrantResult,
+  PlanSharing,
+  ShareCodeCreated,
+} from "../api/schemas.ts";
 import type { AppAuth } from "../auth/instance.ts";
 import type { Config } from "../config.ts";
 import { newShareCode } from "../ids.ts";
 import type { PlanRepo } from "../services/types.ts";
 import { readBoundedBody } from "./bounded-body.ts";
+import {
+  applyGrants,
+  MAX_HANDLE_LIST_BYTES,
+  parseHandleList,
+} from "./handle-list.ts";
 import { parsePlanVisibility } from "./plan-visibility.ts";
 import { problem } from "./problem.ts";
 import { resolveSessionUserId } from "./require-user.ts";
@@ -27,8 +36,8 @@ import { hashShareCode } from "./share-auth.ts";
  * confirm that someone else's id exists.
  */
 
-/** A handle is ten characters; the document carrying one is tiny. */
-const MAX_GRANT_BODY_BYTES = 1024;
+/** Sized for the handle list this accepts, so the two cannot disagree. */
+const MAX_GRANT_BODY_BYTES = MAX_HANDLE_LIST_BYTES;
 
 /** The same, for `{ "visibility": "private" }`. */
 const MAX_SHARING_BODY_BYTES = 256;
@@ -160,7 +169,13 @@ export async function clearShareCode(
 }
 
 /**
- * Grants one account, addressed by handle.
+ * Grants one or more accounts, addressed by handle.
+ *
+ * `handles` takes a comma-separated string or an array, so sharing with a
+ * whole team is one request rather than one per person. The response names
+ * what landed: an unknown handle is reported rather than fatal, because
+ * refusing the whole list over one typo would make the owner work out which
+ * of five names was wrong.
  *
  * Confirming that a handle exists is safe: a handle is ten characters of a
  * 31-symbol alphabet, about 49 bits, so the set cannot be enumerated - and an
@@ -179,22 +194,19 @@ export async function grantPlan(
   if (read instanceof Response) return read;
 
   const { body } = read;
-  if (typeof body !== "object" || body === null || !("handle" in body)) {
-    return problem(400, "handle is required");
+  if (typeof body !== "object" || body === null || !("handles" in body)) {
+    return problem(400, "handles is required");
   }
-  const handle = body.handle;
-  if (typeof handle !== "string" || handle.trim() === "") {
-    return problem(400, "handle is required");
-  }
+  const parsed = parseHandleList(body.handles);
+  if ("error" in parsed) return problem(400, parsed.error);
 
-  switch (await plans.grantByHandle(planId, ownerId, handle.trim())) {
-    case "granted":
-      return new Response(null, { status: 204 });
-    case "no-user":
-      return problem(404, "no such account");
-    case "no-plan":
-      return problem(404, "not found");
-  }
+  const outcomes = await applyGrants(plans, planId, ownerId, parsed.handles);
+  if (outcomes === null) return problem(404, "not found");
+
+  return Response.json(outcomes satisfies GrantResult, {
+    // Names every account a plan is shared with, so it belongs in no cache.
+    headers: { "cache-control": "no-store" },
+  });
 }
 
 export async function revokePlanGrant(
