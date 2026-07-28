@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ErrorBody } from "../src/api/schemas.ts";
 import { readUploadBody } from "../src/http/upload-body.ts";
 
 /** Mirrors the production `MAX_UPLOAD_BYTES` default. */
@@ -72,21 +73,27 @@ describe("readUploadBody", () => {
   });
 
   /**
-   * The wire shape, not just the status. `error` alone for one fault keeps a
-   * client that reads only that field seeing what it always saw.
+   * The wire shape, not just the status, and parsed with the schema the
+   * published document is built from - so a body that drifts from `Error` fails
+   * here rather than shipping a document that lies. `error` alone for one fault
+   * keeps a client that reads only that field seeing what it always saw.
    */
-  test("reports one fault as `error` with no list beside it", async () => {
-    const html = `${HEAD}<img src="/logo.png">${TAIL}`;
+  const refusalBody = async (html: string) => {
     const response = (await readUploadBody(htmlRequest(html), MAX)) as Response;
-    expect(await response.json()).toEqual({
+    expect(response.status).toBe(422);
+    return ErrorBody.parse(await response.json());
+  };
+
+  test("reports one fault as `error` with no list beside it", async () => {
+    expect(await refusalBody(`${HEAD}<img src="/logo.png">${TAIL}`)).toEqual({
       error: "external reference: img[src] /logo.png",
     });
   });
 
   test("reports several faults as `error` plus the whole list", async () => {
-    const html = `${HEAD}<img src="/a.png"><img src="/b.png">${TAIL}`;
-    const response = (await readUploadBody(htmlRequest(html), MAX)) as Response;
-    expect(await response.json()).toEqual({
+    expect(
+      await refusalBody(`${HEAD}<img src="/a.png"><img src="/b.png">${TAIL}`),
+    ).toEqual({
       error: "external reference: img[src] /a.png",
       errors: [
         "external reference: img[src] /a.png",
@@ -100,17 +107,9 @@ describe("readUploadBody", () => {
       { length: 40 },
       (_, n) => `<img src="/i${n}.png">`,
     ).join("");
-    const response = (await readUploadBody(
-      htmlRequest(`${HEAD}${images}${TAIL}`),
-      MAX,
-    )) as Response;
-    const body = (await response.json()) as {
-      error: string;
-      errors: string[];
-      truncated: boolean;
-    };
+    const body = await refusalBody(`${HEAD}${images}${TAIL}`);
     expect(body.errors).toHaveLength(10);
     expect(body.truncated).toBe(true);
-    expect(body.error).toBe(body.errors[0]);
+    expect(body.errors?.[0]).toBe(body.error);
   });
 });
