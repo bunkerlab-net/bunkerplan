@@ -634,6 +634,9 @@ describe("gated sharing", () => {
     const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
       headers: { cookie },
     });
+    // Status first, like the two above: a 404 also carries `no-store`, so the
+    // header alone would pass on a request that never reached the handler.
+    expect(sharing.status).toBe(200);
     expect(sharing.headers.get("cache-control")).toBe("no-store");
   });
 
@@ -809,6 +812,7 @@ describe("gated sharing", () => {
     expect(await jsonBody(unknown)).toEqual({
       granted: [],
       unknown: ["nobodyatall"],
+      failed: [],
     });
   });
 
@@ -831,6 +835,7 @@ describe("gated sharing", () => {
     expect(await jsonBody(granted)).toEqual({
       granted: [first.handle, second.handle],
       unknown: ["nobodyatall"],
+      failed: [],
     });
 
     // Both can actually read it, which is the point of the request.
@@ -871,6 +876,7 @@ describe("gated sharing", () => {
     expect(await jsonBody(granted)).toEqual({
       granted: [byId.userId, byHandle.handle],
       unknown: [],
+      failed: [],
     });
 
     for (const account of [byId, byHandle]) {
@@ -1041,11 +1047,38 @@ describe("gated sharing", () => {
       200,
     );
 
+    // Redeem the rotated code, so there is a live cookie to invalidate.
+    const reUnlocked = await app.fetch(`/api/plans/${created.id}/unlock`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: second }),
+    });
+    expect(reUnlocked.status).toBe(204);
+    const secondCookie = shareCookie(reUnlocked);
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { cookie: secondCookie },
+        })
+      ).status,
+    ).toBe(200);
+
     const cleared = await app.fetch(`/api/plans/${created.id}/share-code`, {
       method: "DELETE",
       headers: session,
     });
     expect(cleared.status).toBe(204);
+
+    // Clearing has to reach the readers already holding a cookie, not just
+    // stop new redemptions - the cookie carries the digest, so removing the
+    // column is what retires it.
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { cookie: secondCookie },
+        })
+      ).status,
+    ).toBe(401);
 
     // With no code at all the endpoint cannot say a plan is code-shared.
     const afterClear = await app.fetch(`/api/plans/${created.id}/unlock`, {

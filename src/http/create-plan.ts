@@ -78,7 +78,7 @@ async function claimId(
 /**
  * Everything that must hold before a byte of the body is read: the caller's
  * identity, their allowance, that their account is not being deleted, and
- * that the two query parameters are usable.
+ * that `?label=`, `?visibility=`, and `?grants=` are all usable.
  *
  * Ordered this way so a large upload is never accepted and then thrown away
  * over a typo in `?visibility=`.
@@ -145,8 +145,8 @@ function created(
       // The only time the plaintext is ever returned; there is no way to read
       // it back. The caller composes `${url}?code=${code}`.
       ...(code === null ? {} : { code }),
-      // Only when `?grants=` asked for them, so an upload that named nobody
-      // does not carry two empty arrays.
+      // Only when `?grants=` asked for them, so an upload that named
+      // nobody does not carry three empty arrays.
       ...(grants === null ? {} : grants),
     } satisfies PlanCreated,
     {
@@ -154,13 +154,44 @@ function created(
       headers: {
         location: url,
         // `?visibility=code` puts that code in this body, the same secret the
-        // rotate route protects, and `?grants=` puts account accounts in it.
+        // rotate route protects, and `?grants=` puts account names in it.
         // Unconditional rather than only on those branches, so the upload
         // paths cannot answer differently.
         "cache-control": "no-store",
       },
     },
   );
+}
+
+/**
+ * Applies `?grants=` to a plan that is already stored, and never throws.
+ *
+ * The row and the object are durable by the time this runs, so a raised error
+ * would answer 500 for a plan that exists: the caller could not tell whether
+ * to retry the upload, and retrying would store it twice. `applyGrants`
+ * reports a per-account failure rather than raising; the catch here covers
+ * the ownership read it does first. `null` when nobody was named, so the
+ * response carries no grant fields at all.
+ */
+async function grantOnUpload(
+  deps: Pick<CreatePlanDeps, "plans" | "logger">,
+  planId: string,
+  userId: string,
+  accounts: string[],
+): Promise<GrantOutcomes | null> {
+  if (accounts.length === 0) return null;
+  try {
+    // "Not yours" is unreachable on a plan this request just made - but a
+    // concurrent delete between storing and granting would produce it, and
+    // passing the `null` through would strip the grant fields entirely,
+    // which reads exactly like an upload that named nobody.
+    const outcomes = await applyGrants(deps.plans, planId, userId, accounts);
+    if (outcomes !== null) return outcomes;
+    deps.logger.warn({ planId }, "plan vanished before its grants applied");
+  } catch (cause) {
+    deps.logger.warn({ err: cause, planId }, "grants failed on upload");
+  }
+  return { granted: [], unknown: [], failed: accounts };
 }
 
 export async function createPlan(
@@ -210,13 +241,7 @@ export async function createPlan(
   }
   if (failure === "withdrawn") return problem(404, "not found");
 
-  // After the object lands: a grant on a plan whose bytes never arrived would
-  // name accounts on something that 404s. The owner always owns the plan they
-  // just made, so `applyGrants` cannot report "no such plan" here.
-  const grants =
-    accounts.length === 0
-      ? null
-      : await applyGrants(plans, id, userId, accounts);
+  const grants = await grantOnUpload(deps, id, userId, accounts);
 
   return created(planUrl(config.publicBaseUrl, id), id, label, code, grants);
 }

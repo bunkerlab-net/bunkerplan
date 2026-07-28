@@ -307,14 +307,22 @@ export const PlanCreated = component(
       // `describeShareCode` writes this field's description at document
       // build time, because it names a per-deployment length.
       code: z.string().optional(),
-      // Both present only when `?grants=` named someone, so an upload that
-      // shared with nobody does not carry two empty arrays.
+      // All three present only when `?grants=` named someone, so an upload
+      // that shared with nobody does not carry three empty arrays.
       granted: z.array(PlanAccount).optional().meta({
         description: "Accounts `?grants=` gave access to.",
       }),
       unknown: z.array(PlanAccount).optional().meta({
-        description: "Handles from `?grants=` that no account answers to.",
+        description: "Entries from `?grants=` that no account answers to.",
       }),
+      failed: z
+        .array(PlanAccount)
+        .optional()
+        .meta({
+          description:
+            "Entries from `?grants=` whose grant errored. The plan is stored " +
+            "either way; retry these against POST /api/plans/{id}/grants.",
+        }),
     })
     .meta({ title: "PlanCreated" }),
 );
@@ -401,8 +409,14 @@ export const GrantResult = component(
       }),
       unknown: z.array(PlanAccount).meta({
         description:
-          "Handles no account answers to. Reported rather than fatal, so one " +
+          "Entries no account answers to. Reported rather than fatal, so one " +
           "mistyped name does not refuse the rest of the list.",
+      }),
+      failed: z.array(PlanAccount).meta({
+        description:
+          "Entries whose grant errored rather than being refused. Safe to " +
+          "retry: granting is idempotent, so a retry that had in fact landed " +
+          "comes back under `granted`.",
       }),
     })
     .meta({ title: "GrantResult" }),

@@ -25,6 +25,7 @@ export interface PlanSharing {
 export interface GrantResult {
   granted: string[];
   unknown: string[];
+  failed: string[];
 }
 
 async function readError(response: Response): Promise<string> {

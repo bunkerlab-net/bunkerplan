@@ -470,7 +470,12 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
         },
       },
       ...failures({
-        400: "The body is not JSON, or `code` is missing or not a string.",
+        400:
+          "The body is not JSON, `code` is missing or not a string, or the " +
+          "body is larger than a code could make it. One status rather than " +
+          "a 413 for the last: this route is unauthenticated and its only " +
+          "caller is the gate page, so every malformed body means the same " +
+          "thing to it and the bound is a defence rather than a contract.",
         401: "The code did not match.",
         404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
       }),

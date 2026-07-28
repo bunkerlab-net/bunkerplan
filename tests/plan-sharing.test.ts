@@ -44,8 +44,8 @@ function fakeAuth(
 }
 
 interface Calls {
-  granted: { planId: string; ownerId: string; handle: string }[];
-  revoked: { planId: string; ownerId: string; handle: string }[];
+  granted: { planId: string; ownerId: string; account: string }[];
+  revoked: { planId: string; ownerId: string; account: string }[];
   /** Every value handed to `setShareCodeHash`; never a plaintext code. */
   hashes: (string | null)[];
   visibilities: PlanVisibility[];
@@ -57,6 +57,8 @@ function fakePlans(
     revokes?: boolean;
     /** False models a plan that does not exist or is not the caller's. */
     owned?: boolean;
+    /** The one account whose grant errors, modelling a database blip. */
+    throwsFor?: string;
   } = {},
 ): {
   plans: PlanRepo;
@@ -98,12 +100,13 @@ function fakePlans(
       return owned;
     },
     listGrantHandles: async () => (owned ? [] : null),
-    grantByHandle: async (planId, ownerId, handle) => {
-      calls.granted.push({ planId, ownerId, handle });
+    grantByHandle: async (planId, ownerId, account) => {
+      calls.granted.push({ planId, ownerId, account });
+      if (account === over.throwsFor) throw new Error("database unreachable");
       return over.outcome ?? "granted";
     },
-    revokeByHandle: async (planId, ownerId, handle) => {
-      calls.revoked.push({ planId, ownerId, handle });
+    revokeByHandle: async (planId, ownerId, account) => {
+      calls.revoked.push({ planId, ownerId, account });
       return over.revokes ?? true;
     },
   };
@@ -318,9 +321,13 @@ describe("grantPlan", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await jsonOf(response)).toEqual({ granted: [HANDLE], unknown: [] });
+    expect(await jsonOf(response)).toEqual({
+      granted: [HANDLE],
+      unknown: [],
+      failed: [],
+    });
     expect(calls.granted).toEqual([
-      { planId: PLAN, ownerId: OWNER, handle: HANDLE },
+      { planId: PLAN, ownerId: OWNER, account: HANDLE },
     ]);
   });
 
@@ -339,8 +346,9 @@ describe("grantPlan", () => {
     expect(await jsonOf(response)).toEqual({
       granted: [HANDLE, "second", "third"],
       unknown: [],
+      failed: [],
     });
-    expect(calls.granted.map((call) => call.handle)).toEqual([
+    expect(calls.granted.map((call) => call.account)).toEqual([
       HANDLE,
       "second",
       "third",
@@ -356,7 +364,7 @@ describe("grantPlan", () => {
       PLAN,
     );
 
-    expect(calls.granted.map((call) => call.handle)).toEqual([
+    expect(calls.granted.map((call) => call.account)).toEqual([
       HANDLE,
       "second",
       "third",
@@ -372,7 +380,11 @@ describe("grantPlan", () => {
       PLAN,
     );
 
-    expect(await jsonOf(response)).toEqual({ granted: [HANDLE], unknown: [] });
+    expect(await jsonOf(response)).toEqual({
+      granted: [HANDLE],
+      unknown: [],
+      failed: [],
+    });
     expect(calls.granted).toHaveLength(1);
   });
 
@@ -386,7 +398,7 @@ describe("grantPlan", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(calls.granted.map((call) => call.handle)).toEqual([HANDLE]);
+    expect(calls.granted.map((call) => call.account)).toEqual([HANDLE]);
   });
 
   test("an unknown handle is reported, not fatal", async () => {
@@ -404,7 +416,30 @@ describe("grantPlan", () => {
     expect(await jsonOf(response)).toEqual({
       granted: [],
       unknown: [HANDLE, "second"],
+      failed: [],
     });
+  });
+
+  test("an account whose grant errors is reported, and the rest still land", async () => {
+    // The upload route calls this after the plan is already durable, so a
+    // throw here would answer 500 for a plan that exists. Every account has
+    // to come back in one of the three buckets instead.
+    const { plans, calls } = fakePlans({ throwsFor: "second" });
+    const response = await grantPlan(
+      fakeAuth(OWNER),
+      plans,
+      post({ accounts: `${HANDLE},second,third` }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({
+      granted: [HANDLE, "third"],
+      unknown: [],
+      failed: ["second"],
+    });
+    // It kept going rather than stopping at the one that threw.
+    expect(calls.granted).toHaveLength(3);
   });
 
   test("a plan the caller does not own is a 404, before any handle", async () => {
@@ -498,7 +533,7 @@ describe("grantPlan", () => {
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ handle: "x".repeat(4096) }),
+      post({ accounts: "x".repeat(4096) }),
       PLAN,
     );
 
@@ -526,7 +561,7 @@ describe("revokePlanGrant", () => {
 
     expect(response.status).toBe(204);
     expect(calls.revoked).toEqual([
-      { planId: PLAN, ownerId: OWNER, handle: HANDLE },
+      { planId: PLAN, ownerId: OWNER, account: HANDLE },
     ]);
   });
 
@@ -609,7 +644,7 @@ describe("every sharing handler refuses an API key", () => {
     [
       "grantPlan",
       (plans: PlanRepo) =>
-        grantPlan(keyOnly, plans, keyedJson({ handle: HANDLE }), PLAN),
+        grantPlan(keyOnly, plans, keyedJson({ accounts: HANDLE }), PLAN),
     ],
     [
       "revokePlanGrant",
@@ -658,7 +693,7 @@ describe("every sharing handler refuses an API key", () => {
       new Request("https://plans.example.test/x", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ handle: HANDLE }),
+        body: JSON.stringify({ accounts: HANDLE }),
       }),
     );
 

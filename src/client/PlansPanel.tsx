@@ -153,12 +153,20 @@ function VisibilityChoice(props: {
 }) {
   // Several editors can be open at once, so the heading id carries the plan.
   const headingId = `visibility-heading-${props.planId}`;
+  const inertId = `visibility-inert-${props.planId}`;
   return (
     <div>
       <h3 id={headingId}>Who can open it</h3>
       {/* Without the role the radios are announced one at a time, with no
-          statement of what the choice is for. */}
-      <div className="choices" role="radiogroup" aria-labelledby={headingId}>
+          statement of what the choice is for. `aria-describedby` carries the
+          note below into that announcement, so the reason the code and the
+          grants are inactive arrives with the choice rather than after it. */}
+      <div
+        className="choices"
+        role="radiogroup"
+        aria-labelledby={headingId}
+        aria-describedby={props.inert ? inertId : undefined}
+      >
         {(["private", "public"] as const).map((option) => (
           <label className="choice" key={option}>
             <input
@@ -178,7 +186,7 @@ function VisibilityChoice(props: {
         ))}
       </div>
       {props.inert && (
-        <p className="muted">
+        <p className="muted" id={inertId}>
           Anyone holding the URL can open this plan, so the code and the
           accounts below grant nothing extra. Make it private to use them.
         </p>
@@ -271,8 +279,10 @@ function ShareCodeBlock(
 function GrantsBlock(props: BlockProps & { grants: string[] }) {
   const { plan, guard, reload, locked } = props;
   const [handle, setHandle] = useState("");
-  /** Handles the last submission named that no account answers to. */
+  /** What the last submission named that nothing answers to. */
   const [unknown, setUnknown] = useState<string[]>([]);
+  /** What errored rather than being refused; worth trying again as-is. */
+  const [failed, setFailed] = useState<string[]>([]);
 
   const submit = (event: Event) => {
     event.preventDefault();
@@ -285,9 +295,10 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
       // and a list written against the API are parsed by the same code.
       const result = await addGrants(plan.id, wanted);
       setUnknown(result.unknown);
-      // Keep the field when nothing landed, so a single mistyped handle can
-      // be corrected rather than retyped.
-      if (result.granted.length > 0) setHandle("");
+      setFailed(result.failed);
+      // Whatever did not land stays in the field, so a typo can be corrected
+      // and a failure retried without retyping the ones that worked.
+      setHandle([...result.unknown, ...result.failed].join(", "));
       await reload();
     });
   };
@@ -307,10 +318,17 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
         <strong>Sign out</strong> on that person's own dashboard - ask them for
         it. An account id works too. Separate several with commas.
       </p>
+      {/* Two separate lines, and neither says what the other's entries did:
+          "everyone else was added" is false the moment something failed. */}
       {unknown.length > 0 && (
         <p className="error" role="alert">
-          No account holds {unknown.join(", ")}. Everyone else on that list was
-          added.
+          No account holds {unknown.join(", ")} - check the spelling.
+        </p>
+      )}
+      {failed.length > 0 && (
+        <p className="error" role="alert">
+          Could not share with {failed.join(", ")} just now. Adding them again
+          is safe.
         </p>
       )}
       {/* A real form, not a button beside an input: Enter in a text field
@@ -596,6 +614,12 @@ function usePlanList() {
   const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * False until the first list call has answered. Without it the panel says
+   * "No plans yet" for the length of that request, which is the wrong thing
+   * to tell someone who has plans.
+   */
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -603,6 +627,8 @@ function usePlanList() {
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -639,7 +665,7 @@ function usePlanList() {
     [refresh],
   );
 
-  return { plans, error, setError, busy, guard };
+  return { plans, error, setError, busy, guard, loaded };
 }
 
 /** The one HTML file in `files`, or null with the reason already shown. */
@@ -678,7 +704,7 @@ function usePlanUploads(guard: Guard, onError: (reason: string) => void) {
 }
 
 export function PlansPanel() {
-  const { plans, error, setError, busy, guard } = usePlanList();
+  const { plans, error, setError, busy, guard, loaded } = usePlanList();
   const { expanded, setExpanded, expandedPlan, editorRef } =
     useExpandedPlan(plans);
   const { submit, replace } = usePlanUploads(guard, setError);
@@ -703,7 +729,10 @@ export function PlansPanel() {
       {error !== null && <p className="error">{error}</p>}
       {plans.length === 0 ? (
         <p className="empty" style={{ marginTop: "24px" }}>
-          No plans yet.
+          {/* Before the first list answers there is nothing to say yet -
+              "No plans yet" would be a claim, and a wrong one for anyone who
+              has plans. */}
+          {loaded ? "No plans yet." : "Loading..."}
         </p>
       ) : (
         <>

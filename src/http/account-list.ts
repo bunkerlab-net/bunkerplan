@@ -1,4 +1,4 @@
-import type { PlanRepo } from "../services/types.ts";
+import type { GrantOutcome, PlanRepo } from "../services/types.ts";
 
 /**
  * One or more accounts, as a caller supplies them.
@@ -81,30 +81,40 @@ export function parseAccountList(raw: unknown): AccountList {
   return { accounts };
 }
 
-/** What naming a set of accounts did. */
+/**
+ * What naming a set of accounts did. Every account asked for lands in exactly
+ * one of these, which is what makes the answer usable without guessing.
+ */
 export interface GrantOutcomes {
-  /** Handles that now have access, including any that already did. */
+  /** Accounts that now have access, including any that already did. */
   granted: string[];
-  /** Handles no account answers to. Reported, not fatal. */
+  /** Accounts nothing answers to. Reported, not fatal. */
   unknown: string[];
+  /**
+   * Accounts whose grant errored - a database blip, not a bad name. Retrying
+   * these is safe: granting is idempotent, so a retry that turns out to have
+   * landed the first time still reports `granted`.
+   */
+  failed: string[];
 }
 
 /**
- * Grants each handle in turn, reporting which ones landed.
+ * Grants each account in turn, reporting which ones landed.
  *
  * `null` means the plan is not this caller's, which every route turns into a
  * 404.
  *
  * Ownership is resolved first, on its own, rather than being read off the
- * first `grantByHandle`. That call checks the handle before the plan, so an
- * unknown handle answers "no-user" whether or not the caller owns the plan -
- * and a stranger naming a handle that does not exist would otherwise get a
- * 200 describing their typo instead of the 404 that every other "not yours"
- * gets.
+ * first `grantByHandle`. That call checks the account before the plan, so an
+ * unknown one answers "no-user" whether or not the caller owns the plan - and
+ * a stranger naming an account that does not exist would otherwise get a 200
+ * describing their typo instead of the 404 that every other "not yours" gets.
  *
- * An unknown handle is not an error once past that. Naming five colleagues
- * and mistyping one should share the plan with the four, and say so, rather
- * than refuse all five and make the owner work out which was wrong.
+ * Past that, nothing here throws. An unknown account is not an error - naming
+ * five colleagues and mistyping one should share the plan with the four, and
+ * say so. Neither is a failed one: the upload route calls this after the plan
+ * and its object are already durable, so raising would answer 500 for a plan
+ * that exists, leaving the caller unable to tell what was stored or shared.
  */
 export async function applyGrants(
   plans: Pick<PlanRepo, "findOwner" | "grantByHandle">,
@@ -116,14 +126,22 @@ export async function applyGrants(
 
   const granted: string[] = [];
   const unknown: string[] = [];
+  const failed: string[] = [];
 
-  for (const handle of accounts) {
-    switch (await plans.grantByHandle(planId, ownerId, handle)) {
+  for (const account of accounts) {
+    let outcome: GrantOutcome;
+    try {
+      outcome = await plans.grantByHandle(planId, ownerId, account);
+    } catch {
+      failed.push(account);
+      continue;
+    }
+    switch (outcome) {
       case "granted":
-        granted.push(handle);
+        granted.push(account);
         break;
       case "no-user":
-        unknown.push(handle);
+        unknown.push(account);
         break;
       // Deleted between the ownership read and now. Rare, and the same
       // answer as never having owned it.
@@ -132,5 +150,5 @@ export async function applyGrants(
     }
   }
 
-  return { granted, unknown };
+  return { granted, unknown, failed };
 }
