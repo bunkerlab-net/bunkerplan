@@ -1373,6 +1373,27 @@ describe("validateStandaloneHtml - parser conformance", () => {
   });
 
   /**
+   * A stray end tag must not cost a walk of the open foreign elements. Names that
+   * alternate never collapse into runs, so this shape holds one entry per element
+   * and then spends the rest of the upload on end tags that close none of them -
+   * which scanning made quadratic, at 61 seconds for a 2 MiB document.
+   *
+   * Asserted as a bound rather than a ratio: a timing test that compares two
+   * shapes is a flake on a shared runner, while whole seconds of headroom under a
+   * limit reached only by quadratic work is not.
+   */
+  test("classifies a stray end tag without scanning open roots", () => {
+    const opens = "<svg><math>".repeat(32_000);
+    const strays = "</g>".repeat(400_000);
+    const html = DOC(`${opens}${strays}`);
+    expect(html.length).toBeLessThanOrEqual(2_097_152);
+
+    const started = performance.now();
+    expect(check(html)).toEqual({ ok: true });
+    expect(performance.now() - started).toBeLessThan(5_000);
+  });
+
+  /**
    * HTML ignores the slash on a non-void element and enters raw text regardless,
    * so this is a stylesheet - the opposite of the SVG case above.
    */

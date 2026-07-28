@@ -827,6 +827,13 @@ class StyleText {
    * 2 MiB document of nothing else held 400,000 entries and 31 MB.
    */
   private roots: { name: string; depth: number }[] = [];
+  /**
+   * Elements open per tracked name, so an end tag is classified in constant time.
+   * Scanning `roots` instead was quadratic: alternating names never collapse into
+   * runs, so every stray end tag walked one entry per open element.
+   */
+  private svgOpen = 0;
+  private mathOpen = 0;
 
   /**
    * True when no SVG or MathML root is open, so the document is in HTML content
@@ -896,14 +903,28 @@ class StyleText {
    * is refused rather than half-scanned.
    */
   endTag(tagName: string): void {
-    const closesRoot = this.roots.some((run) => run.name === tagName);
+    const closesRoot = this.opened(tagName);
     const ambiguous = this.css !== null && tagName !== "style" && !closesRoot;
     this.end();
     if (ambiguous) this.onUnaccountable();
     if (closesRoot) this.closeRoot(tagName);
   }
 
+  /** Whether an element of this name is open. False for every untracked name. */
+  private opened(name: string): boolean {
+    if (name === "svg") return this.svgOpen > 0;
+    if (name === "math") return this.mathOpen > 0;
+    return false;
+  }
+
+  /** Only ever called with a tracked name, from `pushRoot` and `closeRoot`. */
+  private count(name: string, by: number): void {
+    if (name === "svg") this.svgOpen += by;
+    else this.mathOpen += by;
+  }
+
   private pushRoot(name: string): void {
+    this.count(name, 1);
     const innermost = this.roots.at(-1);
     if (innermost?.name === name) innermost.depth += 1;
     else this.roots.push({ name, depth: 1 });
@@ -913,13 +934,24 @@ class StyleText {
    * Closes the innermost root of this name AND everything opened inside it, the
    * way a parser pops until the name matches: `<svg><math></svg>` leaves neither
    * open.
+   *
+   * Entered only when `opened` says the name is there, so the search always
+   * finds it and every entry it passes is one it drops. Each element is pushed
+   * once and dropped once, so the whole document costs a walk of its elements.
    */
   private closeRoot(name: string): void {
     for (let index = this.roots.length - 1; index >= 0; index -= 1) {
       const run = this.roots[index];
       if (run === undefined || run.name !== name) continue;
+      for (let above = index; above < this.roots.length; above += 1) {
+        const dropped = this.roots[above];
+        if (dropped !== undefined) this.count(dropped.name, -dropped.depth);
+      }
       this.roots.length = index;
-      if (run.depth > 1) this.roots.push({ name, depth: run.depth - 1 });
+      if (run.depth > 1) {
+        this.roots.push({ name, depth: run.depth - 1 });
+        this.count(name, run.depth - 1);
+      }
       return;
     }
   }
