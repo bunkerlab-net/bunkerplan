@@ -30,27 +30,30 @@ describe("validateStandaloneHtml", () => {
   test("rejects an external script", () => {
     expect(
       check(DOC(`<script src="https://cdn.example.com/x.js"></script>`)),
-    ).toEqual({ ok: false, reason: "external reference: script[src]" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: script[src] https://cdn.example.com/x.js",
+    });
   });
 
   test("rejects a relative stylesheet - relative counts as external", () => {
     expect(check(DOC(`<link rel="stylesheet" href="./a.css">`))).toEqual({
       ok: false,
-      reason: "external reference: link[href]",
+      reason: "external reference: link[href] ./a.css - inline the stylesheet",
     });
   });
 
   test("rejects a root-relative stylesheet", () => {
     expect(check(DOC(`<link rel="stylesheet" href="/a.css">`))).toEqual({
       ok: false,
-      reason: "external reference: link[href]",
+      reason: "external reference: link[href] /a.css - inline the stylesheet",
     });
   });
 
   test("rejects a protocol-relative image", () => {
     expect(check(DOC(`<img src="//cdn.example.com/x.png">`))).toEqual({
       ok: false,
-      reason: "external reference: img[src]",
+      reason: "external reference: img[src] //cdn.example.com/x.png",
     });
   });
 
@@ -76,7 +79,7 @@ describe("validateStandaloneHtml", () => {
   test("rejects an external candidate inside srcset", () => {
     expect(
       check(DOC(`<img srcset="a.png 1x, https://cdn.example.com/b.png 2x">`)),
-    ).toEqual({ ok: false, reason: "external reference: img[srcset]" });
+    ).toEqual({ ok: false, reason: "external reference: img[srcset] a.png" });
   });
 
   test("rejects @import inside a style element", () => {
@@ -84,13 +87,19 @@ describe("validateStandaloneHtml", () => {
       check(
         `<!doctype html><html><head><style>@import url(https://x/y.css);</style></head><body></body></html>`,
       ),
-    ).toEqual({ ok: false, reason: "external reference: style" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: style https://x/y.css",
+    });
   });
 
   test("rejects url() inside a style attribute", () => {
     expect(
       check(DOC(`<div style="background:url(//evil/x.png)"></div>`)),
-    ).toEqual({ ok: false, reason: "external reference: div[style]" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: div[style] //evil/x.png",
+    });
   });
 
   test("accepts a data: url() inside a style attribute", () => {
@@ -106,7 +115,10 @@ describe("validateStandaloneHtml", () => {
       check(
         `<!DOCTYPE HTML><HTML><HEAD><BASE HREF="https://x/"></HEAD><BODY></BODY></HTML>`,
       ),
-    ).toEqual({ ok: false, reason: "external reference: base[href]" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: base[href] https://x/",
+    });
   });
 
   test("rejects an external meta refresh", () => {
@@ -116,20 +128,24 @@ describe("validateStandaloneHtml", () => {
       ),
     ).toEqual({
       ok: false,
-      reason: "external reference: meta[http-equiv=refresh]",
+      reason:
+        "external reference: meta[http-equiv=refresh] https://evil.example",
     });
   });
 
   test("rejects an SVG use[xlink:href]", () => {
     expect(
       check(DOC(`<svg><use xlink:href="https://x/sprite.svg#a"></use></svg>`)),
-    ).toEqual({ ok: false, reason: "external reference: use[xlink:href]" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: use[xlink:href] https://x/sprite.svg#a",
+    });
   });
 
   test("rejects an iframe src", () => {
     expect(check(DOC(`<iframe src="https://example.com"></iframe>`))).toEqual({
       ok: false,
-      reason: "external reference: iframe[src]",
+      reason: "external reference: iframe[src] https://example.com",
     });
   });
 
@@ -193,14 +209,17 @@ describe("validateStandaloneHtml - subresource gate regressions", () => {
       ),
     ).toEqual({
       ok: false,
-      reason: "external reference: script[xlink:href]",
+      reason: "external reference: script[xlink:href] https://e.example/a.js",
     });
   });
 
   test("rejects an SVG script loaded through the SVG2 href", () => {
     expect(
       check(DOC(`<svg><script href="https://e.example/a.js"></script></svg>`)),
-    ).toEqual({ ok: false, reason: "external reference: script[href]" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: script[href] https://e.example/a.js",
+    });
   });
 
   test("rejects a preload that fetches through imagesrcset", () => {
@@ -210,7 +229,10 @@ describe("validateStandaloneHtml - subresource gate regressions", () => {
           `<link rel="preload" as="image" imagesrcset="https://e.example/x.png 1x">`,
         ),
       ),
-    ).toEqual({ ok: false, reason: "external reference: link[imagesrcset]" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: link[imagesrcset] https://e.example/x.png",
+    });
   });
 
   test("rejects an feImage filter primitive", () => {
@@ -220,7 +242,10 @@ describe("validateStandaloneHtml - subresource gate regressions", () => {
           `<svg><filter id="f"><feImage xlink:href="https://e.example/x.png"/></filter></svg>`,
         ),
       ),
-    ).toEqual({ ok: false, reason: "external reference: feimage[xlink:href]" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: feimage[xlink:href] https://e.example/x.png",
+    });
   });
 
   test("rejects image-set(), which fetches without writing url()", () => {
@@ -230,7 +255,10 @@ describe("validateStandaloneHtml - subresource gate regressions", () => {
           `<style>b{background:image-set("https://e.example/x.png" 1x)}</style>`,
         ),
       ),
-    ).toEqual({ ok: false, reason: "external reference: style" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: style https://e.example/x.png",
+    });
   });
 
   test("rejects the -webkit- spelling of image-set()", () => {
@@ -240,7 +268,10 @@ describe("validateStandaloneHtml - subresource gate regressions", () => {
           `<style>b{background:-webkit-image-set("https://e.example/x.png" 1x)}</style>`,
         ),
       ),
-    ).toEqual({ ok: false, reason: "external reference: style" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: style https://e.example/x.png",
+    });
   });
 
   test("accepts image-set() whose candidates travel in the document", () => {
@@ -257,12 +288,97 @@ describe("validateStandaloneHtml - subresource gate regressions", () => {
   test("rejects an @import hidden behind a comment", () => {
     expect(
       check(DOC(`<style>@import/**/"https://e.example/x.css";</style>`)),
-    ).toEqual({ ok: false, reason: "external reference: style" });
+    ).toEqual({
+      ok: false,
+      reason: "external reference: style https://e.example/x.css",
+    });
   });
 
   test("still accepts a comment that hides nothing", () => {
     expect(check(DOC(`<style>/* a note */ body{color:red}</style>`))).toEqual({
       ok: true,
+    });
+  });
+});
+
+/**
+ * The target is the whole point of the refusal: without it a caller has to
+ * bisect their own document to find the one reference that offended.
+ */
+describe("validateStandaloneHtml - the reported target", () => {
+  test("names the font stylesheet a branded document reaches for", () => {
+    const url = "https://fonts.googleapis.com/css2?family=Inter";
+    expect(check(DOC(`<link rel="stylesheet" href="${url}">`))).toEqual({
+      ok: false,
+      reason: `external reference: link[href] ${url} - inline the stylesheet`,
+    });
+  });
+
+  test("names an @import target, which has no attribute to name", () => {
+    const url = "https://fonts.googleapis.com/css2?family=Inter";
+    expect(check(DOC(`<style>@import url("${url}");</style>`))).toEqual({
+      ok: false,
+      reason: `external reference: style ${url}`,
+    });
+  });
+
+  test("points a font file at @font-face rather than at inlining CSS", () => {
+    expect(
+      check(DOC(`<style>@font-face{src:url(/f/inter.woff2)}</style>`)),
+    ).toEqual({
+      ok: false,
+      reason:
+        "external reference: style /f/inter.woff2 - embed fonts as data: URIs in @font-face",
+    });
+  });
+
+  test("hints fonts over stylesheets when a link points straight at a face", () => {
+    expect(
+      check(DOC(`<link rel="stylesheet" href="https://e.example/i.otf">`)),
+    ).toEqual({
+      ok: false,
+      reason:
+        "external reference: link[href] https://e.example/i.otf - embed fonts as data: URIs in @font-face",
+    });
+  });
+
+  test("leaves an ordinary stylesheet unhinted about fonts", () => {
+    const reason = check(DOC(`<link rel="stylesheet" href="/site.css">`));
+    expect(reason).toEqual({
+      ok: false,
+      reason:
+        "external reference: link[href] /site.css - inline the stylesheet",
+    });
+  });
+
+  test("truncates a target long enough to bloat a log line", () => {
+    const url = `https://e.example/${"a".repeat(400)}.js`;
+    const result = check(DOC(`<script src="${url}"></script>`));
+    expect(result).toEqual({
+      ok: false,
+      reason: `external reference: script[src] ${url.slice(0, 120)}...`,
+    });
+  });
+
+  test("still hints fonts when the extension falls past the truncation", () => {
+    const url = `https://e.example/${"a".repeat(400)}.woff2`;
+    expect(check(DOC(`<style>@font-face{src:url(${url})}</style>`))).toEqual({
+      ok: false,
+      reason: `external reference: style ${url.slice(0, 120)}... - embed fonts as data: URIs in @font-face`,
+    });
+  });
+
+  /**
+   * A bidi override in the reported target would reorder the text around it and
+   * let one refusal read as another, which is why `parsePlanLabel` refuses the
+   * same characters in labels.
+   */
+  test("flattens newlines and bidi overrides out of the target", () => {
+    expect(
+      check(DOC(`<img src="https://e.example/\u202ea\nb\u202c.png">`)),
+    ).toEqual({
+      ok: false,
+      reason: "external reference: img[src] https://e.example/ a b .png",
     });
   });
 });

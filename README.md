@@ -147,8 +147,14 @@ long to reach a visitor who has already seen the old one.
 Uploads must be self-contained: no external scripts, stylesheets, images,
 iframes, or CSS `url()`/`@import` targets, including relative paths, and no
 non-empty `iframe[srcdoc]`. Inline `<style>`, inline `<script>`, `data:` URIs
-and ordinary links are fine. A rejection returns `422` naming the offending
-`tag[attribute]`.
+and ordinary links are fine. A rejection returns `422` naming where the
+reference was found and the target it pointed at.
+
+Webfonts are covered by that, so a branded document carries its typefaces as
+`data:` URIs in `@font-face`. That is cheaper than it sounds - a latin subset
+of a variable face costs about 65 KB encoded, and a provider that already
+serves subsets saves you a subsetting step. See
+[Webfonts](docs/self-hosting.md#webfonts) for the recipe.
 
 Plans are served with `Content-Security-Policy: sandbox`, which puts each
 document in an opaque origin so it cannot reach the uploader's session.

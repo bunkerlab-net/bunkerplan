@@ -342,7 +342,14 @@ outright: it carries a whole nested document, and its value is entity-encoded,
 so validating it would mean trusting a hand-rolled entity decoder as a security
 boundary. Inline `<style>`, inline `<script>`,
 `data:` URIs and ordinary `<a href>` links are all fine. A rejection returns
-`422` with the offending `tag[attribute]` in the body.
+`422` naming where the reference was found and the target it pointed at,
+truncated to 120 characters:
+
+```json
+{
+  "error": "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet"
+}
+```
 
 Note that this is a static check. A plan's inline script can still call `fetch`
 at runtime; the CSP sandbox is what contains it.
@@ -352,6 +359,73 @@ Routing anything else under that prefix would out-rank the plan route and
 silently shadow any plan holding that id, which is exactly the collision the
 prefix exists to prevent. App routes go anywhere else; because they do, plan
 ids need no reserved-word list.
+
+### Webfonts
+
+A webfont is a subresource like any other, so a branded document carries its
+typefaces inside itself as `data:` URIs in `@font-face`. Nothing else will
+work: `PLAN_CSP` serves plans under `font-src data: blob:` and no host, so a
+font left outside the document would be blocked at render time even if the
+upload gate let it through.
+
+Three things make embedding cheaper than it first appears.
+
+**A provider that already subsets saves you the toolchain.** Google Fonts
+serves one `woff2` per script and puts every URL in the stylesheet it hands
+out, so there is nothing to run `pyftsubset` over. A face you host yourself
+may still need subsetting first.
+
+**Ask for a weight range, not a list of weights.** `wght@400..700` returns one
+file per script subset. `wght@400;500;600;700` returns the *same seven files*
+across 28 `@font-face` rules, one per weight, because the face is variable and
+every weight resolves to the same bytes. Embed from the list form and you paste
+four identical base64 blobs into the document for no benefit.
+
+The subset name lives in a comment above each `@font-face`, and the URLs are
+opaque hashes, so pair them up rather than reading the URLs:
+
+```sh
+# A modern desktop user-agent is required - Google serves unsubsetted TTF to
+# anything it does not recognise as woff2-capable, with no subset comments.
+UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '\
+'(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+
+# Prints "subset<TAB>url" for every face in the stylesheet
+curl -s 'https://fonts.googleapis.com/css2?family=Inter:wght@400..700' \
+  -H "user-agent: $UA" \
+  | awk '/^\/\* /{s=$2} /src: url\(/{match($0,/https:[^)]+/);
+         print s"\t"substr($0,RSTART,RLENGTH)}'
+
+# Then turn the row you want into a data: URI
+curl -s '<the latin woff2 URL>' | base64 | tr -d '\n'
+```
+
+Declare the range you asked for, so one blob serves every weight in it:
+
+```css
+@font-face {
+  font-family: Inter;
+  font-weight: 400 700;
+  src: url(data:font/woff2;base64,d09GMgABAAAA...) format("woff2");
+}
+```
+
+**The latin subset is small.** Base64 costs a third on top of the raw bytes,
+and a latin subset is tens of kilobytes to begin with. Measured on a real
+three-family document:
+
+| family                        | latin files    | raw    |
+| ----------------------------- | -------------- | ------ |
+| IBM Plex Sans 400-700         | 1 (variable)   | 40,240 |
+| Inter 400-700                 | 1 (variable)   | 48,432 |
+| IBM Plex Mono 400 / 500 / 600 | 3 (static)     | 30,232 |
+
+Five files and 119 KB raw finished as a 202 KB document - under 10% of the
+default 2 MB `MAX_UPLOAD_BYTES`. Note the two variable families collapsing four
+declared weights into one file each; that is where the range form pays.
+
+Check the provider's licence before redistributing a face inside a document.
+Open licences such as the SIL OFL permit it; many commercial licences do not.
 
 ## Health
 

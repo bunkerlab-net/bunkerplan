@@ -186,6 +186,58 @@ function refreshTarget(content: string): string | null {
   return match?.[2]?.trim() ?? null;
 }
 
+/**
+ * The reported target is uploader-supplied and reaches a JSON error body, a
+ * log line, and the dashboard's error text. `Response.json` escapes it for
+ * transport and the dashboard renders it into a text node, so there is no
+ * injection to close here; what this does is keep the line bounded and
+ * readable. Controls and bidi overrides collapse to a space for the reason
+ * `parsePlanLabel` refuses them outright - reordered text lets one reported
+ * target impersonate another.
+ */
+const MAX_TARGET_LENGTH = 120;
+const UNPRINTABLE = /[\s\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]+/gu;
+
+/**
+ * Hinted only where the document says so, never guessed from a URL. A path
+ * ending in a font extension is a font; `rel="stylesheet"` is a stylesheet
+ * because the document declared it.
+ *
+ * Each hint names only what its signal supports. Most external stylesheets are
+ * ordinary CSS, so the stylesheet hint says nothing about fonts - a font
+ * *stylesheet* such as `fonts.googleapis.com/css2?family=...` is CSS that
+ * happens to serve fonts, and it is named by the target now being visible.
+ * The embedding workflow belongs in the docs, where it can be a recipe rather
+ * than a guess appended to every refusal.
+ */
+const FONT_FILE = /\.(?:woff2?|[ot]tf|eot)(?:[?#]|$)/i;
+const FONT_HINT = " - embed fonts as data: URIs in @font-face";
+const STYLESHEET_HINT = " - inline the stylesheet";
+
+/**
+ * Both halves of a refusal: where the reference was found, and what it pointed
+ * at. The target is what makes a 422 actionable - without it a caller has to
+ * bisect their own document to find the one `url()` that offended.
+ */
+function externalReason(
+  location: string,
+  target: string,
+  stylesheet = false,
+): string {
+  const flat = target.replace(UNPRINTABLE, " ").trim();
+  // Classified from the whole target, truncated only for display: a `.woff2`
+  // sitting past the cut is still a font, and a long URL is exactly when the
+  // caller needs to be told so.
+  let hint = "";
+  if (FONT_FILE.test(flat)) hint = FONT_HINT;
+  else if (stylesheet) hint = STYLESHEET_HINT;
+  const shown =
+    flat.length > MAX_TARGET_LENGTH
+      ? `${flat.slice(0, MAX_TARGET_LENGTH)}...`
+      : flat;
+  return `external reference: ${location} ${shown}${hint}`;
+}
+
 function lowerAttributes(
   attributes: Record<string, string>,
 ): Record<string, string> {
@@ -202,17 +254,25 @@ function checkElement(node: Node): string | null {
   if (node.type !== ELEMENT_NODE) return null;
   const tag = String(node.name).toLowerCase();
   const attributes = lowerAttributes(node.attributes);
+  // From the declared `rel`, not inferred from the URL, so the stylesheet hint
+  // states what the document says rather than what a path looks like.
+  const stylesheet =
+    tag === "link" &&
+    (attributes["rel"] ?? "").toLowerCase().split(/\s+/).includes("stylesheet");
 
   for (const attr of URL_ATTRS[tag] ?? []) {
     const value = attributes[attr];
     if (value === undefined) continue;
     if (SRCSET_ATTRS[attr] === true) {
-      if (firstExternalCandidate(value) !== null) {
-        return `external reference: ${tag}[${attr}]`;
+      const candidate = firstExternalCandidate(value);
+      if (candidate !== null) {
+        return externalReason(`${tag}[${attr}]`, candidate, stylesheet);
       }
       continue;
     }
-    if (isExternalRef(value)) return `external reference: ${tag}[${attr}]`;
+    if (isExternalRef(value)) {
+      return externalReason(`${tag}[${attr}]`, value, stylesheet);
+    }
   }
 
   if (tag === "meta" && attributes["http-equiv"]?.toLowerCase() === "refresh") {
@@ -220,7 +280,7 @@ function checkElement(node: Node): string | null {
     if (target !== undefined) {
       const url = refreshTarget(target);
       if (url !== null && isExternalRef(url)) {
-        return "external reference: meta[http-equiv=refresh]";
+        return externalReason("meta[http-equiv=refresh]", url);
       }
     }
   }
@@ -235,16 +295,16 @@ function checkElement(node: Node): string | null {
   }
 
   const inlineStyle = attributes["style"];
-  if (inlineStyle !== undefined && findExternalInCss(inlineStyle) !== null) {
-    return `external reference: ${tag}[style]`;
+  if (inlineStyle !== undefined) {
+    const target = findExternalInCss(inlineStyle);
+    if (target !== null) return externalReason(`${tag}[style]`, target);
   }
 
   if (tag === "style") {
     for (const child of node.children ?? []) {
       if (child.type !== TEXT_NODE) continue;
-      if (findExternalInCss(String(child.value)) !== null) {
-        return "external reference: style";
-      }
+      const target = findExternalInCss(String(child.value));
+      if (target !== null) return externalReason("style", target);
     }
   }
 
