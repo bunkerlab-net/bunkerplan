@@ -849,7 +849,9 @@ describe("gated sharing", () => {
     const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
       headers: { cookie: owner.cookie },
     });
-    expect((await jsonBody(sharing))["grants"]).toEqual(
+    const grants = (await jsonBody(sharing))["grants"] as string[];
+    expect(grants).toHaveLength(2);
+    expect(grants).toEqual(
       expect.arrayContaining([first.handle, second.handle]),
     );
   });
@@ -891,7 +893,11 @@ describe("gated sharing", () => {
     const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
       headers: { cookie: owner.cookie },
     });
-    expect((await jsonBody(sharing))["grants"]).toEqual(
+    const listed = (await jsonBody(sharing))["grants"] as string[];
+    // Exactly two, so a duplicate - the id and the handle resolving to
+    // separate rows - fails rather than passing on containment alone.
+    expect(listed).toHaveLength(2);
+    expect(listed).toEqual(
       expect.arrayContaining([byId.handle, byHandle.handle]),
     );
   });

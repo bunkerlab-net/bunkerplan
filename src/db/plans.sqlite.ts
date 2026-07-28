@@ -242,8 +242,11 @@ function grantMethods(
             ${accountId(account, email)} as uid
         `,
       );
-      if (!probe[0]?.uid) return "no-user";
-      if (!probe[0].owned) return "no-plan";
+      // Ownership first: a plan the caller does not own answers "no-plan"
+      // whatever the account was, so nothing about a stranger's plan - not
+      // even which of the two things they got wrong - comes back to them.
+      if (!probe[0]?.owned) return "no-plan";
+      if (!probe[0].uid) return "no-user";
       return "granted";
     },
 

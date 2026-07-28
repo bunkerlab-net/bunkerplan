@@ -238,8 +238,11 @@ function grantMethods(
             where id = ${planId} and user_id = ${ownerId}) as owned,
           ${accountId(account, email)} as uid
       `);
-      if (!probe.rows[0]?.uid) return "no-user";
-      if (!probe.rows[0].owned) return "no-plan";
+      // Ownership first: a plan the caller does not own answers "no-plan"
+      // whatever the account was, so nothing about a stranger's plan - not
+      // even which of the two things they got wrong - comes back to them.
+      if (!probe.rows[0]?.owned) return "no-plan";
+      if (!probe.rows[0].uid) return "no-user";
       return "granted";
     },
 

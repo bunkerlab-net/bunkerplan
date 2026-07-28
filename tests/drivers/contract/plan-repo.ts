@@ -572,13 +572,15 @@ export function describePlanRepo(
         expect(await plans.grantByHandle(newPlanId(16), owner, handle)).toBe(
           "no-plan",
         );
-        // Both wrong at once: the handle is checked first, so this is
-        // "no-user". Pinned because the two dialects run different SQL and a
+        // Both wrong at once: ownership is settled first, so this is
+        // "no-plan". Pinned because the two dialects run different SQL and a
         // silent disagreement here would surface as a different error message
-        // depending on which database a deployment uses.
+        // depending on which database a deployment uses - and because the
+        // order is the security property: a caller who does not own the plan
+        // learns nothing further, not even which of the two they got wrong.
         expect(
           await plans.grantByHandle(newPlanId(16), stranger, uniqueHandle()),
-        ).toBe("no-user");
+        ).toBe("no-plan");
         expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
           "granted",
         );

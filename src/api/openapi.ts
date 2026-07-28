@@ -182,8 +182,8 @@ const GRANTS_QUERY_PARAM = {
   description:
     "Accounts to share the new plan with, comma-separated. Names them in " +
     "the same request that stores the plan, so a private plan need never " +
-    "exist unshared. Each entry is a handle or an account id. The 201 " +
-    "reports which ones landed.",
+    "exist unshared. Each entry is a handle or an account id, and at most " +
+    `${MAX_GRANTS_PER_REQUEST} of them. The 201 reports which ones landed.`,
   schema: { type: "string", examples: ["k7mjq2rvxn,q5qkesmr5v"] },
 };
 

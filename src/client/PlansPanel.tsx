@@ -728,12 +728,15 @@ export function PlansPanel() {
       />
       {error !== null && <p className="error">{error}</p>}
       {plans.length === 0 ? (
-        <p className="empty" style={{ marginTop: "24px" }}>
-          {/* Before the first list answers there is nothing to say yet -
-              "No plans yet" would be a claim, and a wrong one for anyone who
-              has plans. */}
-          {loaded ? "No plans yet." : "Loading..."}
-        </p>
+        // Nothing is claimed while the first list is still in flight, and
+        // nothing at all when it failed: the error line above is the whole
+        // story then, and "No plans yet" beside it would be a second, wrong
+        // one.
+        error === null && (
+          <p className="empty" style={{ marginTop: "24px" }}>
+            {loaded ? "No plans yet." : "Loading..."}
+          </p>
+        )
       ) : (
         <>
           <PlansTable

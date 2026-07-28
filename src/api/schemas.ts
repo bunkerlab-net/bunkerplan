@@ -386,7 +386,14 @@ export const GrantRequest = component(
   "GrantRequest",
   z
     .looseObject({
-      accounts: z.union([z.string().min(1), z.array(PlanAccount).min(1)]),
+      // The cap is on the array branch only. A comma-separated string can
+      // carry as many as it likes as far as JSON Schema is concerned; the
+      // parser counts them after splitting, and the body bound stops the
+      // absurd case before that.
+      accounts: z.union([
+        z.string().min(1),
+        z.array(PlanAccount).min(1).max(MAX_GRANTS_PER_REQUEST),
+      ]),
     })
     .meta({
       title: "GrantRequest",

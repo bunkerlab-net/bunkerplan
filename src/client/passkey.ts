@@ -23,16 +23,30 @@ function messageOf(failure: unknown): string {
  * lowercase alphanumerics, so nothing can reach here with a scheme in it.
  * The check is local anyway: this is the one place the app hands a string to
  * `location.assign`, and an open redirect out of a signed-in ceremony is a
- * phishing primitive. `//host` is the case worth naming - it is protocol
- * relative, so it looks like a path and is not one. Backslashes go too,
- * because some browsers fold them to slashes before parsing.
+ * phishing primitive.
+ *
+ * Resolved against the current origin rather than pattern-matched, because
+ * the string checks alone are not enough: a URL parser strips tabs, newlines,
+ * and carriage returns before parsing, so `/\tevil.com` and `/<CR>/evil.com`
+ * do not look protocol-relative until after they already are. Those are
+ * refused outright, backslashes with them, and anything that resolves off
+ * this origin.
  */
 function samePathOnly(destination: string): string {
-  const safe =
-    destination.startsWith("/") &&
-    !destination.startsWith("//") &&
-    !destination.includes("\\");
-  return safe ? destination : "/dashboard";
+  if (
+    !destination.startsWith("/") ||
+    /[\t\n\r\\]/.test(destination) ||
+    destination.startsWith("//")
+  ) {
+    return "/dashboard";
+  }
+  try {
+    const resolved = new URL(destination, window.location.origin);
+    if (resolved.origin !== window.location.origin) return "/dashboard";
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return "/dashboard";
+  }
 }
 
 /**

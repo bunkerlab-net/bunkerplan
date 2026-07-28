@@ -78,6 +78,7 @@ function fakePlans(
     visibility: "private",
     shareCodeHash: null,
   };
+  const granted = new Set<string>();
   const plans: PlanRepo = {
     insert: async () => "created",
     listByUser: async () => [],
@@ -99,15 +100,23 @@ function fakePlans(
       if (owned) stored.shareCodeHash = hash;
       return owned;
     },
-    listGrantHandles: async () => (owned ? [] : null),
+    // Stateful, like `visibility` and `shareCodeHash` above: a handler that
+    // reports the sharing state is then checked against what was actually
+    // granted rather than against a constant the fake would have returned
+    // whatever happened.
+    listGrantHandles: async () => (owned ? [...granted] : null),
     grantByHandle: async (planId, ownerId, account) => {
       calls.granted.push({ planId, ownerId, account });
       if (account === over.throwsFor) throw new Error("database unreachable");
-      return over.outcome ?? "granted";
+      const outcome = over.outcome ?? "granted";
+      if (owned && outcome === "granted") granted.add(account);
+      return outcome;
     },
     revokeByHandle: async (planId, ownerId, account) => {
       calls.revoked.push({ planId, ownerId, account });
-      return over.revokes ?? true;
+      const revoked = over.revokes ?? true;
+      if (revoked) granted.delete(account);
+      return revoked;
     },
   };
   return { plans, calls };
@@ -143,6 +152,28 @@ describe("reading and setting the sharing state", () => {
       visibility: "private",
       hasShareCode: false,
       grants: [],
+    });
+  });
+
+  test("getPlanSharing reports the accounts actually granted", async () => {
+    // The empty case above passes against a fake that always answers `[]`,
+    // so it says nothing about the handler carrying the list through.
+    const { plans } = fakePlans();
+    await grantPlan(fakeAuth(OWNER), plans, post({ accounts: "a,b,c" }), PLAN);
+    await revokePlanGrant(fakeAuth(OWNER), plans, plain(), PLAN, "b");
+
+    const response = await getPlanSharing(
+      fakeAuth(OWNER),
+      plans,
+      plain(),
+      PLAN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({
+      visibility: "private",
+      hasShareCode: false,
+      grants: ["a", "c"],
     });
   });
 
