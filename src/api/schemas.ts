@@ -244,16 +244,25 @@ const PlanHandle = z
  * what `/api/auth/get-session` returns to the signed-in account and what a
  * script is likelier to be holding already. Same constraints as a handle,
  * because the only rule either has to satisfy here is being non-blank.
+ *
+ * Registered, unlike `PlanHandle`: seven fields across three components take
+ * one of these, so the `$ref` saves the document seven copies of the same
+ * string. `PlanHandle` reaches one component and one path parameter that is
+ * inlined deliberately, so the indirection would not be earned there.
  */
-const PlanAccount = z
-  .string()
-  .min(1)
-  .regex(/\S/)
-  .meta({
-    description:
-      "An account handle, as shown in the dashboard, or an account id.",
-    examples: ["k7mjq2rvxn", "PTvWlDlbZeEKHbnAIlscbcyduj6ayFc2"],
-  });
+const PlanAccount = component(
+  "PlanAccount",
+  z
+    .string()
+    .min(1)
+    .regex(/\S/)
+    .meta({
+      title: "PlanAccount",
+      description:
+        "An account handle, as shown in the dashboard, or an account id.",
+      examples: ["k7mjq2rvxn", "PTvWlDlbZeEKHbnAIlscbcyduj6ayFc2"],
+    }),
+);
 
 export const PlanSummary = component(
   "PlanSummary",

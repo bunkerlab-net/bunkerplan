@@ -1,20 +1,14 @@
 import { useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
+import { messageOf } from "./errors.ts";
 
 type Outcome = { error?: unknown } | undefined;
 
-function messageOf(failure: unknown): string {
-  if (failure instanceof Error) return failure.message;
-  if (
-    typeof failure === "object" &&
-    failure !== null &&
-    "message" in failure &&
-    typeof failure.message === "string"
-  ) {
-    return failure.message;
-  }
-  return "authentication failed";
-}
+/**
+ * Both a returned `result.error` and a thrown rejection land on this, so a
+ * ceremony that failed reads the same either way.
+ */
+const FAILED = "authentication failed";
 
 /**
  * Where a ceremony lands, refused unless it is a path on `origin`.
@@ -78,7 +72,7 @@ export function usePasskeyAction(destination = "/dashboard") {
     try {
       const failure = (await action())?.error;
       if (failure) {
-        setError(messageOf(failure));
+        setError(messageOf(failure, FAILED));
         setBusy(false);
         return;
       }
@@ -90,7 +84,7 @@ export function usePasskeyAction(destination = "/dashboard") {
       // signed out and bounce straight back off the guard.
       window.location.assign(samePathOnly(destination, window.location.origin));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(messageOf(cause, FAILED));
       setBusy(false);
     }
   };

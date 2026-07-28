@@ -131,20 +131,25 @@ function cascade(
   closing.delete(userId);
 }
 
+type SeedRow = Parameters<PlanRepo["insert"]>[0];
+
+/**
+ * A row with the fields no test here varies already filled in, so each seed
+ * site shows only what it is actually choosing.
+ */
+function planRow(overrides: Partial<SeedRow> & Pick<SeedRow, "id">): SeedRow {
+  return {
+    userId: OWNER,
+    label: null,
+    size: 1,
+    visibility: "private",
+    shareCodeHash: null,
+    ...overrides,
+  };
+}
+
 async function claim(plans: PlanRepo, id: string): Promise<void> {
-  expect(
-    await plans.insert(
-      {
-        id,
-        userId: OWNER,
-        label: null,
-        size: 5,
-        visibility: "private",
-        shareCodeHash: null,
-      },
-      10,
-    ),
-  ).toBe("created");
+  expect(await plans.insert(planRow({ id, size: 5 }), 10)).toBe("created");
 }
 
 describe("upload racing account deletion", () => {
@@ -239,17 +244,7 @@ describe("upload racing account deletion", () => {
     const { objects, rows, deps, plans, storage } = stores();
 
     for (let i = 0; i < 5; i += 1) {
-      await plans.insert(
-        {
-          id: `p${i}`,
-          userId: OWNER,
-          label: null,
-          size: 1,
-          visibility: "private",
-          shareCodeHash: null,
-        },
-        100,
-      );
+      await plans.insert(planRow({ id: `p${i}` }), 100);
       await storage.put(`p${i}`, new Uint8Array(1));
     }
     expect(objects.size).toBe(5);
@@ -264,17 +259,7 @@ describe("upload racing account deletion", () => {
 
     await claim(plans, "mine");
     await storage.put("mine", new Uint8Array(1));
-    await plans.insert(
-      {
-        id: "theirs",
-        userId: "user-b",
-        label: null,
-        size: 1,
-        visibility: "private",
-        shareCodeHash: null,
-      },
-      10,
-    );
+    await plans.insert(planRow({ id: "theirs", userId: "user-b" }), 10);
     await storage.put("theirs", new Uint8Array(1));
 
     await sweep(deps, OWNER);
