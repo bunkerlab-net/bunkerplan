@@ -9,13 +9,21 @@ function check(html: string) {
   return validateStandaloneHtml(encode(html));
 }
 
-/** A node's text content, descendants included, as a stylesheet is built from. */
-function textContent(node: DefaultTreeAdapterTypes.Node): string {
-  if (node.nodeName === "#text") {
-    return (node as DefaultTreeAdapterTypes.TextNode).value;
-  }
+/**
+ * A node's CHILD text content: its direct text-node children only.
+ *
+ * This is what the HTML standard builds a stylesheet from - "the child text
+ * content of a style element must be that of a conformant style sheet" - and it
+ * is not `Element.textContent`, which descends. The difference decides real
+ * cases: `<style>a{background:u<g>rl("x")</g>}</style>` has child text content
+ * `a{background:u}`, holding no `url(` at all.
+ */
+function childTextContent(node: DefaultTreeAdapterTypes.Node): string {
   if (!("childNodes" in node)) return "";
-  return node.childNodes.map(textContent).join("");
+  return node.childNodes
+    .filter((child) => child.nodeName === "#text")
+    .map((child) => (child as DefaultTreeAdapterTypes.TextNode).value)
+    .join("");
 }
 
 const DOC = (body: string) =>
@@ -1142,61 +1150,90 @@ describe("validateStandaloneHtml - parser conformance", () => {
   );
 
   /**
-   * A browser applies the CSS in an SVG or MathML `<style>`, so it is scanned
-   * like any other. Bounding it is the work: it is not raw text, because the
-   * tokeniser switches to RAWTEXT only outside foreign content, so its text
-   * content runs through descendants and ends only where the element does.
+   * A browser applies the CSS in an SVG `<style>`, so it is scanned like any
+   * other, and bounding it is the work. It is not raw text - the tokeniser
+   * switches to RAWTEXT only outside foreign content - and a stylesheet is the
+   * element's CHILD text content, its direct text children and nothing deeper.
    *
-   * Each case below is a way that extent goes wrong. The refusals are CSS a
-   * browser applies; the acceptances are text a browser never treats as CSS, and
-   * reading them as CSS refused documents over a `url(` in an ordinary sentence.
+   * Text-only styles are exact. A style holding an element is refused instead,
+   * because where its later direct text goes depends on HTML tree construction.
+   * The three lists below are those three outcomes.
    */
-  const CSS_IN_STYLE = [
-    // The plain case, in both foreign namespaces.
+  const EXACT_CSS = [
+    // Plain, and the CDATA form that is the usual way to write it.
     `<svg><style>a{background:url("${EXT}")}</style></svg>`,
-    `<math><style>a{background:url("${EXT}")}</style></math>`,
-    // A CDATA section is character data, and the usual way to write this.
     `<svg><style><![CDATA[a{background:url("${EXT}")}]]></style></svg>`,
-    // Child elements do not end the text content.
-    `<svg><style>a{}<g/>b{background:url("${EXT}")}</style></svg>`,
-    `<svg><style>a{}<g></g>b{background:url("${EXT}")}</style></svg>`,
-    `<svg><style>a{}<text>x</text>b{background:url("${EXT}")}</style></svg>`,
-    // One end tag closing two elements, which a child COUNT desynchronises on.
-    `<svg><style>a{}<g><path></g>b{background:url("${EXT}")}</style></svg>`,
-    // A nested `<style>` is an ordinary child element here.
-    `<svg><style>a{}<style></style>b{background:url("${EXT}")}</style></svg>`,
-    // Browsers ignore an unmatched end tag; so must the extent.
-    `<svg><style>a{}</bogus>b{background:url("${EXT}")}</style></svg>`,
-    // `<foreignObject>` PUSHES an HTML island rather than popping the subtree, so
-    // the outer element - and its text - is still open after it closes.
-    `<svg><style>a{}<foreignObject><div/></foreignObject>b{background:url("${EXT}")}</style></svg>`,
-    `<svg><style>a{}<foreignObject><div><p>x</p></div></foreignObject>b{background:url("${EXT}")}</style></svg>`,
-    // Void elements in that island are never popped by name, so the stack has to
-    // recover by index when their ancestor closes.
-    `<svg><style>a{}<foreignObject><br><input></foreignObject>b{background:url("${EXT}")}</style></svg>`,
-    // An island `<style>` is raw text, and its text belongs to the outer element
-    // too, so it must not replace the block.
-    `<svg><style>a{}<foreignObject><style>x{}</style></foreignObject>b{background:url("${EXT}")}</style></svg>`,
-    // An integration point on its own is HTML, so its `<style>` is raw text.
+    // An integration point is HTML, so this `<style>` is raw text.
     `<svg><foreignObject><style>a{background:url("${EXT}")}</style></foreignObject></svg>`,
+    // Properly balanced foreign nesting leaves the parser back in HTML, so this
+    // `<style>` is an ordinary stylesheet.
+    `<svg><math></math></svg><style>@import url("${EXT}");</style>`,
   ];
 
-  const NOT_IN_STYLE = [
-    // `</svg>` closes the subtree and the `<style>` with it.
+  /**
+   * The simulator enters SVG or MathML on the start tag whether or not it closed
+   * itself, and leaves only when an end tag matches its innermost entry, where a
+   * browser pops until one matches. Past either point the parse stops describing
+   * the document - raw text is read as markup, `<image>` is not rewritten to
+   * `img`, SVG name and attribute adjustment is applied to HTML - so the check
+   * says so rather than giving a verdict it cannot stand behind.
+   */
+  const DIVERGED = [
+    `<svg/><style>@import url("${EXT}");</style>`,
+    `<math/><style>@import url("${EXT}");</style>`,
+    `<svg><math></svg><style>@import url("${EXT}");</style>`,
+    // `<image>` is rewritten to `img` in HTML and fetches its `src`, while the
+    // SVG entry in `URL_ATTRS` lists no `src` at all - so a stale namespace would
+    // have accepted this outright.
+    `<svg/><image src="${EXT}">`,
+    `<svg><math></svg><image src="${EXT}">`,
+    // Raw text read as markup: the `<g>` in this CSS would emit a start tag.
+    `<svg/><style>a{content:"<g>";background:url("${EXT}")}</style>`,
+    // And the same for a script, whose string would be read as an element.
+    `<svg/><script>const x='<img src="${EXT}">'</script>`,
+  ];
+
+  const NOT_CSS = [
+    // MathML has no stylesheet-bearing `style` - its styling element is
+    // `mstyle` - so this is ordinary foreign content and its text is not CSS.
+    `<math><style>a{background:url("${EXT}")}</style></math>`,
+    // `</svg>` closes the root the `<style>` sits in, so the child text stopped
+    // there and the prose after it is prose.
     `<svg><style>a{}</svg><p>prose with url("${EXT}") in it</p>`,
-    // `<p>` forces an exit from foreign content, which pops it just the same.
-    `<svg><style>a{}<p>prose with url("${EXT}") in it</p>`,
+    `<svg><svg><style>a{}</svg><text>url("${EXT}")</text></svg>`,
     // Properly closed, so nothing after it is CSS either.
     `<svg><style>a{}</style></svg><p>prose with url("${EXT}") in it</p>`,
-    // An inner `</svg>` leaves `inForeignContent` true, because the flag is a
-    // namespace and not an element stack - `<svg><svg>` pushed twice.
-    `<svg><svg><style>a{}</svg><text>url("${EXT}")</text></svg>`,
-    `<svg><svg><g><style>a{}</g><text>url("${EXT}")</text></svg></svg>`,
     // SVG honours the self-closing slash, so this `<style/>` holds nothing.
     `<svg><style/>prose url("${EXT}")</svg>`,
   ];
 
-  test.each(CSS_IN_STYLE)("scans the CSS a browser applies: %s", (body) => {
+  /**
+   * Refused for what the markup is, not for a reference: an element inside an
+   * SVG `<style>`, or an end tag that could be closing an ancestor or could be
+   * stray. Either way the direct text after it cannot be accounted for without
+   * reproducing HTML tree construction, so the gate says so instead of guessing.
+   *
+   * Some of these hold a reference a browser would fetch and some do not. That
+   * is the point: telling them apart is the thing that cannot be done here.
+   */
+  const UNACCOUNTABLE = [
+    `<svg><style>a{}<g/>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<g></g>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<text>x</text>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<g><path></g>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<style></style>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<foreignObject><div/></foreignObject>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<foreignObject><br><input></foreignObject>b{background:url("${EXT}")}</style></svg>`,
+    // Text split across a child element, which aggregating descendants would
+    // rejoin into a `url(` that is in no stylesheet anywhere.
+    `<svg><style>a{background:u<g>rl("${EXT}")</g>}</style></svg>`,
+    `<svg><style>a{}<g>b{background:url("${EXT}")}</g></style></svg>`,
+    // Stray or ancestor close - indistinguishable without the element stack.
+    `<svg><style>a{}</bogus>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><svg><g><style>a{}</g><text>url("${EXT}")</text></svg></svg>`,
+  ];
+
+  test.each(EXACT_CSS)("scans the CSS a browser applies: %s", (body) => {
     expect(check(DOC(body))).toEqual({
       ok: false,
       reasons: [`external reference: style ${EXT}`],
@@ -1204,34 +1241,72 @@ describe("validateStandaloneHtml - parser conformance", () => {
     });
   });
 
-  test.each(NOT_IN_STYLE)(
-    "does not read text outside a foreign <style> as CSS: %s",
+  test.each(NOT_CSS)(
+    "does not read text outside a style as CSS: %s",
     (body) => {
       expect(check(DOC(body))).toEqual({ ok: true });
     },
   );
 
+  test.each(UNACCOUNTABLE)(
+    "refuses markup it cannot account for rather than guessing: %s",
+    (body) => {
+      const result = check(DOC(body));
+      expect(result.ok).toBe(false);
+      expect(result.ok ? [] : result.reasons).toContain(
+        "unsupported markup inside an svg style - keep the stylesheet to text only",
+      );
+    },
+  );
+
+  test.each(DIVERGED)(
+    "refuses a document whose parse it can no longer follow: %s",
+    (body) => {
+      const result = check(DOC(body));
+      expect(result.ok).toBe(false);
+      expect(result.ok ? [] : result.reasons).toContain(
+        "unsupported nesting: a self-closing <svg/> or <math/>, or crossed " +
+          "svg/math end tags - give each one its own end tag",
+      );
+    },
+  );
+
+  /** The plain spellings the refusal above points at are unaffected. */
+  test.each([
+    `<svg></svg><style>@import url("data:,");</style>`,
+    `<math></math><style>@import url("data:,");</style>`,
+    `<svg><math></math></svg><image src="data:,">`,
+  ])("accepts the balanced spelling of the same document: %s", (body) => {
+    expect(check(DOC(body))).toEqual({ ok: true });
+  });
+
   /**
-   * The two lists above say what a browser does, so something other than this
-   * scanner has to decide which list a case belongs in - otherwise they only
+   * `EXACT_CSS` and `NOT_CSS` claim to match a browser, so something other than
+   * this scanner has to decide which list a case belongs in - otherwise they only
    * assert that the scanner agrees with itself.
    *
-   * `parse5` builds the tree, and a stylesheet is built from its style element's
-   * text content, descendants included. Whether the reference appears in that
-   * text is the answer the streaming scanner has to reach without a tree. Cheap
-   * here on fixtures this size; a tree is what the gate cannot afford on a 2 MiB
-   * upload, which is why the scanner streams in the first place.
+   * `parse5` builds the tree, and the answer is the CHILD text content of each
+   * style element it holds. `UNACCOUNTABLE` is deliberately excluded: those are
+   * refused for their markup, and the gate makes no claim about the reference.
+   * Cheap on fixtures this size; a tree is what the gate cannot afford on a 2 MiB
+   * upload, which is why the scanner streams instead.
    */
-  test.each([...CSS_IN_STYLE, ...NOT_IN_STYLE])(
+  test.each([...EXACT_CSS, ...NOT_CSS])(
     "agrees with the parsed tree about what the stylesheet holds: %s",
     (body) => {
       const html = DOC(body);
       const styles: string[] = [];
       const walk = (node: DefaultTreeAdapterTypes.Node): void => {
-        if ("childNodes" in node) {
-          if (node.nodeName === "style") styles.push(textContent(node));
-          for (const child of node.childNodes) walk(child);
+        if (!("childNodes" in node)) return;
+        // An SVG `<style>` bears a stylesheet and a MathML one does not, so the
+        // namespace decides whether its text counts.
+        const mathml =
+          "namespaceURI" in node &&
+          node.namespaceURI === "http://www.w3.org/1998/Math/MathML";
+        if (node.nodeName === "style" && !mathml) {
+          styles.push(childTextContent(node));
         }
+        for (const child of node.childNodes) walk(child);
       };
       walk(parse(html));
 
@@ -1244,8 +1319,11 @@ describe("validateStandaloneHtml - parser conformance", () => {
    * HTML ignores the slash on a non-void element and enters raw text regardless,
    * so this is a stylesheet - the opposite of the SVG case above.
    */
-  test("reads a self-closing HTML <style/> as a stylesheet", () => {
-    expect(check(DOC(`<style/>@import url("${EXT}");`))).toEqual({
+  test.each([
+    `<style/>@import url("${EXT}");`,
+    `<style>@import url("${EXT}");`,
+  ])("reads an HTML <style> as a stylesheet however it ends: %s", (body) => {
+    expect(check(DOC(body))).toEqual({
       ok: false,
       reasons: [`external reference: style ${EXT}`],
       truncated: false,

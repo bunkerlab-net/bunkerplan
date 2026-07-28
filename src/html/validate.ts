@@ -33,7 +33,7 @@
  * stream nothing. Nothing here accumulates per element: the only buffer is one
  * `<style>` block's text, bounded by the upload itself.
  */
-import { foreignContent, type Token } from "parse5";
+import type { Token } from "parse5";
 import { SAXParser, type StartTag } from "parse5-sax-parser";
 
 type Attribute = Token.Attribute;
@@ -742,156 +742,200 @@ class DocumentScanner extends SAXParser {
   }
 
   /**
-   * True when the parser is inside SVG or MathML, where a `<style>` start tag
-   * does NOT switch the tokeniser to raw text - `_ensureTokenizerMode` is
-   * reached only on the non-foreign branch. Taken from the feedback simulator
-   * rather than tracked here, so integration points come out right: a `<style>`
-   * inside `<foreignObject>` is HTML again, and is raw text again with it.
+   * Whether the simulator believes it is inside SVG or MathML. Everything about
+   * how the rest of the document is read follows from it: raw-text elements,
+   * the `<image>` to `img` rewrite, SVG name and attribute adjustment, and
+   * whether a `<style>` bears a stylesheet.
    */
   get inForeignContent(): boolean {
     return this.parserFeedbackSimulator.inForeignContent;
   }
-
-  /**
-   * True when the `startTag` being delivered POPS the SVG or MathML subtree
-   * rather than descending into it.
-   *
-   * Both show up as `inForeignContent` going false, which is why the flag alone
-   * cannot bound a foreign `<style>`: `<p>` pops the subtree and takes the
-   * `<style>` with it, while `<foreignObject>` PUSHES an HTML island inside the
-   * element and leaves it open.
-   */
-  get exitsForeignContent(): boolean {
-    return this.exits;
-  }
-
-  private exits = false;
-  /** The namespace as of the previous token, which is what the exit rule tests. */
-  private wasForeign = false;
-
-  /**
-   * The simulator hands over the fully adjusted token - `tagID` set, attributes
-   * adjusted - so this is the same predicate it used, evaluated before the public
-   * event is emitted. Gated on the previous namespace because inside an HTML
-   * island the tag is ordinary HTML and pops nothing.
-   */
-  override onStartTag(token: Token.TagToken): void {
-    this.exits = this.wasForeign && foreignContent.causesExit(token);
-    super.onStartTag(token);
-    this.wasForeign = this.inForeignContent;
-  }
-
-  override onEndTag(token: Token.TagToken): void {
-    super.onEndTag(token);
-    this.wasForeign = this.inForeignContent;
-  }
 }
 
 /**
- * The text content of the `<style>` element currently open, if any.
+ * The simulator's namespace no longer matches the document's.
  *
- * Buffered whole rather than scanned per event, because a block arrives in as
- * many pieces as the tokeniser cares to emit and `url(` can straddle any two of
- * them. Bounded by the upload: one block, never the tree.
+ * It enters SVG on `<svg>` whether or not the tag closed itself, and it leaves
+ * only when an end tag matches its innermost entry, where a browser pops until
+ * one matches. So `<svg/>` leaves it in SVG for the rest of the document, and
+ * `<svg><math></svg>` leaves it in MathML, and from there EVERYTHING downstream
+ * is read wrong: raw-text elements are read as markup, `<image>` is not rewritten
+ * to `img` so its `src` is never checked, SVG name and attribute adjustment is
+ * applied to HTML.
  *
- * An HTML `<style>` is raw text: only `</style>` can end it, because the
- * tokeniser hides every other end tag from us, and nothing more is needed.
- *
- * An SVG or MathML one is an ordinary element whose text content continues
- * through child elements, so bounding it needs the open-element stack. Nothing
- * cheaper survives hostile input: `inForeignContent` is a namespace flag, not a
- * stack - `<svg><svg>` pushes twice and one `</svg>` pops once - and a count of
- * children desynchronises on both a stray `</bogus>`, which browsers ignore, and
- * `<g><path></g>`, which closes two elements with one tag.
+ * Each of those could be corrected one at a time; the list is the reason not to.
+ * Where the parse has stopped describing the document, a verdict about the
+ * document is not worth giving, so this says so instead. It costs nothing real:
+ * the trigger is a self-closed `<svg/>` or `<math/>`, or foreign end tags that
+ * cross, and both have a plain spelling that is not affected.
  */
-class StyleBuffer {
-  /** Open elements inside SVG or MathML, outermost first. */
-  private elements: string[] = [];
-  /** Where the open `<style>` sits in `elements`; -1 when none does. */
-  private styleAt = -1;
-  /** An HTML `<style>` is open, and the stack plays no part in bounding it. */
-  private raw = false;
-  private text = "";
+const DIVERGED_NAMESPACE =
+  "unsupported nesting: a self-closing <svg/> or <math/>, or crossed svg/math " +
+  "end tags - give each one its own end tag";
+
+/**
+ * An SVG `<style>` holding anything this cannot account for.
+ *
+ * Refused rather than half-scanned: see `StyleText`. Deliberately vague about
+ * WHAT the markup is, because the two triggers differ - a child element, or an
+ * end tag that may be closing an ancestor or may be stray - and naming one of
+ * them would misdescribe the other. The instruction is the useful part, and it
+ * is the same either way.
+ */
+const UNACCOUNTABLE_STYLE =
+  "unsupported markup inside an svg style - keep the stylesheet to text only";
+
+/**
+ * The CSS of the `<style>` element currently open.
+ *
+ * A stylesheet is the element's CHILD text content - "the child text content of
+ * a style element must be that of a conformant style sheet" - its direct
+ * text-node children and nothing deeper. Aggregating descendant text instead
+ * lets markup fabricate a reference no browser parses, because
+ * `<style>a{background:u<g>rl("...")</g>}</style>` has child text content
+ * `a{background:u}`, with no `url(` in it anywhere.
+ *
+ * Text-only styles are therefore exact, and that is every style anyone writes.
+ * An element opening inside an SVG one is refused instead, because the direct
+ * text AFTER it cannot be accounted for without knowing where the element ends,
+ * and inside an `<foreignObject>` island that is HTML tree construction: special
+ * elements blocking an unmatched end tag, implied end tags, the adoption agency.
+ * Matching end tags by name looks close and is not - in
+ * `<svg><style>a{}<foreignObject><div/></foreignObject>b{url(...)}</style>`
+ * HTML ignores the slash on `<div>`, so `</foreignObject>` is blocked by it and
+ * `b{...}` lands inside the `<div>`, outside the stylesheet entirely. Refusing
+ * says so; guessing either invented a reference or hid one.
+ *
+ * An end tag needs none of that. Whatever closes the element - `</style>`,
+ * `</svg>`, anything - the child text is already complete, because collection
+ * would have stopped at a child element.
+ *
+ * Buffered whole rather than scanned per event, because text arrives in as many
+ * pieces as the tokeniser cares to emit and `url(` can straddle any two.
+ */
+class StyleText {
+  /** The open element's CSS so far, or null when none is collecting. */
+  private css: string | null = null;
+  /**
+   * Innermost SVG or MathML root, which decides whether a foreign `<style>`
+   * bears a stylesheet at all. SVG has one; MathML does not - its styling
+   * element is `mstyle`, so an element merely named `style` there is ordinary
+   * foreign content and its text is not CSS.
+   *
+   * Kept as runs rather than one entry per element, because only the innermost
+   * name is ever read and `<svg>` nests to whatever depth an uploader likes: a
+   * 2 MiB document of nothing else held 400,000 entries and 31 MB.
+   */
+  private roots: { name: string; depth: number }[] = [];
 
   /**
-   * A start tag. True when it ended the open block.
-   *
-   * `exits` pops the whole SVG or MathML subtree, so a `<style>` inside it goes
-   * too. Everything else descends.
-   *
-   * Inside a foreign subtree EVERY element goes on the stack, including the HTML
-   * ones of an `<foreignObject>` island, so that their end tags pop themselves
-   * instead of matching an outer `<style>` of the same name. One block is enough
-   * even so: a style element's text content includes its descendants' text, so an
-   * island `<style>` nested in an SVG one contributes to it rather than starting
-   * a second block. Opening one there cleared the outer buffer and lost every
-   * declaration written after the island.
+   * True when no SVG or MathML root is open, so the document is in HTML content
+   * and its raw-text elements are raw text - whatever the simulator's namespace
+   * flag has been left saying.
+   */
+  get inHtmlContent(): boolean {
+    return this.roots.length === 0;
+  }
+
+  private get root(): string | undefined {
+    return this.roots.at(-1)?.name;
+  }
+
+  constructor(
+    /** Called with the child text content of each `<style>`, once it ends. */
+    private readonly onBlock: (css: string) => void,
+    /** Called when an element inside an SVG `<style>` makes it unaccountable. */
+    private readonly onUnaccountable: () => void,
+  ) {}
+
+  /**
+   * A start tag. Any tag ends the text this can vouch for, and a `<style>` then
+   * begins the next block.
    *
    * The self-closing slash is where the namespaces part. HTML ignores it on a
    * non-void element and the tokeniser enters raw text regardless, so `<style/>`
-   * there holds every byte up to `</style>`. SVG and MathML honour it, so
-   * `<svg><style/>` is empty and the text after it belongs to the SVG.
+   * there holds every byte up to `</style>`. SVG honours it, so `<svg><style/>`
+   * is empty and the text after it belongs to the SVG.
    */
-  startTag(tag: StartTag, inForeignContent: boolean, exits: boolean): boolean {
-    if (exits) {
-      const ended = this.styleAt >= 0;
-      this.elements.length = 0;
-      this.styleAt = -1;
-      return ended;
+  startTag(tag: StartTag, inForeignContent: boolean): void {
+    // A tag arriving while a block is open proves the block was never raw text:
+    // raw text hides every tag from the tokeniser, which is the point of it. So
+    // this covers the SVG `<style>` that is ordinary markup AND the one the
+    // simulator left in the wrong namespace, where `<style>` is HTML but never
+    // switched to RAWTEXT and a `<` in the CSS emits a start tag of its own.
+    const unaccountable = this.css !== null;
+    this.end();
+    if (unaccountable) this.onUnaccountable();
+
+    if (tag.tagName === "svg" || tag.tagName === "math") {
+      if (!tag.selfClosing) this.pushRoot(tag.tagName);
+      return;
     }
-    if (this.elements.length === 0 && !inForeignContent) {
-      // Plain HTML, where `<style>` is raw text and no stack is needed.
-      if (tag.tagName === "style") {
-        this.raw = true;
-        this.text = "";
-      }
-      return false;
+    if (tag.tagName !== "style") return;
+    if (!inForeignContent) {
+      // Raw text, at the top level or inside an integration point.
+      this.css = "";
+      return;
     }
-    if (inForeignContent && tag.selfClosing) return false;
-    this.elements.push(tag.tagName);
-    if (tag.tagName === "style" && this.styleAt < 0) {
-      this.styleAt = this.elements.length - 1;
-      this.text = "";
-    }
-    return false;
+    if (tag.selfClosing) return;
+    if (this.root === "svg") this.css = "";
   }
 
   append(chunk: string): void {
-    if (this.raw || this.styleAt >= 0) this.text += chunk;
+    if (this.css !== null) this.css += chunk;
   }
 
   /**
-   * An end tag. True when it ended the block.
+   * An end tag.
    *
-   * Matched against the stack the way a parser does: the innermost element of
-   * that name closes, and everything still open inside it closes with it. A name
-   * open nowhere is stray, and ignored as browsers ignore it. The block ends when
-   * the tag closes the `<style>` itself or anything containing it.
+   * `</style>` completes the block, and so does the end tag of any SVG or MathML
+   * root the element sits inside - both say exactly where the child text stopped.
+   * Any other end tag does not: `</g>` may close an ancestor of the `<style>`, or
+   * may be stray and ignored, in which case the CSS carries on past it. Only the
+   * foreign roots are tracked, so the two cannot be told apart, and the document
+   * is refused rather than half-scanned.
    */
-  endTag(tagName: string): boolean {
-    if (this.raw) return true;
-    const at = this.elements.lastIndexOf(tagName);
-    if (at === -1) return false;
-    const closed = this.styleAt >= 0 && at <= this.styleAt;
-    this.elements.length = at;
-    if (closed) this.styleAt = -1;
-    return closed;
+  endTag(tagName: string): void {
+    const closesRoot = this.roots.some((run) => run.name === tagName);
+    const ambiguous = this.css !== null && tagName !== "style" && !closesRoot;
+    this.end();
+    if (ambiguous) this.onUnaccountable();
+    if (closesRoot) this.closeRoot(tagName);
   }
 
-  /** The buffered CSS, and the block closed. */
-  take(): string {
-    this.raw = false;
-    this.styleAt = -1;
-    const block = this.text;
-    this.text = "";
-    return block;
+  private pushRoot(name: string): void {
+    const innermost = this.roots.at(-1);
+    if (innermost?.name === name) innermost.depth += 1;
+    else this.roots.push({ name, depth: 1 });
+  }
+
+  /**
+   * Closes the innermost root of this name AND everything opened inside it, the
+   * way a parser pops until the name matches: `<svg><math></svg>` leaves neither
+   * open.
+   */
+  private closeRoot(name: string): void {
+    for (let index = this.roots.length - 1; index >= 0; index -= 1) {
+      const run = this.roots[index];
+      if (run === undefined || run.name !== name) continue;
+      this.roots.length = index;
+      if (run.depth > 1) this.roots.push({ name, depth: run.depth - 1 });
+      return;
+    }
+  }
+
+  /** Reports the block still open, if any. Also the end of input. */
+  end(): void {
+    if (this.css === null) return;
+    const css = this.css;
+    this.css = null;
+    this.onBlock(css);
   }
 }
 
 /** Records every refusable reference in the document. */
 function scanDocument(text: string, found: Map<string, string>): void {
   const parser = new DocumentScanner();
-  const style = new StyleBuffer();
 
   /** Past the cap the remaining bytes cannot change the verdict. */
   const capped = (): boolean => {
@@ -900,20 +944,37 @@ function scanDocument(text: string, found: Map<string, string>): void {
     return true;
   };
 
-  const flushStyle = (): void => {
-    for (const target of externalInCss(style.take())) {
-      addExternal(found, "style", target);
-      if (capped()) return;
-    }
+  const style = new StyleText(
+    (css) => {
+      for (const target of externalInCss(css)) {
+        addExternal(found, "style", target);
+        if (capped()) return;
+      }
+    },
+    () => {
+      found.set(UNACCOUNTABLE_STYLE, UNACCOUNTABLE_STYLE);
+      capped();
+    },
+  );
+
+  /**
+   * One-way on purpose. `roots` empty while the simulator still says foreign
+   * means it never left, and nothing after that point is read as the document
+   * says. The reverse - roots open while the simulator says HTML - is ordinary
+   * and correct: that is an integration point such as `<foreignObject>`, whose
+   * content IS HTML inside a subtree that is still open.
+   */
+  const diverged = (): boolean => {
+    if (!style.inHtmlContent || !parser.inForeignContent) return false;
+    found.set(DIVERGED_NAMESPACE, DIVERGED_NAMESPACE);
+    // Nothing further can be trusted, so nothing further is read.
+    parser.stop();
+    return true;
   };
 
   parser.on("startTag", (tag) => {
-    const ended = style.startTag(
-      tag,
-      parser.inForeignContent,
-      parser.exitsForeignContent,
-    );
-    if (ended) flushStyle();
+    style.startTag(tag, parser.inForeignContent);
+    if (diverged()) return;
     collectStartTag(tag, found);
     capped();
   });
@@ -923,13 +984,14 @@ function scanDocument(text: string, found: Map<string, string>): void {
   });
 
   parser.on("endTag", (tag) => {
-    if (style.endTag(tag.tagName)) flushStyle();
+    style.endTag(tag.tagName);
+    diverged();
   });
 
   parser.scan(text);
-  // An unclosed `<style>` never sees an end tag, and a browser applies its CSS
-  // regardless, so the buffer is scanned at EOF as well.
-  flushStyle();
+  // A `<style>` left unclosed never sees an end tag, and a browser applies its
+  // CSS regardless, so whatever is still open is reported at EOF.
+  style.end();
 }
 
 export function validateStandaloneHtml(bytes: Uint8Array): ValidationResult {

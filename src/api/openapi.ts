@@ -122,7 +122,17 @@ const NOT_STANDALONE =
   "than one, and `truncated` is present when the cap dropped others. Each " +
   "target is cut to its first 120 characters, followed by an ellipsis when it " +
   "was longer. Webfonts count: they have to travel as `data:` URIs in " +
-  "`@font-face`.";
+  "`@font-face`.\n\n" +
+  "Two refusals name markup rather than a reference. A `<style>` inside " +
+  "`<svg>` holds a stylesheet built from its direct text, so once another " +
+  "element opens inside it - or an end tag appears that may be closing an " +
+  "ancestor - where the rest of that text belongs depends on HTML tree " +
+  "construction. Keep such a stylesheet to text, `<![CDATA[ ... ]]>` " +
+  "included, and it is read exactly.\n\n" +
+  "The other names nesting. A self-closing `<svg/>` or `<math/>`, or foreign " +
+  "end tags that cross as in `<svg><math></svg>`, leave the parse describing " +
+  "something a browser is not reading, after which no verdict is given. Close " +
+  "each one with its own end tag, in order, and the document is read normally.";
 const STORAGE_DOWN = "The object store could not be reached.";
 
 /** Upload and replace share one allowance, counted per user. */

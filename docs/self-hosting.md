@@ -372,6 +372,29 @@ was longer:
 At most ten faults are listed. A document with more carries `"truncated": true`
 beside them, so the cap is never mistaken for the whole list.
 
+Two refusals are about the markup rather than a reference. A `<style>` inside
+`<svg>` is not raw text the way an HTML one is, and a stylesheet is built from
+the element's direct text - so once another element opens inside it, or an end
+tag turns up that might be closing an ancestor, where the rest of that text
+belongs depends on HTML tree construction. Rather than guess, the check refuses
+with `unsupported markup inside an svg style - keep the stylesheet to text
+only`. Keeping the CSS to text, or moving it to an HTML `<style>`, resolves it;
+text-only SVG stylesheets are read exactly, including the `<![CDATA[ ... ]]>`
+form. A MathML element named `style` bears no stylesheet at all - the styling
+element there is `mstyle` - so its text is not read as CSS.
+
+The other names nesting. `<svg>` and `<math>` change how everything inside them
+is read, and the parser this check uses follows that only for the plain
+spellings: it enters on the start tag whether or not the tag closed itself, and
+leaves only on an end tag matching the innermost one open. So a self-closing
+`<svg/>` or `<math/>`, or end tags that cross as in `<svg><math></svg>`, leave
+the parse describing something the browser is not reading - raw text becomes
+markup, `<image>` stops being rewritten to `img`, SVG naming is applied to HTML -
+after which no verdict is worth giving. Those are refused with `unsupported
+nesting: a self-closing <svg/> or <math/>, or crossed svg/math end tags - give
+each one its own end tag`. Writing `<svg></svg>` and closing each one in order
+resolves it, and costs nothing: the balanced spelling is read normally.
+
 Note that this is a static check. A plan's inline script can still call `fetch`
 at runtime; the CSP sandbox is what contains it.
 
