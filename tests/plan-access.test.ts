@@ -13,6 +13,7 @@ import {
   shareCookieName,
 } from "../src/http/share-auth.ts";
 import type { PlanAccessRow, PlanRepo } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 const OWNER = "user-owner";
 const GRANTEE = "user-grantee";
@@ -61,6 +62,10 @@ function fakePlans(
   grantees: string[] = [],
 ): PlanRepo {
   return {
+    // Spread first, so the two this suite cares about win. Everything else is
+    // the shared refusal stub: the read gate never calls it, and spelling it
+    // out here only invited the list to drift from the interface.
+    ...basePlanRepoStub,
     insert: async () => "created",
     listByUser: async () => [],
     findOwner: async () => null,
@@ -70,11 +75,6 @@ function fakePlans(
     findAccess: async (id) => (id === PLAN ? row : null),
     hasGrant: async (planId, userId) =>
       planId === PLAN && grantees.includes(userId),
-    setVisibility: async () => false,
-    setShareCodeHash: async () => false,
-    listGrantHandles: async () => null,
-    grantByHandle: async () => "no-plan",
-    revokeByHandle: async () => false,
   };
 }
 

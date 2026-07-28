@@ -244,28 +244,7 @@ function ShareCodeBlock(
           </button>
         )}
       </div>
-      {code !== null && (
-        <>
-          <p>
-            <strong>This is the only time the code is shown.</strong> Copy the
-            link:
-          </p>
-          {/* Encoded even though the alphabet is base62 and needs none: the
-              link is built here, and a future alphabet change must not
-              silently start producing broken URLs. */}
-          {/* A section, not a bare `code`: the block scrolls sideways, so it
-              has to be focusable, and a focus stop with no name is worse than
-              none. The `code` stays inside it. */}
-          <section
-            className="snippet"
-            // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
-            tabIndex={0}
-            aria-label="Share link"
-          >
-            <code>{`${plan.url}?code=${encodeURIComponent(code)}`}</code>
-          </section>
-        </>
-      )}
+      {code !== null && <ShareLink url={plan.url} code={code} />}
       {code === null && props.hasShareCode && (
         <p className="muted">
           A code is set. It cannot be read back - regenerate to get a new one,
@@ -273,6 +252,63 @@ function ShareCodeBlock(
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * The one-time share link, with the copy button the sentence above it asks
+ * for - the same shape `ApiKeysPanel`'s `Reveal` uses for the other secret
+ * this app shows exactly once.
+ */
+function ShareLink({ url, code }: { url: string; code: string }) {
+  // Encoded even though the alphabet is base62 and needs none: the link is
+  // built here, and a future alphabet change must not silently start
+  // producing broken URLs.
+  const link = `${url}?code=${encodeURIComponent(code)}`;
+  const [copyFailed, setCopyFailed] = useState(false);
+
+  // `writeText` rejects on a denied permission or an insecure context, and
+  // this is the one secret the app shows once - a copy that quietly did
+  // nothing would lose it. The link is on screen either way, so the fallback
+  // is to say so rather than to retry.
+  const copy = () => {
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(link);
+        setCopyFailed(false);
+      } catch {
+        setCopyFailed(true);
+      }
+    })();
+  };
+
+  return (
+    <>
+      <p>
+        <strong>This is the only time the code is shown.</strong> Copy the link:
+      </p>
+      <div className="row">
+        {/* A section, not a bare `code`: the block scrolls sideways, so it
+            has to be focusable, and a focus stop with no name is worse than
+            none. The `code` stays inside it. */}
+        <section
+          className="snippet"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+          tabIndex={0}
+          aria-label="Share link"
+        >
+          <code>{link}</code>
+        </section>
+        <button type="button" className="btn-text" onClick={copy}>
+          Copy
+        </button>
+      </div>
+      {copyFailed && (
+        <p className="error" role="alert">
+          Could not reach the clipboard - select the link above and copy it.
+        </p>
+      )}
+    </>
   );
 }
 

@@ -143,6 +143,23 @@ describe.each([
 });
 
 /**
+ * `<statement> <table>`, however the dialect chose to quote the name.
+ *
+ * The three forms are spelled out rather than wrapped in optional quotes,
+ * because an optional closing quote leaves the boundary in the wrong place:
+ * `` `plan` `` followed by `;` has no word boundary after the backtick, so
+ * the pattern would only match by backtracking past a quote it never
+ * consumed. Quote pairs also have to agree. The bare form keeps its
+ * boundary, so `plan` does not match inside `plan_grant`.
+ */
+function named(statement: string, table: string): RegExp {
+  return new RegExp(
+    `${statement}\\s+(?:\`${table}\`|"${table}"|${table}\\b)`,
+    "i",
+  );
+}
+
+/**
  * The ordering invariant, checked statically because no data can demonstrate
  * it yet: `plan_grant` is created after the rebuild, so there is nothing for
  * the drop to cascade to.
@@ -161,9 +178,14 @@ describe("the migration set as a whole", () => {
       // Positions, not just presence: within a single file the order of these
       // two is the whole question, and a regeneration puts them the wrong way
       // round without changing which statements are present.
-      const dropsAt = sql.search(/DROP TABLE\s+`plan`/i);
-      const createsGrantsAt = sql.search(/CREATE TABLE\s+`plan_grant`/i);
-      const preserves = /INSERT INTO\s+`plan_grant`/i.test(sql);
+      //
+      // Quoting is left open. Drizzle writes backticks for SQLite today, but
+      // a guard that only recognised its current style would go quiet - not
+      // fail - the day it emitted `"plan"` or a bare name, which is the worst
+      // way for this particular test to break.
+      const dropsAt = sql.search(named("DROP TABLE", "plan"));
+      const createsGrantsAt = sql.search(named("CREATE TABLE", "plan_grant"));
+      const preserves = named("INSERT INTO", "plan_grant").test(sql);
 
       if (dropsAt !== -1 && !preserves) {
         const grantsLiveAtDrop =

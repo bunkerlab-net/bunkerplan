@@ -162,19 +162,25 @@ function PasskeysTable(props: {
                   : "-"}
               </td>
               <td className="actions">
-                <button
-                  type="button"
-                  className="btn-text btn-text-clay"
-                  disabled={props.busy || props.onlyOne}
-                  title={
-                    props.onlyOne
-                      ? "Deleting your only passkey would lock you out"
-                      : undefined
-                  }
-                  onClick={() => void props.onDelete(item.id)}
-                >
-                  Delete
-                </button>
+                {/* A disabled button takes no focus, so its `title` reaches
+                    neither a keyboard nor a screen reader - the reason has to
+                    be text on the page. Rendered in place of the control,
+                    because with one passkey there is nothing to press. */}
+                {props.onlyOne ? (
+                  <span className="muted">
+                    Deleting your only passkey would lock you out
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-text btn-text-clay"
+                    aria-label={`Delete ${item.name ?? "this passkey"}`}
+                    disabled={props.busy}
+                    onClick={() => void props.onDelete(item.id)}
+                  >
+                    Delete
+                  </button>
+                )}
               </td>
             </tr>
           ))}

@@ -1,7 +1,11 @@
 import type { AppAuth } from "../auth/instance.ts";
 import { MAX_SHARE_CODE_LENGTH } from "../config.ts";
 import { isPlanId } from "../ids.ts";
-import type { PlanRepo, PlanVisibility } from "../services/types.ts";
+import type {
+  PlanAccessRow,
+  PlanRepo,
+  PlanVisibility,
+} from "../services/types.ts";
 import { readBoundedBody } from "./bounded-body.ts";
 import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";
@@ -55,6 +59,45 @@ export type PlanAccess =
   | { kind: "missing" };
 
 /**
+ * The two ways a share code lets someone in: the `?code=` on this request,
+ * and the cookie an earlier one left behind. `null` when neither applies.
+ *
+ * A wrong code returns `null` rather than gating outright, so an owner who
+ * follows a stale link still gets in on their own credential.
+ */
+async function resolveByCode(
+  config: ShareCookieConfig,
+  request: Request,
+  planId: string,
+  row: PlanAccessRow,
+  /** Passed rather than read off `row`, which types it as nullable. */
+  storedHash: string,
+): Promise<PlanAccess | null> {
+  const code = new URL(request.url).searchParams.get("code");
+  if (
+    code !== null &&
+    code.length <= MAX_CODE_LENGTH &&
+    (await shareCodeMatches(code, storedHash))
+  ) {
+    return {
+      kind: "granted",
+      visibility: row.visibility,
+      // So the next request to this plan works without the parameter.
+      setCookie: await mintShareCookie(config, planId, storedHash, Date.now()),
+    };
+  }
+
+  const byCookie = await verifyShareCookie(
+    config.secret,
+    planId,
+    storedHash,
+    request.headers.get("cookie"),
+    Date.now(),
+  );
+  return byCookie ? { kind: "granted", visibility: row.visibility } : null;
+}
+
+/**
  * Decides access, stopping at the first thing that grants it.
  *
  * The order is a cost order. A public plan and a returning code holder never
@@ -74,54 +117,33 @@ export async function resolvePlanAccess(
 
   const row = await plans.findAccess(planId);
   if (row === null) return { kind: "missing" };
+  // Past this point the row is private, so the branches below could all
+  // write that literal. They read the column instead: the claim is then
+  // local to each return rather than depending on this early exit staying
+  // above them.
   if (row.visibility === "public") {
-    return { kind: "granted", visibility: "public" };
+    return { kind: "granted", visibility: row.visibility };
   }
 
   const storedHash = row.shareCodeHash;
   if (storedHash !== null) {
-    const code = new URL(request.url).searchParams.get("code");
-    // A wrong code falls through rather than short-circuiting to the gate: an
-    // owner who follows a stale link must still get in on their own
-    // credential.
-    if (
-      code !== null &&
-      code.length <= MAX_CODE_LENGTH &&
-      (await shareCodeMatches(code, storedHash))
-    ) {
-      return {
-        kind: "granted",
-        visibility: "private",
-        // So the next request to this plan works without the parameter.
-        setCookie: await mintShareCookie(
-          config,
-          planId,
-          storedHash,
-          Date.now(),
-        ),
-      };
-    }
-
-    if (
-      await verifyShareCookie(
-        config.secret,
-        planId,
-        storedHash,
-        request.headers.get("cookie"),
-        Date.now(),
-      )
-    ) {
-      return { kind: "granted", visibility: "private" };
-    }
+    const byCode = await resolveByCode(
+      config,
+      request,
+      planId,
+      row,
+      storedHash,
+    );
+    if (byCode !== null) return byCode;
   }
 
   const userId = await resolveUserId(auth, request);
   if (userId === null) return { kind: "gate", hasCode: storedHash !== null };
   if (userId === row.ownerId) {
-    return { kind: "granted", visibility: "private" };
+    return { kind: "granted", visibility: row.visibility };
   }
   if (await plans.hasGrant(planId, userId)) {
-    return { kind: "granted", visibility: "private" };
+    return { kind: "granted", visibility: row.visibility };
   }
 
   return { kind: "gate", hasCode: storedHash !== null };
