@@ -383,7 +383,7 @@ text-only SVG stylesheets are read exactly, including the `<![CDATA[ ... ]]>`
 form. A MathML element named `style` bears no stylesheet at all - the styling
 element there is `mstyle` - so its text is not read as CSS.
 
-The other names nesting. `<svg>` and `<math>` change how everything inside them
+The other refusal names nesting. `<svg>` and `<math>` change how everything
 is read, and the parser this check uses follows that only for the plain
 spellings: it enters on the start tag whether or not the tag closed itself, and
 leaves only on an end tag matching the innermost one open. So a self-closing

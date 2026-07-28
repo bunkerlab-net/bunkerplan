@@ -1316,6 +1316,63 @@ describe("validateStandaloneHtml - parser conformance", () => {
   );
 
   /**
+   * `DocumentScanner` reaches past the published surface of `parse5-sax-parser`:
+   * it subclasses to reach the `protected` tokenizer and feedback simulator, and
+   * it drives `tokenizer.write(text, true)` rather than the stream, because that
+   * is what delivers every token AND the EOF before it returns. None of that is
+   * guaranteed by semver, so the assumptions are asserted here rather than left
+   * to be discovered by a wrong verdict after an upgrade.
+   */
+  describe("assumptions about the parser", () => {
+    /** EOF has to arrive synchronously, or an unclosed block is lost. */
+    test("delivers the last text before returning a verdict", () => {
+      expect(
+        check(`<!doctype html><html><head><style>@import url("${EXT}");`),
+      ).toEqual({
+        ok: false,
+        reasons: [`external reference: style ${EXT}`],
+        truncated: false,
+      });
+    });
+
+    /** Text has to be flushed before the tag that follows it is delivered. */
+    test("keeps a style block and the tag after it in order", () => {
+      expect(
+        check(
+          DOC(
+            `<style>a{background:url("${EXT}")}</style><img src="/after.png">`,
+          ),
+        ),
+      ).toEqual({
+        ok: false,
+        reasons: [
+          `external reference: style ${EXT}`,
+          "external reference: img[src] /after.png",
+        ],
+        truncated: false,
+      });
+    });
+
+    /**
+     * A comment is a token of its own, so it flushes the text pending before it
+     * and the CSS around it arrives as two events - while remaining ONE element's
+     * child text content. Scanning per event would see `a{background:u` and
+     * `rl("...")}` and no `url(` in either, so the block is buffered whole.
+     */
+    test("joins style text split across two events by a comment", () => {
+      expect(
+        check(
+          DOC(`<svg><style>a{background:u<!--x-->rl("${EXT}")}</style></svg>`),
+        ),
+      ).toEqual({
+        ok: false,
+        reasons: [`external reference: style ${EXT}`],
+        truncated: false,
+      });
+    });
+  });
+
+  /**
    * HTML ignores the slash on a non-void element and enters raw text regardless,
    * so this is a stylesheet - the opposite of the SVG case above.
    */
