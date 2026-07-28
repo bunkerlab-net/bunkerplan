@@ -147,8 +147,21 @@ long to reach a visitor who has already seen the old one.
 Uploads must be self-contained: no external scripts, stylesheets, images,
 iframes, or CSS `url()`/`@import` targets, including relative paths, and no
 non-empty `iframe[srcdoc]`. Inline `<style>`, inline `<script>`, `data:` URIs
-and ordinary links are fine. A rejection returns `422` naming the offending
-`tag[attribute]`.
+and ordinary links are fine, as are the `link` relationships that fetch
+nothing: `canonical`, `alternate`, `license`, `prev`, `next`, `me`. Anything
+else is refused, including an unrecognised `rel` and combinations such as
+`alternate stylesheet`, which is still a stylesheet. A rejection returns `422`
+listing up to ten of the references it objected to, each named with the target
+it pointed at and cut to 120 characters, and carrying `truncated` when there
+were more than it listed - so one upload is usually enough to learn everything
+that has to change. The full response shape is under
+[API](docs/self-hosting.md#api) in the self-hosting guide.
+
+Webfonts are covered by that, so a branded document carries its typefaces as
+`data:` URIs in `@font-face`. That is cheaper than it sounds - a latin subset
+of a variable face costs about 65 KB encoded, and a provider that already
+serves subsets saves you a subsetting step. See
+[Webfonts](docs/self-hosting.md#webfonts) for the recipe.
 
 Plans are served with `Content-Security-Policy: sandbox`, which puts each
 document in an opaque origin so it cannot reach the uploader's session.

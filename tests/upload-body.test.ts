@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ErrorBody } from "../src/api/schemas.ts";
 import { readUploadBody } from "../src/http/upload-body.ts";
 
 /** Mirrors the production `MAX_UPLOAD_BYTES` default. */
@@ -69,5 +70,58 @@ describe("readUploadBody", () => {
     const html = `${HEAD}<script src="https://cdn.example.com/x.js"></script>${TAIL}`;
     const response = (await readUploadBody(htmlRequest(html), MAX)) as Response;
     expect(response.status).toBe(422);
+  });
+
+  /**
+   * The wire shape, not just the status, and parsed with the schema the
+   * published document is built from - so a body that drifts from `Error` fails
+   * here rather than shipping a document that lies. `error` alone for one fault
+   * keeps a client that reads only that field seeing what it always saw.
+   */
+  const refusalBody = async (html: string) => {
+    const response = (await readUploadBody(htmlRequest(html), MAX)) as Response;
+    expect(response.status).toBe(422);
+    return ErrorBody.parse(await response.json());
+  };
+
+  test("reports one fault as `error` with no list beside it", async () => {
+    expect(await refusalBody(`${HEAD}<img src="/logo.png">${TAIL}`)).toEqual({
+      error: "external reference: img[src] /logo.png",
+    });
+  });
+
+  test("reports several faults as `error` plus the whole list", async () => {
+    expect(
+      await refusalBody(`${HEAD}<img src="/a.png"><img src="/b.png">${TAIL}`),
+    ).toEqual({
+      error: "external reference: img[src] /a.png",
+      errors: [
+        "external reference: img[src] /a.png",
+        "external reference: img[src] /b.png",
+      ],
+    });
+  });
+
+  test("marks a capped list so the cap is not mistaken for the whole", async () => {
+    const images = Array.from(
+      { length: 40 },
+      (_, n) => `<img src="/i${n}.png">`,
+    ).join("");
+    const body = await refusalBody(`${HEAD}${images}${TAIL}`);
+    expect(body.errors).toHaveLength(10);
+    expect(body.truncated).toBe(true);
+    expect(body.errors?.[0]).toBe(body.error);
+  });
+
+  /** Exactly at the cap, nothing was dropped, so the wire must not say it was. */
+  test("sends ten faults with no truncation marker", async () => {
+    const images = Array.from(
+      { length: 10 },
+      (_, n) => `<img src="/i${n}.png">`,
+    ).join("");
+    const body = await refusalBody(`${HEAD}${images}${TAIL}`);
+    expect(body.errors).toHaveLength(10);
+    expect(body.truncated).toBeUndefined();
+    expect(body.errors?.[9]).toBe("external reference: img[src] /i9.png");
   });
 });

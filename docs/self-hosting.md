@@ -340,9 +340,37 @@ fonts, iframes, or CSS `url()`/`@import` targets - including relative paths,
 which have nothing to resolve against. A non-empty `iframe[srcdoc]` is rejected
 outright: it carries a whole nested document, and its value is entity-encoded,
 so validating it would mean trusting a hand-rolled entity decoder as a security
-boundary. Inline `<style>`, inline `<script>`,
-`data:` URIs and ordinary `<a href>` links are all fine. A rejection returns
-`422` with the offending `tag[attribute]` in the body.
+boundary. Inline `<style>`, inline `<script>`, `data:` URIs and ordinary
+`<a href>` links are all fine.
+
+A `link` is judged by its `rel`. Values that reach the network are refused:
+`stylesheet` (including `alternate stylesheet`), `icon`, `preload`, `prefetch`,
+`modulepreload`, `manifest`, `prerender`, and also `preconnect` and
+`dns-prefetch`, which display nothing but still open a connection or resolve a
+third-party name. Values that reach nothing are accepted: `canonical`,
+`alternate`, `license`, `prev`, `next`, `me`. An unrecognised
+`rel`, or a `link` with none at all, is refused - the allowlist is deliberate,
+so a newly minted relationship is not admitted before anybody has judged it.
+
+A rejection returns `422` listing up to ten of the references it objected to,
+so one upload is usually enough to learn everything that has to change. `error`
+is the first fault, `errors` holds them all when there was more than one, and
+each target is cut to its first 120 characters with a trailing ellipsis when it
+was longer:
+
+```json
+{
+  "error": "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet",
+  "errors": [
+    "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet",
+    "external reference: img[src] /logo.png",
+    "external reference: style /background.png"
+  ]
+}
+```
+
+At most ten faults are listed. A document with more carries `"truncated": true`
+beside them, so the cap is never mistaken for the whole list.
 
 Note that this is a static check. A plan's inline script can still call `fetch`
 at runtime; the CSP sandbox is what contains it.
@@ -352,6 +380,84 @@ Routing anything else under that prefix would out-rank the plan route and
 silently shadow any plan holding that id, which is exactly the collision the
 prefix exists to prevent. App routes go anywhere else; because they do, plan
 ids need no reserved-word list.
+
+### Webfonts
+
+A webfont is a subresource like any other, so a branded document carries its
+typefaces inside itself as `data:` URIs in `@font-face`. Nothing else will
+work: `PLAN_CSP` serves plans under `font-src data: blob:` and no host, so a
+font left outside the document would be blocked at render time even if the
+upload gate let it through.
+
+Four things make embedding cheaper than it first appears.
+
+**A provider that already subsets saves you the toolchain.** Google Fonts
+serves one `woff2` per script and puts every URL in the stylesheet it hands
+out, so there is nothing to run `pyftsubset` over. A face you host yourself
+may still need subsetting first.
+
+**Ask for a weight range when you need several weights.** `wght@400..700`
+returns one file per script subset and declares `font-weight: 400 700`.
+`wght@400;500;600;700` returns the *same seven files* across 28 `@font-face`
+rules, one per weight, because the face is variable and every weight resolves to
+the same bytes. Embed from the list form and you paste four identical base64
+blobs into the document for no benefit.
+
+**Ask for one weight when one is all you need.** The range form is not free:
+`wght@400..700` and `wght@400;700` both serve Inter's latin subset as the same
+48,432-byte variable file, but `wght@400` alone serves a 23,804-byte static
+instance. Widening a range costs nothing - `wght@100..900` is that same 48,432
+bytes - so the choice is between one variable file and one static one, and a
+document using a single weight per family halves its font payload by asking for
+exactly that.
+
+The subset name lives in a comment above each `@font-face`, and the URLs are
+opaque hashes, so pair them up rather than reading the URLs:
+
+```sh
+# A modern desktop user-agent is required - Google serves unsubsetted TTF to
+# anything it does not recognise as woff2-capable, with no subset comments.
+UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '\
+'(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+
+# Prints "subset<TAB>url" for every face in the stylesheet
+curl -s 'https://fonts.googleapis.com/css2?family=Inter:wght@400..700' \
+  -H "user-agent: $UA" \
+  | awk '/^\/\* /{s=$2} /src: url\(/{match($0,/https:[^)]+/);
+         print s"\t"substr($0,RSTART,RLENGTH)}'
+
+# Then turn the row you want into a complete data: URI, ready to paste. The
+# download is checked first, so an error page cannot be encoded as a font.
+curl -fsSL '<the latin woff2 URL>' -o face.woff2 \
+  && printf 'data:font/woff2;base64,%s\n' "$(base64 < face.woff2 | tr -d '\n')"
+```
+
+Declare the range you asked for, so one blob serves every weight in it:
+
+```css
+@font-face {
+  font-family: Inter;
+  font-weight: 400 700;
+  src: url(data:font/woff2;base64,d09GMgABAAAA...) format("woff2");
+}
+```
+
+**The latin subset is small.** Base64 costs a third on top of the raw bytes,
+and a latin subset is tens of kilobytes to begin with. Measured on a real
+three-family document:
+
+| family                        | latin files    | raw    |
+| ----------------------------- | -------------- | ------ |
+| IBM Plex Sans 400-700         | 1 (variable)   | 40,240 |
+| Inter 400-700                 | 1 (variable)   | 48,432 |
+| IBM Plex Mono 400 / 500 / 600 | 3 (static)     | 30,232 |
+
+Five files and 119 KB raw finished as a 202 KB document - under 10% of the
+default 2 MB `MAX_UPLOAD_BYTES`. Note the two variable families collapsing four
+declared weights into one file each; that is where the range form pays.
+
+Check the provider's licence before redistributing a face inside a document.
+Open licences such as the SIL OFL permit it; many commercial licences do not.
 
 ## Health
 

@@ -189,10 +189,48 @@ const PlanLabel = z
 
 export const ErrorBody = component(
   "Error",
-  z.object({ error: z.string().meta({ examples: ["not found"] }) }).meta({
-    title: "Error",
-    description: "The error body returned by failing plan API operations.",
-  }),
+  z
+    .object({
+      error: z.string().meta({ examples: ["not found"] }),
+      /**
+       * Present only when one request reported several faults, so a caller
+       * rarely has to fix them one upload at a time. `error` is always the
+       * first of them, which is what keeps single-fault responses unchanged.
+       */
+      errors: z
+        .array(z.string())
+        // At least two, because one fault is reported through `error` alone,
+        // and never more than one response carries. Written out rather than
+        // imported from the validator, which would pull an HTML parser into
+        // every module that loads these schemas: the two are held together by
+        // `tests/upload-body.test.ts`, which parses real refusals through this
+        // schema, so a gate that reported 1 or 11 would fail there.
+        .min(2)
+        .max(10)
+        .optional()
+        .meta({
+          description:
+            "The faults reported, when there was more than one, up to the limit one response carries. `error` is the first entry, and `truncated` says whether others were dropped.",
+          examples: [
+            [
+              "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet",
+              "external reference: img[src] /logo.png",
+            ],
+          ],
+        }),
+      truncated: z
+        .boolean()
+        .optional()
+        .meta({
+          description:
+            "Present and `true` when more distinct faults were found than the response lists.",
+          examples: [true],
+        }),
+    })
+    .meta({
+      title: "Error",
+      description: "The error body returned by failing plan API operations.",
+    }),
 );
 
 /**

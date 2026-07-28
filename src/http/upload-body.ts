@@ -1,6 +1,6 @@
 import { validateStandaloneHtml } from "../html/validate.ts";
 import { readBoundedBody } from "./bounded-body.ts";
-import { problem } from "./problem.ts";
+import { problem, problems } from "./problem.ts";
 
 /**
  * Reads and vets an upload body, or returns the failing response.
@@ -24,7 +24,7 @@ export async function readUploadBody(
 
   const validation = validateStandaloneHtml(bytes);
   if (!validation.ok) {
-    return problem(422, validation.reason);
+    return problems(422, validation.reasons, validation.truncated);
   }
 
   return bytes;

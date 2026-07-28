@@ -19,3 +19,26 @@ export function problem(
   const body: ErrorBody = { error };
   return Response.json(body, { status, ...(headers ? { headers } : {}) });
 }
+
+/**
+ * A `problem` reporting several faults at once. `error` stays the first of
+ * them, so a client that only reads that field sees exactly what it saw when
+ * the same request could report one fault.
+ *
+ * Shares `ErrorBody` with `problem` rather than assembling its own object, for
+ * the reason above: one schema, so neither can drift from the published
+ * document without failing `tsc`.
+ */
+export function problems(
+  status: number,
+  reasons: readonly string[],
+  truncated: boolean,
+): Response {
+  const [first, ...rest] = reasons;
+  const body: ErrorBody = {
+    error: first ?? "invalid request",
+    ...(rest.length > 0 ? { errors: [...reasons] } : {}),
+    ...(truncated ? { truncated: true } : {}),
+  };
+  return Response.json(body, { status });
+}

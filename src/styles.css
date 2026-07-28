@@ -682,6 +682,8 @@ td.actions {
   padding: 12px 16px;
   margin: 16px 0 0;
   font-size: var(--text-body-sm);
+  /* Load-bearing: a refused upload reports each objectionable reference it
+     listed, one per line, and this is what keeps them on separate lines. */
   white-space: pre-wrap;
 }
 
