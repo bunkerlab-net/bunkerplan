@@ -11,6 +11,7 @@ import { type Config, MIN_SHARE_CODE_LENGTH } from "../config.ts";
 import { MAX_GRANTS_PER_REQUEST } from "../http/account-list.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import { MAX_LABEL_BODY_BYTES } from "../http/relabel-plan.ts";
+import { SHARE_CODE_BITS_PER_CHAR } from "../ids.ts";
 import { PLAN_PAGE_SIZE } from "../services/types.ts";
 import {
   componentSchemas,
@@ -436,10 +437,14 @@ const REVOKE_GRANT_OPERATION = {
  * Derived from `MIN_SHARE_CODE_LENGTH`, not from `SHARE_CODE_LENGTH`: the
  * argument for leaving the route unthrottled rests on the weakest code that
  * can be presented, and lowering the mint length does not retire codes issued
- * under the old one. Computed rather than written down, so raising the floor
- * cannot leave the document publishing a number that used to be true.
+ * under the old one. Both factors are computed rather than written down - the
+ * rate comes from the alphabet in src/ids.ts that mints the codes - so neither
+ * raising the floor nor changing the alphabet can leave the document
+ * publishing a number that used to be true.
  */
-const MIN_CODE_BITS = Math.round(MIN_SHARE_CODE_LENGTH * Math.log2(62));
+const MIN_CODE_BITS = Math.round(
+  MIN_SHARE_CODE_LENGTH * SHARE_CODE_BITS_PER_CHAR,
+);
 
 function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
   return {
