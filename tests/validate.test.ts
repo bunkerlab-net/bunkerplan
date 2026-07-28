@@ -654,6 +654,116 @@ describe("validateStandaloneHtml - delimiters inside values", () => {
 });
 
 /**
+ * The CSS scan reads a stylesheet the way a browser tokenises one, because
+ * every shortcut short of that was wrong in one direction or the other: either
+ * it refused text that fetches nothing, or it lost a reference that does.
+ */
+describe("validateStandaloneHtml - CSS text is not CSS code", () => {
+  const style = (css: string) => DOC(`<style>${css}</style>`);
+
+  test.each([
+    ['content:"url(https://e.example/x)"', "a quoted url("],
+    ["content:'url(https://e.example/x)'", "a single-quoted url("],
+    ['content:"see url(/docs) for more"', "a sentence mentioning url("],
+    ['content:"@import \\"https://e.example/x.css\\";"', "a quoted @import"],
+    ['content:"/*"', "a quoted comment opener"],
+  ])("accepts %s - %s is text", (css) => {
+    expect(check(style(`p::after{${css}}`))).toEqual({ ok: true });
+  });
+
+  test.each([
+    ["myurl(", "a{background:myurl(https://e.example/x.png)}"],
+    ["-my-url(", "a{background:-my-url(https://e.example/x.png)}"],
+    [
+      "my-image-set(",
+      `a{background:my-image-set("https://e.example/x.png" 1x)}`,
+    ],
+    ["@important", `a{color:red}@important "https://e.example/x.css";`],
+  ])("accepts %s, which is not the function it resembles", (_name, css) => {
+    expect(check(style(css))).toEqual({ ok: true });
+  });
+
+  test("still reads -webkit-image-set(, which is a real spelling", () => {
+    expect(
+      check(
+        style(`a{background:-webkit-image-set("https://e.example/x.png" 1x)}`),
+      ),
+    ).toEqual({
+      ok: false,
+      reasons: ["external reference: style https://e.example/x.png"],
+      truncated: false,
+    });
+  });
+
+  /**
+   * A CSS string cannot span a newline: the newline ends a bad string and the
+   * parser recovers on the next line, so a reference below one still loads.
+   * Treating the quote as running to the end hid the rest of the stylesheet.
+   */
+  test.each([
+    ['a{background:url("oops', "inside url("],
+    ["a{background:url('oops", "inside url( with single quotes"],
+    ['a{background:image-set("oops', "inside image-set("],
+    ['a{content:"oops', "in a plain declaration"],
+  ])("sees past an unterminated string %s", (opener) => {
+    expect(
+      check(
+        style(`${opener}\n}\nb{background:url(https://evil.example/x.png)}`),
+      ),
+    ).toMatchObject({
+      ok: false,
+      reasons: ["external reference: style https://evil.example/x.png"],
+    });
+  });
+
+  /** An unclosed call must not swallow the reference below it either. */
+  test.each([
+    [
+      "with a newline after it",
+      "a{background:url(data:image/gif;base64,x\n}\n",
+    ],
+    ["on the same line", "a{background:url(data:image/gif;base64,x "],
+  ])("sees past an unclosed url( %s", (_name, opener) => {
+    expect(
+      check(style(`${opener}b{background:url(https://evil.example/y.png)}`)),
+    ).toMatchObject({
+      ok: false,
+      reasons: ["external reference: style https://evil.example/y.png"],
+    });
+  });
+
+  test("sees past a comment opened inside a string", () => {
+    expect(
+      check(
+        style(
+          `p::after{content:"/*"}\na{background:url(https://evil.example/z.png)}`,
+        ),
+      ),
+    ).toMatchObject({
+      ok: false,
+      reasons: ["external reference: style https://evil.example/z.png"],
+    });
+  });
+
+  test("reads a url() whose value is quoted behind a comment", () => {
+    expect(
+      check(style(`a{background:url(/*c*/"data:image/gif;base64,R0lGOD")}`)),
+    ).toEqual({ ok: true });
+  });
+
+  /**
+   * The documented boundary of this check, not an oversight: a name spelled
+   * with CSS escapes fetches in a browser and reads as an unknown function
+   * here. `PLAN_CSP` is what stops the fetch - see src/http/security-headers.ts.
+   */
+  test("does not see a url( spelled with CSS escapes", () => {
+    expect(
+      check(style(String.raw`a{background:u\72l(https://e.example/x.png)}`)),
+    ).toEqual({ ok: true });
+  });
+});
+
+/**
  * `link[href]` was refused for every `rel`, including values that fetch nothing.
  * The deciding question is whether the reference reaches the network without the
  * reader acting, NOT whether it loads a subresource: the two come apart here.

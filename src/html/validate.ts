@@ -138,58 +138,26 @@ function* externalCandidates(srcset: string): Generator<string> {
 }
 
 /**
+ * The CSS with its comments replaced by a space.
+ *
  * Comments are token separators, so `@import/**` + `/"evil.css"` is a valid
- * import that no pattern anchored on `@import\s` would see. Removing them
- * first is cheaper than teaching every pattern to skip them, and it closes
- * the whole class rather than one spelling of it. Hand-scanned rather than
- * regex-replaced: a lazy `[\s\S]*?` retried at every unterminated `/*` is
- * quadratic, and the input is attacker-supplied.
+ * import that no pattern anchored on `@import\s` would see. Removing them first
+ * closes that whole class rather than one spelling of it, and keeps a comment
+ * between a function name and its `(` from reading as a call.
+ *
+ * String-aware, because `/*` is ordinary text inside one. Scanning for `/*`
+ * without checking let `content:"/*"` open a comment that never closed, which
+ * discarded the rest of the stylesheet - and with it any reference below, which
+ * a browser would still have fetched.
+ *
+ * Hand-scanned rather than regex-replaced: a lazy `[\s\S]*?` retried at every
+ * unterminated `/*` is quadratic, and the input is attacker-supplied.
  */
 function stripCssComments(css: string): string {
   if (!css.includes("/*")) return css;
   let out = "";
+  let copied = 0;
   let index = 0;
-  for (;;) {
-    const start = css.indexOf("/*", index);
-    if (start === -1) return out + css.slice(index);
-    out += `${css.slice(index, start)} `;
-    const end = css.indexOf("*/", start + 2);
-    if (end === -1) return out;
-    index = end + 2;
-  }
-}
-
-/**
- * Index of the quote closing the CSS string opening at `open`, or -1.
- * A backslash escapes the next character, so `"a\"b"` is one string.
- */
-function endOfString(css: string, open: number): number {
-  const quote = css[open];
-  let index = open + 1;
-  while (index < css.length) {
-    const char = css[index];
-    if (char === "\\") {
-      index += 2;
-      continue;
-    }
-    if (char === quote) return index;
-    index += 1;
-  }
-  return -1;
-}
-
-/**
- * Index of the `)` closing a call whose arguments begin at `start`, or -1.
- *
- * Counts nesting and skips quoted spans, because taking the FIRST `)` instead
- * truncated a span at a nested call and dropped everything after it. That was
- * not merely untidy: `image-set(url(data:...), "https://host/x.png" 2x)` ended
- * its span at the `url(` close, so the external candidate beside it was never
- * scanned and the document was accepted.
- */
-function closingParen(css: string, start: number): number {
-  let depth = 0;
-  let index = start;
   while (index < css.length) {
     const char = css[index];
     if (char === "\\") {
@@ -197,18 +165,52 @@ function closingParen(css: string, start: number): number {
       continue;
     }
     if (char === '"' || char === "'") {
-      const close = endOfString(css, index);
-      // Unterminated, so nothing after it closes either.
-      if (close === -1) return -1;
-      index = close + 1;
+      const end = endOfString(css, index);
+      // The input ends inside a string, so no comment can open after it.
+      if (end === -1) break;
+      index = end + 1;
       continue;
     }
-    if (char === "(") {
-      depth += 1;
-    } else if (char === ")") {
-      if (depth === 0) return index;
-      depth -= 1;
+    if (char === "/" && css[index + 1] === "*") {
+      out += `${css.slice(copied, index)} `;
+      const end = css.indexOf("*/", index + 2);
+      // Nothing closes it, so the rest of the input is commented out.
+      if (end === -1) return out;
+      index = end + 2;
+      copied = index;
+      continue;
     }
+    index += 1;
+  }
+  return out + css.slice(copied);
+}
+
+/**
+ * Index of the character that ends the CSS string opening at `open` - its
+ * matching quote, or the newline that makes it a BAD string. -1 only when the
+ * input runs out first.
+ *
+ * A CSS string cannot span an unescaped newline: the newline ends it and the
+ * parser resumes on the next line. Treating an unterminated quote as running to
+ * the end instead let a stylesheet hide behind one - everything after
+ * `url("oops` was outside the scan, so an external reference on the next line
+ * was never seen. Callers tell the two apart by looking at the character found.
+ *
+ * A backslash escapes the next character, so `"a\"b"` is one string, and a
+ * backslash before a newline is a line continuation rather than a terminator.
+ */
+function endOfString(css: string, open: number): number {
+  const quote = css[open];
+  let index = open + 1;
+  while (index < css.length) {
+    const char = css[index];
+    if (char === "\\") {
+      // `\r\n` is one escaped newline, not an escaped `\r` beside a live `\n`.
+      index += css[index + 1] === "\r" && css[index + 2] === "\n" ? 3 : 2;
+      continue;
+    }
+    if (char === quote) return index;
+    if (char === "\n" || char === "\r" || char === "\f") return index;
     index += 1;
   }
   return -1;
@@ -235,110 +237,182 @@ function startsWithAt(text: string, needle: string, index: number): boolean {
 }
 
 /**
- * The argument text of every `name(` call, in order.
- *
- * Hand-scanned, because every regex spelling of this rescans. `url\(\s*(...)?
- * \s*\)` has two whitespace runs either side of a value that may match empty,
- * so a `url(` followed by a long run of spaces and no closing paren makes the
- * engine try each way of splitting that run between them. `[^)]*\)` is no
- * better: with no `)` anywhere, it walks back over the whole remainder from
- * every call site. Both are quadratic or worse on bytes an uploader chooses,
- * and 500 KB was enough to hold a CPU for two minutes.
- *
- * Still linear with the matching-paren scan above: spans are disjoint, because
- * the search for the next call resumes past the close of the last one, so no
- * byte is examined by more than one span.
+ * What an open `(` belongs to. Only these three change what a value means:
+ * everything else - `calc(`, a selector's parentheses - is `PLAIN`.
  */
-function* callArguments(css: string, name: string): Generator<string> {
-  let index = 0;
-  while (index < css.length) {
-    if (!startsWithAt(css, name, index)) {
-      index += 1;
-      continue;
-    }
-    const start = index + name.length;
-    const close = closingParen(css, start);
-    if (close === -1) return;
-    yield css.slice(start, close);
-    index = close + 1;
-  }
+const PLAIN = 0;
+const URL = 1;
+const IMAGE_SET = 2;
+const TYPE = 3;
+
+/** CSS identifier characters, which a function name is made of. */
+function identChar(code: number): boolean {
+  return (
+    (code >= 97 && code <= 122) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 48 && code <= 57) ||
+    code === 45 ||
+    code === 95 ||
+    code >= 128
+  );
 }
 
-/** `\s+` before a required quote only ever walks back over its own run. */
-const CSS_IMPORT = /@import\s+(?:"([^"]*)"|'([^']*)')/gi;
+/**
+ * What the function whose `(` sits at `paren` is, read from its WHOLE name.
+ *
+ * Matching a keyword against any offset instead made `myurl(https://host/x)`
+ * a `url(` and `my-image-set(...)` an `image-set(`, refusing documents that
+ * fetch nothing. Reading the name backwards also lets the vendor spelling be
+ * named rather than caught by accident: `-webkit-image-set` shares its tail
+ * with `image-set`, but so does `my-image-set`, and only one of them fetches.
+ */
+function callKind(css: string, paren: number): number {
+  let start = paren;
+  while (start > 0 && identChar(css.charCodeAt(start - 1))) start -= 1;
+  const name = css.slice(start, paren).toLowerCase();
+  if (name === "url") return URL;
+  if (name === "image-set" || name === "-webkit-image-set") return IMAGE_SET;
+  if (name === "type") return TYPE;
+  return PLAIN;
+}
+
+/** The target a `url()` names, with a quoted value unwrapped. */
+function urlTarget(span: string): string {
+  const trimmed = span.trim();
+  const quote = trimmed.charAt(0);
+  return (quote === '"' || quote === "'") && trimmed.endsWith(quote)
+    ? trimmed.slice(1, -1)
+    : trimmed;
+}
+
+/** The target the `url()` closing at `paren` named, or null for any other call. */
+function closedTarget(
+  css: string,
+  paren: number,
+  open: number[],
+  starts: number[],
+): string | null {
+  const start = starts.pop();
+  if (open.pop() !== URL || start === undefined) return null;
+  return urlTarget(css.slice(start, paren));
+}
 
 /**
- * Every quoted string inside an `image-set()` span that could name an image.
- *
- * `image-set` takes bare strings, so a candidate need never write `url(`. The
- * one string in the span that is NOT a candidate is the argument of a
- * `type(<string>)` descriptor: that is a MIME type, and reporting it refused
- * documents whose image travelled beside it in a `data:` URI.
- *
- * Everything else is yielded rather than only an option's leading value. A
- * leading-value-only scan has to decide where options begin, and getting that
- * wrong loses candidates: commas are legal inside quoted URLs and mandatory
- * inside `data:` URIs, and a nested `image-set()` leads its option with a call
- * rather than a string. Yielding every non-descriptor string cannot miss one.
+ * An `@import` at-rule opens at `index`. Its name has to end where it looks
+ * like it does, or `@important` would read as one.
  */
-function* imageSetImages(args: string): Generator<string> {
+function importAt(css: string, index: number): boolean {
+  return (
+    startsWithAt(css, "@import", index) &&
+    !identChar(css.charCodeAt(index + "@import".length))
+  );
+}
+
+/**
+ * Yields the target the string spanning `index` to `end` names, and returns
+ * whether an `@import` is still waiting for one.
+ *
+ * A string names something only as an `@import` target or an `image-set()`
+ * candidate. Inside `url()` the whole span is the target and is read when the
+ * call closes; inside `type()` it is a MIME type; anywhere else it is text.
+ * A bad string - one a newline ended - voids the calls open around it.
+ */
+function* stringAt(
+  css: string,
+  index: number,
+  end: number,
+  importing: boolean,
+  open: number[],
+  starts: number[],
+): Generator<string, boolean> {
+  if (css[end] !== css[index]) {
+    open.length = 0;
+    starts.length = 0;
+    return false;
+  }
+  if (!importing && open[open.length - 1] !== IMAGE_SET) return importing;
+  const text = css.slice(index + 1, end);
+  if (isExternalRef(text)) yield text;
+  return false;
+}
+
+/**
+ * Every target in CSS text that points outside the document, in order.
+ *
+ * ONE pass with a stack of open calls, because separate keyword scans could not
+ * agree on what was a value and what was text. Each mistake that removes was a
+ * real one:
+ *
+ * - `content:"url(https://host/x)"` was refused. A string is text; nothing is
+ *   fetched from one. A scan that did not know whether an offset sat inside a
+ *   string could not tell, and even `"see url(/docs) for more"` was refused.
+ * - `url(data:...` left unclosed swallowed the rest of the file, so a real
+ *   reference below it went unseen. Here an unclosed call simply never pops and
+ *   the scan carries on.
+ * - A bad string - one a newline ends, which CSS does not allow - voids its
+ *   declaration, so it drops the calls around it and resumes on the next line,
+ *   which is what a browser does.
+ *
+ * What it still cannot see is a name spelled with CSS escapes: `u\72l(...)`
+ * fetches in a browser and reads as an unknown function here. That is the
+ * documented boundary of this check rather than an oversight - see `PLAN_CSP`
+ * in src/http/security-headers.ts, whose `default-src 'none'` is what actually
+ * stops a plan fetching.
+ *
+ * Linear by construction: the index only moves forward, and a string is walked
+ * once by `endOfString` before the scan resumes past it.
+ */
+function* externalInCss(rawCss: string): Generator<string> {
+  const css = stripCssComments(rawCss);
+  const open: number[] = [];
+  // Where each open call's value begins, pushed and popped beside `open`.
+  const starts: number[] = [];
+  // Set by `@import`, cleared by the target it takes or by the next call.
+  let importing = false;
   let index = 0;
-  while (index < args.length) {
-    const char = args[index];
+
+  while (index < css.length) {
+    const char = css[index];
+
     if (char === "\\") {
       index += 2;
       continue;
     }
+
     if (char === '"' || char === "'") {
-      const close = endOfString(args, index);
-      // Unterminated, so nothing after it closes either.
-      if (close === -1) return;
-      yield args.slice(index + 1, close);
-      index = close + 1;
+      const end = endOfString(css, index);
+      // The input ended inside a string, so nothing after it is readable.
+      if (end === -1) return;
+      importing = yield* stringAt(css, index, end, importing, open, starts);
+      index = end + 1;
       continue;
     }
-    if (startsWithAt(args, "type(", index)) {
-      const close = closingParen(args, index + "type(".length);
-      if (close === -1) return;
-      index = close + 1;
+
+    if (char === "(") {
+      const kind = callKind(css, index);
+      open.push(kind);
+      starts.push(index + 1);
+      // `type()` describes a candidate rather than carrying a target, so it is
+      // never what an `@import` was waiting for.
+      if (kind !== TYPE) importing = false;
+      index += 1;
       continue;
     }
+
+    if (char === ")") {
+      const target = closedTarget(css, index, open, starts);
+      if (target !== null && isExternalRef(target)) yield target;
+      index += 1;
+      continue;
+    }
+
+    if (char === "@" && importAt(css, index)) {
+      importing = true;
+      index += "@import".length;
+      continue;
+    }
+
     index += 1;
-  }
-}
-
-/**
- * Every `url(...)`, `@import`, and `image-set(...)` target in CSS text that
- * points outside the document, in that order.
- *
- * A generator rather than an array because the caller stops at a finding cap:
- * a hostile stylesheet can name a million external targets, and lazily is the
- * only way to scan one without collecting them all first.
- */
-function* externalInCss(rawCss: string): Generator<string> {
-  const css = stripCssComments(rawCss);
-
-  for (const raw of callArguments(css, "url(")) {
-    const trimmed = raw.trim();
-    const quote = trimmed.charAt(0);
-    const target =
-      (quote === '"' || quote === "'") && trimmed.endsWith(quote)
-        ? trimmed.slice(1, -1)
-        : trimmed;
-    if (isExternalRef(target)) yield target;
-  }
-
-  // `image-set("x.png" 1x)` takes bare strings, so it fetches without ever
-  // writing `url(`. Matching the bare name also covers `-webkit-image-set(`.
-  for (const args of callArguments(css, "image-set(")) {
-    for (const target of imageSetImages(args)) {
-      if (isExternalRef(target)) yield target;
-    }
-  }
-
-  for (const match of css.matchAll(CSS_IMPORT)) {
-    const target = match[1] ?? match[2];
-    if (target !== undefined && isExternalRef(target)) yield target;
   }
 }
 
