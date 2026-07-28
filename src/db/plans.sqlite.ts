@@ -22,12 +22,18 @@ async function updateOwned(
   db: SqliteDb,
   id: string,
   userId: string,
-  fields: Partial<typeof plan.$inferInsert>,
+  /** Each column takes its own type, or SQL computing it from the old row. */
+  fields: Partial<{
+    [K in keyof typeof plan.$inferInsert]: (typeof plan.$inferInsert)[K] | SQL;
+  }>,
+  /** Extra condition the row must also satisfy, folded into the same write. */
+  guard?: SQL,
 ): Promise<boolean> {
+  const owned = and(eq(plan.id, id), eq(plan.userId, userId));
   const updated = await db
     .update(plan)
     .set(fields)
-    .where(and(eq(plan.id, id), eq(plan.userId, userId)))
+    .where(guard === undefined ? owned : and(owned, guard))
     .returning({ id: plan.id });
   return updated.length > 0;
 }
@@ -112,11 +118,55 @@ function accessMethods(
       return rows.length > 0;
     },
 
+    /**
+     * Neither visibility ever leaves a code on a public plan.
+     *
+     * A code is a bearer token: it cannot be asked for back, and whoever holds
+     * it may no longer be someone the owner would give it to. Leaving the hash
+     * behind meant it lay dormant while public and worked again the moment the
+     * plan went private - a flip meant to restrict access silently restoring a
+     * credential minted long before. Unlock cookies are HMAC-bound to the hash,
+     * so they stop verifying with it.
+     *
+     * Going public clears it outright. Going private clears it only when the
+     * row was public, which is what catches a pair this repo still accepts from
+     * `insert` and rows written before any of this. The `case` reads the
+     * pre-update value, so both decisions are the one statement.
+     *
+     * A plan that was already private keeps its code: that is the whole
+     * code-shared state, and this field cannot tell "private, keep it" from
+     * "private, drop it". `DELETE /share-code` says the latter precisely, so an
+     * idempotent write here never destroys a credential.
+     *
+     * Grants survive either way: those are named accounts the owner chose,
+     * still visible and individually revocable.
+     */
     setVisibility: (id, userId, visibility) =>
-      updateOwned(db, id, userId, { visibility }),
+      updateOwned(
+        db,
+        id,
+        userId,
+        visibility === "public"
+          ? { visibility, shareCodeHash: null }
+          : {
+              visibility,
+              shareCodeHash: sql`case when ${plan.visibility} = 'public' then null else ${plan.shareCodeHash} end`,
+            },
+      ),
 
+    /**
+     * Setting a hash requires the plan to be private, in the same statement so
+     * a concurrent flip to public cannot slip a code in behind it. Clearing has
+     * no such guard: a public row carrying one is exactly what wants tidying.
+     */
     setShareCodeHash: (id, userId, hash) =>
-      updateOwned(db, id, userId, { shareCodeHash: hash }),
+      updateOwned(
+        db,
+        id,
+        userId,
+        { shareCodeHash: hash },
+        hash === null ? undefined : eq(plan.visibility, "private"),
+      ),
   };
 }
 

@@ -80,9 +80,10 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
   }
 
   // A public plan is readable by anyone holding the URL, so neither a code nor
-  // a grant gates anything. Both stay on screen rather than vanishing - they
-  // are real state that applies again the moment this goes private, and hiding
-  // them would read as having cleared them - but nothing here acts.
+  // a grant gates anything. Grants stay on screen rather than vanishing - they
+  // are real state that applies again the moment this goes private - but
+  // nothing here acts while public. The code is genuinely gone: going public
+  // retires it, rather than leaving a bearer secret to reactivate later.
   const inert = state.visibility === "public";
   const shared = { plan, guard, reload: load, locked: busy || inert };
 
@@ -93,6 +94,7 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
         visibility={state.visibility}
         busy={busy}
         inert={inert}
+        hasShareCode={state.hasShareCode}
         onChoose={(visibility) =>
           void guard(async () => {
             setState(await setVisibility(plan.id, visibility));
@@ -149,6 +151,8 @@ function VisibilityChoice(props: {
   visibility: PlanVisibility;
   busy: boolean;
   inert: boolean;
+  /** Names the consequence on the control that causes it, before it is used. */
+  hasShareCode: boolean;
   onChoose: (visibility: PlanVisibility) => void;
 }) {
   // Several editors can be open at once, so the heading id carries the plan.
@@ -159,8 +163,8 @@ function VisibilityChoice(props: {
       <h3 id={headingId}>Who can open it</h3>
       {/* Without the role the radios are announced one at a time, with no
           statement of what the choice is for. `aria-describedby` carries the
-          note below into that announcement, so the reason the code and the
-          grants are inactive arrives with the choice rather than after it. */}
+          note below into that announcement, so the reason the accounts are
+          inactive arrives with the choice rather than after it. */}
       <div
         className="choices"
         role="radiogroup"
@@ -180,15 +184,17 @@ function VisibilityChoice(props: {
             <span>
               {option === "private"
                 ? "Private - you, granted accounts, and anyone with the code"
-                : "Public - anyone holding the URL"}
+                : props.hasShareCode
+                  ? "Public - anyone holding the URL. Retires the share code."
+                  : "Public - anyone holding the URL"}
             </span>
           </label>
         ))}
       </div>
       {props.inert && (
         <p className="muted" id={inertId}>
-          Anyone holding the URL can open this plan, so the code and the
-          accounts below grant nothing extra. Make it private to use them.
+          Anyone holding the URL can open this plan, so the accounts below grant
+          nothing extra. Make it private to use them.
         </p>
       )}
     </div>

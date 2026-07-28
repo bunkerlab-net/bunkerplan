@@ -212,6 +212,14 @@ confusing 403 much later.
   Plans are untrusted HTML served from the same origin as the session cookie.
   Without the sandbox, a plan's inline script could issue credentialed
   same-origin requests to `/api/*` and take over the uploader's account.
+- **Making a plan public retires its share code.** A code is a bearer secret
+  that cannot be recalled, so it is not left dormant on a public plan waiting to
+  matter again: the digest is cleared in the same write, and the unlock cookies
+  signed over it stop verifying. Going private does not mint a new one, and a
+  public plan cannot be given one (409). A plan that was already private keeps
+  its code - `DELETE /api/plans/{id}/share-code` is how that one is dropped.
+  Grants are untouched by either flip: those name accounts the owner chose, and
+  each is revocable on its own.
 - **Security headers are applied in `src/server.ts`**, the one entry both
   targets share: `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options:
 DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,

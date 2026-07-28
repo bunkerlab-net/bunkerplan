@@ -479,20 +479,90 @@ export function describePlanRepo(
         expect(await plans.setVisibility(created.id, owner, "public")).toBe(
           true,
         );
+
+        // A public plan cannot be given a code. It is readable by anyone
+        // holding the URL, so a code would gate nothing while public and would
+        // start working the moment the plan went private again. Pinned in both
+        // dialects because it is the write that holds the invariant: no public
+        // row ever carries a hash.
+        expect(
+          await plans.setShareCodeHash(created.id, owner, "d".repeat(64)),
+        ).toBe(false);
+        expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
+
+        // Private again, and now a code is allowed.
+        expect(await plans.setVisibility(created.id, owner, "private")).toBe(
+          true,
+        );
         expect(
           await plans.setShareCodeHash(created.id, owner, "d".repeat(64)),
         ).toBe(true);
         expect(await plans.findAccess(created.id)).toEqual({
           ownerId: owner,
-          visibility: "public",
+          visibility: "private",
           shareCodeHash: "d".repeat(64),
         });
 
-        // Null clears it, which is how a code is removed.
+        // Going public retires it rather than leaving it dormant.
+        expect(await plans.setVisibility(created.id, owner, "public")).toBe(
+          true,
+        );
+        expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
+
+        // Null clears it, which is how a code is removed while private. Allowed
+        // on a public row too, so a legacy one can still be tidied.
         expect(await plans.setShareCodeHash(created.id, owner, null)).toBe(
           true,
         );
         expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
+      });
+
+      /**
+       * `insert` still accepts a public row carrying a hash, and rows written
+       * before public retired the code look exactly like that - the e2e suite
+       * used to assert the pair. Going private must not hand such a code back,
+       * and nothing here clears it by hand: the transition is what is on trial.
+       */
+      test("a public row carrying a code cannot resurrect it", async () => {
+        const owner = await fixture.seedUser();
+        const legacy = row(owner, {
+          visibility: "public",
+          shareCodeHash: "e".repeat(64),
+        });
+        await plans.insert(legacy, 10);
+        // Really there, so the assertion below is about the transition and not
+        // about a hash that was never stored.
+        expect((await plans.findAccess(legacy.id))?.shareCodeHash).toBe(
+          "e".repeat(64),
+        );
+
+        expect(await plans.setVisibility(legacy.id, owner, "private")).toBe(
+          true,
+        );
+        expect(await plans.findAccess(legacy.id)).toEqual({
+          ownerId: owner,
+          visibility: "private",
+          shareCodeHash: null,
+        });
+      });
+
+      test("a plan that was already private keeps its code", async () => {
+        const owner = await fixture.seedUser();
+        const coded = row(owner, {
+          visibility: "private",
+          shareCodeHash: "f".repeat(64),
+        });
+        await plans.insert(coded, 10);
+
+        // The other half of the rule. Setting private on a code-shared plan is
+        // the idempotent write the sharing editor makes, and it must not be the
+        // thing that destroys the code - `DELETE /share-code` is that request.
+        expect(await plans.setVisibility(coded.id, owner, "private")).toBe(
+          true,
+        );
+        expect((await plans.findAccess(coded.id))?.shareCodeHash).toBe(
+          "f".repeat(64),
+        );
       });
 
       /**

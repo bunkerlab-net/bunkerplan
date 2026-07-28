@@ -142,6 +142,44 @@ describe.each([
   });
 });
 
+describe.each([
+  ["in one transaction, as drizzle runs it", true],
+  ["statement by statement", false],
+])("0009 against a public plan carrying a share code (%s)", (_, wrap) => {
+  /**
+   * Until public retired the code, flipping a plan public left its digest in
+   * place: dormant while public, live again the moment the plan went private.
+   * Rows in that shape already exist, so the migration has to repair them - and
+   * has to leave a private plan's own code alone, which is the state the whole
+   * code-sharing feature is.
+   */
+  test("clears a public plan's code and keeps a private one's", () => {
+    const db = migrate(
+      9,
+      (seeded) => {
+        seedLegacyPlan(seeded);
+        seeded.exec(
+          `UPDATE plan SET visibility = 'public', share_code_hash = 'deadbeef'
+           WHERE id = 'old'`,
+        );
+        seeded.exec(
+          `INSERT INTO plan (id, user_id, size, visibility, share_code_hash)
+           VALUES ('coded', 'owner', 1, 'private', 'cafebabe')`,
+        );
+      },
+      wrap,
+    );
+
+    expect(
+      db.query(`select id, share_code_hash from plan order by id`).all(),
+    ).toEqual([
+      { id: "coded", share_code_hash: "cafebabe" },
+      { id: "old", share_code_hash: null },
+    ]);
+    db.close();
+  });
+});
+
 /**
  * `<statement> <table>`, however the dialect chose to quote the name.
  *

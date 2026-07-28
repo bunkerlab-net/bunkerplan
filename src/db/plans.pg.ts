@@ -17,12 +17,18 @@ async function updateOwned(
   db: PgDb,
   id: string,
   userId: string,
-  fields: Partial<typeof plan.$inferInsert>,
+  /** Each column takes its own type, or SQL computing it from the old row. */
+  fields: Partial<{
+    [K in keyof typeof plan.$inferInsert]: (typeof plan.$inferInsert)[K] | SQL;
+  }>,
+  /** Extra condition the row must also satisfy, folded into the same write. */
+  guard?: SQL,
 ): Promise<boolean> {
+  const owned = and(eq(plan.id, id), eq(plan.userId, userId));
   const updated = await db
     .update(plan)
     .set(fields)
-    .where(and(eq(plan.id, id), eq(plan.userId, userId)))
+    .where(guard === undefined ? owned : and(owned, guard))
     .returning({ id: plan.id });
   return updated.length > 0;
 }
@@ -105,11 +111,32 @@ function accessMethods(
       return rows.length > 0;
     },
 
+    /**
+     * See the sqlite twin: neither visibility leaves a code on a public plan,
+     * and a row that was already private keeps its own.
+     */
     setVisibility: (id, userId, visibility) =>
-      updateOwned(db, id, userId, { visibility }),
+      updateOwned(
+        db,
+        id,
+        userId,
+        visibility === "public"
+          ? { visibility, shareCodeHash: null }
+          : {
+              visibility,
+              shareCodeHash: sql`case when ${plan.visibility} = 'public' then null else ${plan.shareCodeHash} end`,
+            },
+      ),
 
+    /** Private-only, like the sqlite twin, and for the same reason. */
     setShareCodeHash: (id, userId, hash) =>
-      updateOwned(db, id, userId, { shareCodeHash: hash }),
+      updateOwned(
+        db,
+        id,
+        userId,
+        { shareCodeHash: hash },
+        hash === null ? undefined : eq(plan.visibility, "private"),
+      ),
   };
 }
 

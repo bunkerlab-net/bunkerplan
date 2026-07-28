@@ -340,7 +340,16 @@ const SET_SHARING_OPERATION = {
     `${SHARING_NOTE} Giving a plan a share code is a separate request, ` +
     "because that is the one that returns a plaintext code. A plan flipped " +
     "to private stops being served at once: a public plan carries " +
-    "`public, no-cache`, so every read revalidates against this API.",
+    "`public, no-cache`, so every read revalidates against this API.\n\n" +
+    "Setting `public` retires any share code, in the same write. A code is a " +
+    "bearer secret that cannot be recalled, so it is not left dormant to " +
+    "start working again if the plan goes private later; the unlock cookies " +
+    "minted under it are bound to its digest and stop verifying too. " +
+    "`hasShareCode` in the response says so. Grants are untouched - those " +
+    "name accounts the owner chose, and each is revocable on its own. " +
+    "Setting `private` does not clear a code: every code-shared plan is " +
+    "private with a code, so this field cannot distinguish keeping one from " +
+    "dropping it - `DELETE /api/plans/{id}/share-code` is that request.",
   tags: ["Sharing"],
   security: SESSION_AUTH,
   requestBody: {
@@ -366,12 +375,18 @@ function rotateShareCodeOperation(codeFormat: string): Record<string, unknown> {
       `${SHARING_NOTE} Returns the plaintext code once; nothing reads it ` +
       `back afterwards (${codeFormat}). Calling this again replaces the ` +
       "code and immediately invalidates every unlock cookie issued under " +
-      "the old one.",
+      "the old one. The plan must be private: a public one is readable by " +
+      "anyone holding its URL, so a code would gate nothing and would only " +
+      "sit waiting to matter again.",
     tags: ["Sharing"],
     security: SESSION_AUTH,
     responses: {
       "201": json(ShareCodeCreated, "The new code, shown this once."),
-      ...failures({ 401: UNAUTHORISED, 404: NOT_FOUND }),
+      ...failures({
+        401: UNAUTHORISED,
+        404: NOT_FOUND,
+        409: "The plan is public, so it needs no share code.",
+      }),
     },
   };
 }

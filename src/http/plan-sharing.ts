@@ -145,7 +145,17 @@ export async function rotateShareCode(
     ownerId,
     await hashShareCode(code),
   );
-  if (!stored) return problem(404, "not found");
+  if (!stored) {
+    // The write is private-only, so a refusal means the plan is gone, is not
+    // this caller's, or is public. Re-read only here, on the path that has
+    // already failed, to say which: a public plan needs no code, and answering
+    // 404 about the owner's own plan would just look broken.
+    const row = await plans.findAccess(planId);
+    if (row?.ownerId === ownerId && row.visibility === "public") {
+      return problem(409, "a public plan needs no share code");
+    }
+    return problem(404, "not found");
+  }
 
   // The one response that ever carries a plaintext code.
   return Response.json({ code } satisfies ShareCodeCreated, {
