@@ -389,18 +389,27 @@ work: `PLAN_CSP` serves plans under `font-src data: blob:` and no host, so a
 font left outside the document would be blocked at render time even if the
 upload gate let it through.
 
-Three things make embedding cheaper than it first appears.
+Four things make embedding cheaper than it first appears.
 
 **A provider that already subsets saves you the toolchain.** Google Fonts
 serves one `woff2` per script and puts every URL in the stylesheet it hands
 out, so there is nothing to run `pyftsubset` over. A face you host yourself
 may still need subsetting first.
 
-**Ask for a weight range, not a list of weights.** `wght@400..700` returns one
-file per script subset. `wght@400;500;600;700` returns the *same seven files*
-across 28 `@font-face` rules, one per weight, because the face is variable and
-every weight resolves to the same bytes. Embed from the list form and you paste
-four identical base64 blobs into the document for no benefit.
+**Ask for a weight range when you need several weights.** `wght@400..700`
+returns one file per script subset and declares `font-weight: 400 700`.
+`wght@400;500;600;700` returns the *same seven files* across 28 `@font-face`
+rules, one per weight, because the face is variable and every weight resolves to
+the same bytes. Embed from the list form and you paste four identical base64
+blobs into the document for no benefit.
+
+**Ask for one weight when one is all you need.** The range form is not free:
+`wght@400..700` and `wght@400;700` both serve Inter's latin subset as the same
+48,432-byte variable file, but `wght@400` alone serves a 23,804-byte static
+instance. Widening a range costs nothing - `wght@100..900` is that same 48,432
+bytes - so the choice is between one variable file and one static one, and a
+document using a single weight per family halves its font payload by asking for
+exactly that.
 
 The subset name lives in a comment above each `@font-face`, and the URLs are
 opaque hashes, so pair them up rather than reading the URLs:
