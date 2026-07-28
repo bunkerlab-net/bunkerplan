@@ -342,8 +342,8 @@ outright: it carries a whole nested document, and its value is entity-encoded,
 so validating it would mean trusting a hand-rolled entity decoder as a security
 boundary. Inline `<style>`, inline `<script>`,
 `data:` URIs and ordinary `<a href>` links are all fine. A rejection returns
-`422` naming where the reference was found and the target it pointed at,
-truncated to 120 characters:
+`422` naming where the reference was found and the target it pointed at - the
+first 120 characters of it, with a trailing ellipsis when it was longer:
 
 ```json
 {

@@ -15,7 +15,15 @@ import { ELEMENT_NODE, type Node, parse, TEXT_NODE, walkSync } from "ultrahtml";
 export type ValidationResult = { ok: true } | { ok: false; reason: string };
 
 /**
- * Subresource-loading attributes per tag. These fetch automatically on load.
+ * Attributes whose value names an external resource. Most of them fetch it
+ * automatically on load; two entries are deliberately blunter than that.
+ *
+ * `base[href]` fetches nothing - it redirects how every relative URL in the
+ * document resolves, which is worse than one load. `link[href]` is refused for
+ * every `rel`, including values such as `canonical` that fetch nothing, because
+ * keying on the attribute rather than the `rel` token set is the conservative
+ * direction. Narrowing it by `rel` needs the "reaches the network" rule rather
+ * than the "loads a subresource" one, or it admits `preconnect`; see #12.
  *
  * Deliberately ABSENT: `a[href]`, `area[href]`, `form[action]`,
  * `button[formaction]`, `a[ping]`. Those are user-initiated navigations, not

@@ -117,9 +117,9 @@ const NOT_FOUND =
 const UNSUPPORTED_MEDIA = "`content-type` was not `text/html`.";
 const NOT_STANDALONE =
   "The document loads something external. The message names where the " +
-  "reference was found and the target it pointed at, truncated to 120 " +
-  "characters. Webfonts count: they have to travel as `data:` URIs in " +
-  "`@font-face`.";
+  "reference was found and the target it pointed at: the first 120 " +
+  "characters of it, followed by an ellipsis when it was longer. " +
+  "Webfonts count: they have to travel as `data:` URIs in `@font-face`.";
 const STORAGE_DOWN = "The object store could not be reached.";
 
 /** Upload and replace share one allowance, counted per user. */
