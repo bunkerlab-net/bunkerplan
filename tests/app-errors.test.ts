@@ -107,6 +107,12 @@ describe("a path that matched nothing", () => {
     // also the path a deleted plan takes, so it has to stay browsable.
     expect(response.status).toBe(404);
     expect(response.headers.get("content-type")).toStartWith("text/html");
-    expect(await response.text()).toContain("Nothing lives at this URL");
+
+    const body = await response.text();
+    expect(body).toContain("Nothing lives at this URL");
+    // The page component brings its own `SiteFrame`, so the server render must
+    // not add a second one. Nesting them shipped two navs and two footers.
+    expect(body.match(/<nav class="nav">/g)).toHaveLength(1);
+    expect(body.match(/<footer class="footer">/g)).toHaveLength(1);
   });
 });

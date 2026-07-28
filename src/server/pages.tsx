@@ -1,5 +1,4 @@
 import type { Child } from "hono/jsx";
-import { SiteFrame } from "../client/Chrome.tsx";
 import { PAGE_PROPS_ID, ROOT_ID } from "../client/mount.ts";
 import { NotFound } from "../client/NotFound.tsx";
 import { PlanGate } from "../client/PlanGate.tsx";
@@ -161,9 +160,7 @@ export function renderPlanGate(
 export function renderNotFound(assets: AssetManifest): string {
   return document(
     <Document assets={assets} page={null}>
-      <SiteFrame>
-        <NotFound />
-      </SiteFrame>
+      <NotFound />
     </Document>,
   );
 }
