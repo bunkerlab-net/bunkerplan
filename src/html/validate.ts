@@ -215,6 +215,26 @@ function closingParen(css: string, start: number): number {
 }
 
 /**
+ * Whether `needle` sits at `index` in `text`, ignoring ASCII case.
+ *
+ * Rather than comparing against a `toLowerCase()` copy of the whole input.
+ * That copy is not index-stable - `"İ".toLowerCase()` is two code units, so a
+ * single uploader-supplied character shifts every offset after it and the two
+ * strings stop describing the same positions. Every needle here is an ASCII
+ * CSS keyword, so folding only ASCII is exact, and it allocates nothing.
+ */
+function startsWithAt(text: string, needle: string, index: number): boolean {
+  if (index + needle.length > text.length) return false;
+  for (let offset = 0; offset < needle.length; offset += 1) {
+    let code = text.charCodeAt(index + offset);
+    // `A`-`Z` to lowercase; the needle is written lowercase already.
+    if (code >= 65 && code <= 90) code += 32;
+    if (code !== needle.charCodeAt(offset)) return false;
+  }
+  return true;
+}
+
+/**
  * The argument text of every `name(` call, in order.
  *
  * Hand-scanned, because every regex spelling of this rescans. `url\(\s*(...)?
@@ -229,16 +249,14 @@ function closingParen(css: string, start: number): number {
  * the search for the next call resumes past the close of the last one, so no
  * byte is examined by more than one span.
  */
-function* callArguments(
-  css: string,
-  lowered: string,
-  name: string,
-): Generator<string> {
+function* callArguments(css: string, name: string): Generator<string> {
   let index = 0;
-  for (;;) {
-    const open = lowered.indexOf(name, index);
-    if (open === -1) return;
-    const start = open + name.length;
+  while (index < css.length) {
+    if (!startsWithAt(css, name, index)) {
+      index += 1;
+      continue;
+    }
+    const start = index + name.length;
     const close = closingParen(css, start);
     if (close === -1) return;
     yield css.slice(start, close);
@@ -264,7 +282,6 @@ const CSS_IMPORT = /@import\s+(?:"([^"]*)"|'([^']*)')/gi;
  * rather than a string. Yielding every non-descriptor string cannot miss one.
  */
 function* imageSetImages(args: string): Generator<string> {
-  const lowered = args.toLowerCase();
   let index = 0;
   while (index < args.length) {
     const char = args[index];
@@ -280,7 +297,7 @@ function* imageSetImages(args: string): Generator<string> {
       index = close + 1;
       continue;
     }
-    if (lowered.startsWith("type(", index)) {
+    if (startsWithAt(args, "type(", index)) {
       const close = closingParen(args, index + "type(".length);
       if (close === -1) return;
       index = close + 1;
@@ -300,9 +317,8 @@ function* imageSetImages(args: string): Generator<string> {
  */
 function* externalInCss(rawCss: string): Generator<string> {
   const css = stripCssComments(rawCss);
-  const lowered = css.toLowerCase();
 
-  for (const raw of callArguments(css, lowered, "url(")) {
+  for (const raw of callArguments(css, "url(")) {
     const trimmed = raw.trim();
     const quote = trimmed.charAt(0);
     const target =
@@ -314,7 +330,7 @@ function* externalInCss(rawCss: string): Generator<string> {
 
   // `image-set("x.png" 1x)` takes bare strings, so it fetches without ever
   // writing `url(`. Matching the bare name also covers `-webkit-image-set(`.
-  for (const args of callArguments(css, lowered, "image-set(")) {
+  for (const args of callArguments(css, "image-set(")) {
     for (const target of imageSetImages(args)) {
       if (isExternalRef(target)) yield target;
     }
@@ -581,11 +597,13 @@ export function validateStandaloneHtml(bytes: Uint8Array): ValidationResult {
       if (found.size > MAX_FINDINGS) return;
       collectElement(node, found);
     });
-  } catch {
-    // ultrahtml parses and walks recursively, so a deeply nested document
-    // overflows the stack rather than returning. Anything the parser cannot
-    // see through, this check cannot vouch for, so refuse it as an upload
-    // error instead of letting a `RangeError` surface as a 500.
+  } catch (cause) {
+    // ultrahtml parses and walks recursively, so a document too deeply nested
+    // overflows the stack rather than returning. What the parser cannot see
+    // through, this check cannot vouch for, so that is an upload error rather
+    // than a 500. Only that: every other exception is a defect in the collector
+    // and is rethrown, because a bug reported as a refusal blames the document.
+    if (!(cause instanceof RangeError)) throw cause;
     return {
       ok: false,
       reasons: ["could not parse document"],

@@ -199,6 +199,14 @@ export const ErrorBody = component(
        */
       errors: z
         .array(z.string())
+        // At least two, because one fault is reported through `error` alone,
+        // and never more than one response carries. Written out rather than
+        // imported from the validator, which would pull an HTML parser into
+        // every module that loads these schemas: the two are held together by
+        // `tests/upload-body.test.ts`, which parses real refusals through this
+        // schema, so a gate that reported 1 or 11 would fail there.
+        .min(2)
+        .max(10)
         .optional()
         .meta({
           description:

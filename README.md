@@ -147,8 +147,10 @@ long to reach a visitor who has already seen the old one.
 Uploads must be self-contained: no external scripts, stylesheets, images,
 iframes, or CSS `url()`/`@import` targets, including relative paths, and no
 non-empty `iframe[srcdoc]`. Inline `<style>`, inline `<script>`, `data:` URIs
-and ordinary links are fine, as are `link` relationships that fetch nothing -
-`canonical`, `alternate`, `license` and the like. A rejection returns `422`
+and ordinary links are fine, as are the `link` relationships that fetch
+nothing: `canonical`, `alternate`, `license`, `prev`, `next`, `me`. Anything
+else is refused, including an unrecognised `rel` and combinations such as
+`alternate stylesheet`, which is still a stylesheet. A rejection returns `422`
 listing up to ten of the references it objected to, each named with the target
 it pointed at, so one upload is usually enough to learn everything that has to
 change.

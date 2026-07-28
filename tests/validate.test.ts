@@ -526,6 +526,11 @@ describe("validateStandaloneHtml - every offender at once", () => {
     expect(result).toMatchObject({ ok: false, truncated: false });
     if (result.ok) throw new Error("expected a refusal");
     expect(result.reasons).toHaveLength(2);
+    // Both render identically, which is the point: the displayed text cannot be
+    // what distinguishes them, so the raw target has to be.
+    const shown = `external reference: img[src] ${prefix.slice(0, 120)}...`;
+    expect(result.reasons[0]).toBe(shown);
+    expect(result.reasons[1]).toBe(shown);
   });
 
   test("caps the list and says so when a document is all offenders", () => {
@@ -537,6 +542,19 @@ describe("validateStandaloneHtml - every offender at once", () => {
     expect(result).toMatchObject({ ok: false, truncated: true });
     if (result.ok) throw new Error("expected a refusal");
     expect(result.reasons).toHaveLength(10);
+  });
+
+  /** Exactly at the cap is the boundary that must NOT report truncation. */
+  test("reports ten offenders in full, with nothing dropped", () => {
+    const images = Array.from(
+      { length: 10 },
+      (_, n) => `<img src="/img-${n}.png">`,
+    ).join("");
+    const result = check(DOC(images));
+    expect(result).toMatchObject({ ok: false, truncated: false });
+    if (result.ok) throw new Error("expected a refusal");
+    expect(result.reasons).toHaveLength(10);
+    expect(result.reasons[9]).toBe("external reference: img[src] /img-9.png");
   });
 
   test("leaves a single offender reporting exactly one reason", () => {
@@ -709,7 +727,13 @@ describe("validateStandaloneHtml - link rel", () => {
     });
   });
 
-  test("refuses an empty rel, which names no relationship", () => {
+  test("refuses an empty rel carrying an href", () => {
+    expect(
+      check(DOC(`<link rel="" href="https://e.example/x.css">`)),
+    ).toMatchObject({ ok: false });
+  });
+
+  test("refuses an empty rel carrying an imagesrcset", () => {
     expect(
       check(DOC(`<link rel="" imagesrcset="https://e.example/x.png 1x">`)),
     ).toMatchObject({ ok: false });
@@ -763,6 +787,15 @@ describe("validateStandaloneHtml - resistance to hostile input", () => {
   test("refuses a document too deeply nested to walk", () => {
     const depth = 60_000;
     expect(check(DOC("<i>".repeat(depth) + "</i>".repeat(depth)))).toEqual({
+      ok: false,
+      reasons: ["could not parse document"],
+      truncated: false,
+    });
+  });
+
+  /** Unclosed tags nest just as deeply, by another spelling. */
+  test("refuses a document of unclosed tags too deep to walk", () => {
+    expect(check(DOC("<i>".repeat(60_000)))).toEqual({
       ok: false,
       reasons: ["could not parse document"],
       truncated: false,
