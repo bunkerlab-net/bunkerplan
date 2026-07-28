@@ -61,7 +61,10 @@ These names are the API. They are not renamed across releases.
 | `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`   |
 | `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
 | `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | clamped to a minimum of 60                                               |
+| `UNLOCK_RATE_MAX`        | no              | `30`                          | share-code redemptions per window per client address                     |
+| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | no minimum; a database row, so no KV TTL floor applies                   |
 | `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                 |
+| `SHARE_CODE_LENGTH`      | no              | `16`                          | characters in a share code; mixed-case alphanumeric, 16 to 64            |
 | `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                    |
 | `LOG_LEVEL`              | no              | `info`                        | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent` |
 | `LOG_COLOR`              | no              | `false`                       | colourises `LOG_FORMAT=plain` only                                       |
@@ -184,10 +187,18 @@ confusing 403 much later.
   Postgres is the recommended driver regardless: SQLite is single-node.
 - **Rate limit counters live in the database, never in KV.** Workers KV
   throttles a single key to one write per second and takes up to 60s to
-  propagate, which is the opposite of what a counter needs. Both limiters -
-  Better Auth's per-IP one on `/api/auth/*` and the per-user upload one on
-  `PUT /api/plans` - decide inside a single conditional SQL statement, so a
-  concurrent burst cannot exceed the limit.
+  propagate, which is the opposite of what a counter needs. All three limiters -
+  Better Auth's per-IP one on `/api/auth/*`, the per-user upload one on
+  `PUT /api/plans`, and the per-address unlock one on
+  `POST /api/plans/{id}/unlock` - decide inside a single conditional SQL
+  statement, so a concurrent burst cannot exceed the limit.
+- **The unlock limit is keyed on the client address, never on the plan.**
+  Redeeming a share code is the only route that takes no credential, so it is
+  the only one whose bucket cannot be an account. It must not be the plan
+  either: the plan id travels in the share link, so a per-plan bucket would let
+  anyone holding that link spend the allowance and lock the other readers out.
+  Because an address has no row to cascade from, `unlock_rate_limit` prunes its
+  own closed windows on each redemption rather than relying on a foreign key.
 - **The upload limit is per user, not per credential.** An API key and the
   dashboard session draw on the same `UPLOAD_RATE_MAX` allowance, so creating
   more keys does not buy more uploads. The api-key plugin's own per-key limiter
@@ -201,6 +212,14 @@ confusing 403 much later.
   Plans are untrusted HTML served from the same origin as the session cookie.
   Without the sandbox, a plan's inline script could issue credentialed
   same-origin requests to `/api/*` and take over the uploader's account.
+- **Making a plan public retires its share code.** A code is a bearer secret
+  that cannot be recalled, so it is not left dormant on a public plan waiting to
+  matter again: the digest is cleared in the same write, and the unlock cookies
+  signed over it stop verifying. Going private does not mint a new one, and a
+  public plan cannot be given one (409). A plan that was already private keeps
+  its code - `DELETE /api/plans/{id}/share-code` is how that one is dropped.
+  Grants are untouched by either flip: those name accounts the owner chose, and
+  each is revocable on its own.
 - **Security headers are applied in `src/server.ts`**, the one entry both
   targets share: `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options:
 DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
@@ -224,11 +243,39 @@ deployment's own configuration - so a self-hosted instance publishes its
 limits, not this repository's defaults. Both pages are unauthenticated, and
 neither loads anything off-origin.
 
-Authentication for writes is an API key in the `x-api-key` header. Keys are
-minted from the dashboard; there is no limit on how many, and expiry is
-optional. A key authorises upload, replacement, and delete for its owner's
-plans and nothing else - listing plans, relabelling them, managing keys, and
-deleting the account all require a session.
+Authentication is an API key in the `x-api-key` header. Keys are minted from
+the dashboard; there is no limit on how many, and expiry is optional. A key
+authorises upload, replacement, delete, and reading any plan its owner may
+read. Listing plans, relabelling them, changing who a plan is shared with,
+managing keys, and deleting the account all require a session - a leaked key
+must not be able to hand out access to other people.
+
+Two routes are deliberately unauthenticated, because they are how someone
+holding only a share code gets in: `GET /p/{id}?code=...` and
+`POST /api/plans/{id}/unlock`. Both authorise on the code itself. Redeeming a
+code is not the same as managing sharing, which stays session-only.
+
+A plan is private unless its upload said otherwise. `?visibility=` takes
+`public`, `private` (the default), or `code`; `code` stores the plan private
+and mints a share code, returned once in the 201 body and never readable
+afterwards. An unauthorised visitor to a private plan gets `401` and a gate
+page offering a code box and a sign-in button.
+
+A private plan can be shared with named accounts in the same request that
+stores it, using `?grants=` with a comma-separated list, so it need never
+exist unshared. The same list can be given later to
+`POST /api/plans/{id}/grants` as `accounts`, either comma-separated or as a
+JSON array.
+
+Each entry is a **handle** - the value shown beside `Sign out` on that
+person's own dashboard - or an **account id**, which `/api/auth/get-session`
+returns to the signed-in account. An exact id wins; the handle is only
+consulted when no account carries that id, so a token cannot match two people
+and grant both. Both routes report which entries landed and which no account
+answers to; one mistyped entry does not refuse the rest. At most 50 accounts
+per request. Sharing with accounts is session-only after upload - a key can
+name accounts on a plan it is creating, but cannot hand out access to an
+existing one.
 
 ```sh
 # Upload, optionally labelled
@@ -237,6 +284,28 @@ curl -X PUT "https://plans.example.com/api/plans?label=Q3%20rollout" \
   -H "content-type: text/html" \
   --data-binary @plan.html
 # 201 {"id":"...","url":"https://plans.example.com/p/...","label":"Q3 rollout"}
+
+# Publish, or mint a share link in the same request
+curl -X PUT "https://plans.example.com/api/plans?visibility=code" \
+  -H "x-api-key: bkp_..." \
+  -H "content-type: text/html" \
+  --data-binary @plan.html
+# 201 {"id":"...","url":"...","label":null,"code":"9wRaReOwG14Cw0ko"}
+# Share ${url}?code=${code} - the code is never returned again.
+
+# Share with a whole team while storing the plan
+curl -X PUT "https://plans.example.com/api/plans?visibility=private&grants=k7mjq2rvxn,q5qkesmr5v" \
+  -H "x-api-key: bkp_..." \
+  -H "content-type: text/html" \
+  --data-binary @plan.html
+# 201 {"id":"...","url":"...","label":null,
+#      "granted":["k7mjq2rvxn","q5qkesmr5v"],"unknown":[]}
+
+# Or afterwards, with a session
+curl -X POST https://plans.example.com/api/plans/<id>/grants \
+  -H "cookie: ..." -H "content-type: application/json" \
+  -d '{"accounts":"k7mjq2rvxn, q5qkesmr5v"}'
+# 200 {"granted":["k7mjq2rvxn","q5qkesmr5v"],"unknown":[]}
 
 # Replace the document behind an id you own - same URL, same label
 curl -X PUT https://plans.example.com/api/plans/<id> \
@@ -261,9 +330,10 @@ which is session-only.
 Replacing draws on the same per-user upload allowance as a new upload, and is
 scoped to the caller: an id owned by another account is a `404`, and its object
 is never touched. Everything but the bytes survives - the id, the public URL,
-the label, and the creation timestamp. Plans are served with
-`Cache-Control: public, max-age=300, must-revalidate`, so a cache that already
-holds the old document can keep serving it for up to five minutes.
+the label, and the creation timestamp. A public plan is served with
+`Cache-Control: public, no-cache`, so a cache may keep a copy but has to
+revalidate it on every read; a replacement is therefore picked up at once
+rather than after a freshness window. A private plan is `private, no-store`.
 
 Uploads must be **standalone** HTML: no external scripts, stylesheets, images,
 fonts, iframes, or CSS `url()`/`@import` targets - including relative paths,

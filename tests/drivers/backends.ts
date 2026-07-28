@@ -45,9 +45,16 @@ import { createSqliteAccountClosingRepo } from "../../src/db/account-closing.sql
 import { pgSchema } from "../../src/db/pg-shared.ts";
 import { createPgPlanRepo } from "../../src/db/plans.pg.ts";
 import { createSqlitePlanRepo } from "../../src/db/plans.sqlite.ts";
-import { createPgRateLimitRepo } from "../../src/db/rate-limits.pg.ts";
-import { createSqliteRateLimitRepo } from "../../src/db/rate-limits.sqlite.ts";
+import {
+  createPgRateLimitRepo,
+  createPgUnlockRateLimitRepo,
+} from "../../src/db/rate-limits.pg.ts";
+import {
+  createSqliteRateLimitRepo,
+  createSqliteUnlockRateLimitRepo,
+} from "../../src/db/rate-limits.sqlite.ts";
 import { sqliteSchema } from "../../src/db/sqlite-shared.ts";
+import { handleEmail } from "../../src/ids.ts";
 import { createValkeyKv } from "../../src/kv/valkey.ts";
 import { createWorkersKv } from "../../src/kv/workers-kv.ts";
 import type {
@@ -121,9 +128,15 @@ export interface StorageFixture extends Fixture<PlanStorage> {
 export interface DbFixture {
   plans: PlanRepo;
   rateLimits: RateLimitRepo;
+  /** The unlock bucket, whose key is a client address rather than a user id. */
+  unlockRateLimits: RateLimitRepo;
   accountClosing: AccountClosingRepo;
-  /** Creates a `user` row and returns its id; every repo needs one for the FK. */
-  seedUser(): Promise<string>;
+  /**
+   * Creates a `user` row and returns its id; every repo needs one for the FK.
+   * A `handle` sets `name` and the `@passkey.invalid` address grants are
+   * addressed by, which the grant contract needs.
+   */
+  seedUser(handle?: string): Promise<string>;
   /** Removes the user, exercising the ON DELETE CASCADE the schema declares. */
   deleteUser(userId: string): Promise<void>;
   /** Rewrites a plan's `created_at`, so ordering is asserted without waiting. */
@@ -132,12 +145,27 @@ export interface DbFixture {
   backdateRateWindow(key: string, epochMs: number): Promise<void>;
   /** The stored window start, to prove a refusal did not move it. */
   rateWindowStart(key: string): Promise<number>;
+  /** Ages an unlock counter's window, so rollover needs no waiting. */
+  backdateUnlockWindow(key: string, epochMs: number): Promise<void>;
+  /** Every unlock row, to prove a closed window is actually swept. */
+  countUnlockRows(): Promise<number>;
   countPlans(userId: string): Promise<number>;
   countRateLimits(key: string): Promise<number>;
   countAccountClosings(userId: string): Promise<number>;
   /** Inserts a passkey row; rejects when the credential id is already claimed. */
   addPasskey(userId: string, credentialId: string): Promise<void>;
   countPasskeys(userId: string): Promise<number>;
+  /**
+   * Inserts a plan row with `visibility` set to whatever is asked, bypassing
+   * `PlanRepo` and its `PlanVisibility` type. The CHECK constraint is only
+   * worth having against a writer the type does not cover, so the test needs
+   * a way to be that writer.
+   */
+  insertPlanWithVisibility(
+    id: string,
+    userId: string,
+    visibility: string,
+  ): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -304,13 +332,19 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
   return {
     plans: createSqlitePlanRepo(db),
     rateLimits: createSqliteRateLimitRepo(db),
+    // Always sweeps: the pruning contract asserts a closed window is gone,
+    // and the default only sweeps on a fraction of attempts.
+    unlockRateLimits: createSqliteUnlockRateLimitRepo(db, () => true),
     accountClosing: createSqliteAccountClosingRepo(db),
 
-    seedUser: async () => {
+    seedUser: async (handle) => {
       const id = `u-${crypto.randomUUID()}`;
+      const name = handle ?? id;
+      const email =
+        handle === undefined ? `${id}@example.test` : handleEmail(handle);
       await db.run(
         sql`insert into user (id, name, email, email_verified, created_at, updated_at)
-            values (${id}, ${id}, ${`${id}@example.test`}, 0, ${Date.now()}, ${Date.now()})`,
+            values (${id}, ${name}, ${email}, 0, ${Date.now()}, ${Date.now()})`,
       );
       return id;
     },
@@ -342,6 +376,13 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
         db,
         sql`select count(*) as v from upload_rate_limit where key = ${key}`,
       ),
+    backdateUnlockWindow: async (key, epochMs) => {
+      await db.run(
+        sql`update unlock_rate_limit set window_start = ${epochMs} where key = ${key}`,
+      );
+    },
+    countUnlockRows: () =>
+      sqliteCount(db, sql`select count(*) as v from unlock_rate_limit`),
     countAccountClosings: (userId) =>
       sqliteCount(
         db,
@@ -360,6 +401,12 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
         db,
         sql`select count(*) as v from passkey where user_id = ${userId}`,
       ),
+    insertPlanWithVisibility: async (id, userId, visibility) => {
+      await db.run(
+        sql`insert into plan (id, user_id, size, visibility)
+            values (${id}, ${userId}, 1, ${visibility})`,
+      );
+    },
     close,
   };
 }
@@ -425,13 +472,18 @@ export async function postgresDb(): Promise<DbFixture> {
   return {
     plans: createPgPlanRepo(db),
     rateLimits: createPgRateLimitRepo(db),
+    // Always sweeps, as above.
+    unlockRateLimits: createPgUnlockRateLimitRepo(db, () => true),
     accountClosing: createPgAccountClosingRepo(db),
 
-    seedUser: async () => {
+    seedUser: async (handle) => {
       const id = `u-${crypto.randomUUID()}`;
+      const name = handle ?? id;
+      const email =
+        handle === undefined ? `${id}@example.test` : handleEmail(handle);
       await db.execute(
         sql`insert into "user" (id, name, email, email_verified, created_at, updated_at)
-            values (${id}, ${id}, ${`${id}@example.test`}, false, now(), now())`,
+            values (${id}, ${name}, ${email}, false, now(), now())`,
       );
       return id;
     },
@@ -461,6 +513,13 @@ export async function postgresDb(): Promise<DbFixture> {
       count(
         sql`select count(*) as v from upload_rate_limit where key = ${key}`,
       ),
+    backdateUnlockWindow: async (key, epochMs) => {
+      await db.execute(
+        sql`update unlock_rate_limit set window_start = ${epochMs} where key = ${key}`,
+      );
+    },
+    countUnlockRows: () =>
+      count(sql`select count(*) as v from unlock_rate_limit`),
     countAccountClosings: (userId) =>
       count(
         sql`select count(*) as v from account_closing where user_id = ${userId}`,
@@ -475,6 +534,12 @@ export async function postgresDb(): Promise<DbFixture> {
     },
     countPasskeys: (userId) =>
       count(sql`select count(*) as v from passkey where user_id = ${userId}`),
+    insertPlanWithVisibility: async (id, userId, visibility) => {
+      await db.execute(
+        sql`insert into plan (id, user_id, size, visibility)
+            values (${id}, ${userId}, 1, ${visibility})`,
+      );
+    },
     close: async () => {
       await pool.query(`drop schema if exists "${schema}" cascade`);
       await pool.end();

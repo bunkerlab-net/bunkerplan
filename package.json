@@ -12,6 +12,7 @@
     "check": "biome check",
     "clean": "rm -rf .wrangler dist node_modules src/server/manifest.generated.ts",
     "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts",
+    "db:migrate:local": "wrangler d1 migrations apply bunkerplan --local",
     "db:migrate:pg": "drizzle-kit migrate --config drizzle.pg.config.ts",
     "db:migrate:sqlite": "drizzle-kit migrate --config drizzle.sqlite.config.ts",
     "deploy": "bun run scripts/check-deploy-config.ts && bun run build && wrangler deploy",

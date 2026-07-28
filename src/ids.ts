@@ -53,3 +53,43 @@ export function isPlanId(value: string): boolean {
 const handleAlphabet = "23456789abcdefghjkmnpqrstuvwxyz";
 
 export const newUserHandle = customAlphabet(handleAlphabet, 10);
+
+/**
+ * Share codes are mixed-case alphanumeric. Unlike a plan id this never has to
+ * be a DNS label, so case is kept for the entropy: base62 carries ~5.95 bits
+ * per character against lowercase-alnum's ~5.17, and the default 16 characters
+ * are then ~95 bits. `-` and `_` are still excluded for the reason a plan id
+ * excludes them - a code travels inside a URL that chat clients autolink.
+ *
+ * Not the handle alphabet: a handle drops lookalikes because it is read aloud
+ * and retyped, while a code is copied with the link it sits in.
+ */
+const shareCodeAlphabet =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/** Length is supplied per call from `config.shareCodeLength`. */
+export const newShareCode = customAlphabet(shareCodeAlphabet);
+
+/**
+ * How many symbols a share code draws from, for callers that publish how
+ * strong one is.
+ *
+ * The length rather than a precomputed bit rate: this module owns what the
+ * alphabet is, and the caller that publishes an entropy figure owns the
+ * arithmetic that turns it into one.
+ */
+export const SHARE_CODE_ALPHABET_LENGTH = shareCodeAlphabet.length;
+
+/**
+ * The synthetic address a passkey signup gets, and the key a grant resolves a
+ * handle through.
+ *
+ * NOT a product concept. BunkerPlan has no email: it is never collected, never
+ * shown, never sent to. Better Auth requires a unique `user.email`, and
+ * `user.name` - the handle - carries no uniqueness constraint, so the handle
+ * is folded into an address on an RFC 2606 reserved TLD that can never
+ * resolve. Anything user-facing says "handle" and means `user.name`.
+ */
+export function handleEmail(handle: string): string {
+  return `${handle}@passkey.invalid`;
+}

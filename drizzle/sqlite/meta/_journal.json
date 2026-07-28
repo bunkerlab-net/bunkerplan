@@ -50,6 +50,34 @@
       "when": 1785059860687,
       "tag": "0006_salty_morbius",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785150387859,
+      "tag": "0007_charming_penance",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1785230023537,
+      "tag": "0008_polite_santa_claus",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785231675254,
+      "tag": "0009_watchful_shard",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1785234852572,
+      "tag": "0010_quiet_bucket",
+      "breakpoints": true
     }
   ]
 }

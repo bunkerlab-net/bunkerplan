@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
+import { messageOf } from "./errors.ts";
 
 interface KeyRow {
   id: string;
@@ -50,29 +51,49 @@ function Reveal({
   );
 }
 
-export function ApiKeysPanel() {
+/**
+ * The list, and the call that reloads it.
+ *
+ * `refresh` never rejects. Every mutation below awaits it, and each is called
+ * as `void create(...)` from an event handler with no rejection handler - so
+ * a list call that threw would surface as an unhandled rejection and nothing
+ * on screen, rather than as the error line this panel already has.
+ */
+function useKeyList() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
-  const [name, setName] = useState("");
-  const [expiryIndex, setExpiryIndex] = useState(0);
-  const [plaintext, setPlaintext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const result = await authClient().apiKey.list();
-    if (result.error) {
-      setError(result.error.message ?? "could not list API keys");
-      return;
+    try {
+      const result = await authClient().apiKey.list();
+      if (result.error) {
+        setError(result.error.message ?? "could not list API keys");
+        return;
+      }
+      setError(null);
+      setKeys(result.data?.apiKeys ?? []);
+    } catch (cause) {
+      setError(messageOf(cause, "could not list API keys"));
     }
-    setError(null);
-    setKeys(result.data?.apiKeys ?? []);
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const onCreate = async () => {
+  return { keys, error, setError, busy, setBusy, refresh };
+}
+
+/** Keys, and the three calls that change them. */
+function useApiKeys() {
+  const { keys, error, setError, busy, setBusy, refresh } = useKeyList();
+  const [plaintext, setPlaintext] = useState<string | null>(null);
+
+  // Both of these are called as `void create(...)` / `void revoke(...)` from
+  // an event handler, so neither may reject: the call itself can throw before
+  // it ever reaches `refresh`, and there is no handler upstream to catch it.
+  const create = async (name: string, expiryIndex: number) => {
     setBusy(true);
     try {
       const seconds = EXPIRY_CHOICES[expiryIndex]?.seconds ?? null;
@@ -82,19 +103,22 @@ export function ApiKeysPanel() {
       });
       if (result.error) {
         setError(result.error.message ?? "could not create API key");
-        return;
+        return false;
       }
       setError(null);
-      setName("");
       // The only time the plaintext key is ever returned.
       setPlaintext(result.data?.key ?? null);
       await refresh();
+      return true;
+    } catch (cause) {
+      setError(messageOf(cause, "could not create API key"));
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
-  const onRevoke = async (keyId: string) => {
+  const revoke = async (keyId: string) => {
     setBusy(true);
     try {
       const result = await authClient().apiKey.delete({ keyId });
@@ -104,46 +128,42 @@ export function ApiKeysPanel() {
       }
       setError(null);
       await refresh();
+    } catch (cause) {
+      setError(messageOf(cause, "could not revoke API key"));
     } finally {
       setBusy(false);
     }
   };
 
+  return { keys, plaintext, setPlaintext, error, busy, create, revoke };
+}
+
+export function ApiKeysPanel() {
+  const { keys, plaintext, setPlaintext, error, busy, create, revoke } =
+    useApiKeys();
+  const [name, setName] = useState("");
+  const [expiryIndex, setExpiryIndex] = useState(0);
+
   return (
     <section className="card">
       <h2 className="card-title">API keys</h2>
       <p className="muted">
-        A key authorises upload, replacement, and delete for your own plans, and
-        nothing else. Send it as <code>x-api-key</code>.
+        A key authorises upload, replacement, delete, and reading any plan you
+        can read. It cannot list your plans or change who a plan is shared with.
+        Send it as <code>x-api-key</code>.
       </p>
-      <div className="row" style={{ marginTop: "16px" }}>
-        <input
-          type="text"
-          placeholder="Key name"
-          value={name}
-          onChange={(event: Event) => setName(controlValue(event))}
-        />
-        <select
-          value={expiryIndex}
-          onChange={(event: Event) =>
-            setExpiryIndex(Number(controlValue(event)))
-          }
-        >
-          {EXPIRY_CHOICES.map((choice, index) => (
-            <option key={choice.label} value={index}>
-              {choice.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="btn-ivory"
-          disabled={busy}
-          onClick={() => void onCreate()}
-        >
-          Create key
-        </button>
-      </div>
+      <CreateKeyForm
+        name={name}
+        expiryIndex={expiryIndex}
+        busy={busy}
+        onName={setName}
+        onExpiryIndex={setExpiryIndex}
+        onCreate={() => {
+          void create(name, expiryIndex).then((ok) => {
+            if (ok) setName("");
+          });
+        }}
+      />
       {plaintext !== null && (
         <Reveal value={plaintext} onDismiss={() => setPlaintext(null)} />
       )}
@@ -153,42 +173,103 @@ export function ApiKeysPanel() {
           No API keys.
         </p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Key</th>
-              <th>Expires</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {keys.map((item) => (
-              <tr key={item.id}>
-                <td>{item.name ?? "-"}</td>
-                {/* `start` is the first characters of the full key, prefix
-                    included - do not prepend `prefix` again. */}
-                <td className="mono">{item.start ?? "-"}…</td>
-                <td>
-                  {item.expiresAt === null
-                    ? "Never"
-                    : new Date(item.expiresAt).toLocaleString()}
-                </td>
-                <td className="actions">
-                  <button
-                    type="button"
-                    className="btn-text btn-text-clay"
-                    disabled={busy}
-                    onClick={() => void onRevoke(item.id)}
-                  >
-                    Revoke
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <KeysTable keys={keys} busy={busy} onRevoke={revoke} />
       )}
+    </section>
+  );
+}
+
+function CreateKeyForm(props: {
+  name: string;
+  expiryIndex: number;
+  busy: boolean;
+  onName: (value: string) => void;
+  onExpiryIndex: (index: number) => void;
+  onCreate: () => void;
+}) {
+  return (
+    <div className="row" style={{ marginTop: "16px" }}>
+      <input
+        type="text"
+        placeholder="Key name"
+        // A placeholder is not a name: it is gone the moment there is a value,
+        // and several screen readers never announce it at all.
+        aria-label="Key name"
+        value={props.name}
+        onChange={(event: Event) => props.onName(controlValue(event))}
+      />
+      <select
+        aria-label="How long the key lasts"
+        value={props.expiryIndex}
+        onChange={(event: Event) =>
+          props.onExpiryIndex(Number(controlValue(event)))
+        }
+      >
+        {EXPIRY_CHOICES.map((choice, index) => (
+          <option key={choice.label} value={index}>
+            {choice.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="btn-ivory"
+        disabled={props.busy}
+        onClick={props.onCreate}
+      >
+        Create key
+      </button>
+    </div>
+  );
+}
+
+function KeysTable(props: {
+  keys: KeyRow[];
+  busy: boolean;
+  onRevoke: (keyId: string) => Promise<void>;
+}) {
+  return (
+    <section
+      className="table-scroll"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+      tabIndex={0}
+      aria-label="API keys"
+    >
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Key</th>
+            <th>Expires</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {props.keys.map((item) => (
+            <tr key={item.id}>
+              <td>{item.name ?? "-"}</td>
+              {/* `start` is the first characters of the full key, prefix
+                  included - do not prepend `prefix` again. */}
+              <td className="mono">{item.start ?? "-"}…</td>
+              <td>
+                {item.expiresAt === null
+                  ? "Never"
+                  : new Date(item.expiresAt).toLocaleString()}
+              </td>
+              <td className="actions">
+                <button
+                  type="button"
+                  className="btn-text btn-text-clay"
+                  disabled={props.busy}
+                  onClick={() => void props.onRevoke(item.id)}
+                >
+                  Revoke
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }

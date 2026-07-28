@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { pino } from "pino";
 import { deletePlan } from "../src/http/delete-plan.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 const OWNER = "user-a";
 const OTHER = "user-b";
@@ -39,7 +40,11 @@ function fakes(
     probe: async () => {},
   };
 
+  // Spread first, so anything this suite defines below wins. The stub only
+  // holds sharing methods today, but a later addition that collided with a
+  // recording fake here would silently replace it.
   const plans: PlanRepo = {
+    ...basePlanRepoStub,
     insert: async () => "created",
     listByUser: async () => [],
     findOwner: async () => owner,

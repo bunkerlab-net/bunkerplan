@@ -50,6 +50,41 @@
       "when": 1785059861089,
       "tag": "0006_curly_greymalkin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785150388258,
+      "tag": "0007_hard_the_fury",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785174455246,
+      "tag": "0008_perpetual_diamondback",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785230023937,
+      "tag": "0009_smiling_chronomancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785231675254,
+      "tag": "0010_watchful_shard",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785234852574,
+      "tag": "0011_quiet_bucket",
+      "breakpoints": true
     }
   ]
 }

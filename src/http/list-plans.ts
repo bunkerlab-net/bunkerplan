@@ -12,7 +12,9 @@ export async function listPlans(
   config: Pick<Config, "publicBaseUrl">,
   request: Request,
 ): Promise<Response> {
-  // Session-only: an API key authorises writes to plans, nothing else.
+  // Session-only. Not because a key cannot read - it can, one plan at a time
+  // through the read gate - but because enumerating an account's plans is a
+  // dashboard capability rather than a per-plan one.
   const userId = await resolveSessionUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
 
@@ -28,6 +30,8 @@ export async function listPlans(
       label: row.label,
       size: row.size,
       createdAt: row.createdAt.toISOString(),
+      visibility: row.visibility,
+      hasShareCode: row.hasShareCode,
     })),
     truncated: rows.length > PLAN_PAGE_SIZE,
   } satisfies PlanList);

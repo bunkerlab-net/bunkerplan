@@ -36,7 +36,14 @@ function NavControls({
             Dashboard
           </a>
         )}
-        <span className="nav-handle">{handle}</span>
+        {/* Labelled visibly, not by `title`: on its own this reads as an
+            opaque account id, and a tooltip is invisible at a glance and
+            absent entirely on touch. It is the one string another account
+            needs in order to share a plan with this one. */}
+        <span className="nav-handle">
+          <span className="nav-handle-label">Handle</span>
+          {handle}
+        </span>
         <button
           type="button"
           className="btn-text"
@@ -134,7 +141,8 @@ export function SiteFooter() {
           </div>
         </div>
         <p className="footer-bottom caption">
-          Plans are public to anyone holding the URL and unlisted otherwise.
+          Plans are private by default. Share one with a code, with named
+          accounts, or with anyone holding the URL.
         </p>
       </div>
     </footer>

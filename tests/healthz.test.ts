@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { pino } from "pino";
 import { healthz } from "../src/http/healthz.ts";
 import type { Db, KvStore, PlanStorage } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /** Silent: these tests assert on responses and side effects, not on output. */
 const logger = pino({ level: "silent" });
@@ -41,6 +42,7 @@ function fakes(fails: string[] = []): Fakes {
     adapter: {},
     provider: "pg",
     plans: {
+      ...basePlanRepoStub,
       insert: async () => "created",
       listByUser: async () => [],
       findOwner: async () => null,
@@ -49,6 +51,9 @@ function fakes(fails: string[] = []): Fakes {
       deleteOwned: async () => false,
     },
     uploadRateLimits: {
+      consume: async () => ({ allowed: true, retryAfter: 60 }),
+    },
+    unlockRateLimits: {
       consume: async () => ({ allowed: true, retryAfter: 60 }),
     },
     accountClosing: {

@@ -3,7 +3,7 @@ import type { SecondaryStorage } from "@better-auth/core/db";
 import { passkey } from "@better-auth/passkey";
 import type { BetterAuthOptions } from "better-auth";
 import { setSessionCookie } from "better-auth/cookies";
-import { newUserHandle } from "../ids.ts";
+import { handleEmail, newUserHandle } from "../ids.ts";
 import type { Logger } from "../log.ts";
 
 /**
@@ -70,7 +70,7 @@ function passkeyPlugin(input: AuthOptionsInput) {
           name: handle,
           // RFC 2606 reserved TLD: a synthetic address that can never resolve
           // or be mailed.
-          email: `${handle}@passkey.invalid`,
+          email: handleEmail(handle),
           emailVerified: false,
         });
         // Registration signs the user straight in. Without this the browser
@@ -136,10 +136,21 @@ function loggerOption(logger: Logger | undefined) {
 }
 
 /**
- * Passkeys only, so every password and email-verification route is 404'd
- * rather than merely disabled - there is then nothing to probe.
+ * Routes the router 404s outright, so there is nothing to probe.
+ *
+ * Two groups. Passkeys only, so every password and email-verification route
+ * goes; and identity is immutable, so the routes that would rewrite it go too.
+ *
+ * `/update-user` is the load-bearing one. `user.name` IS the account handle:
+ * it is minted at registration, shown in the nav, and what a plan grant is
+ * addressed by. Grants resolve through the synthetic `@passkey.invalid`
+ * address derived from the handle at signup, so a rename would leave the
+ * owner looking at a handle whose grant they can no longer revoke - the
+ * lookup would compute an address belonging to nobody. There is no profile to
+ * edit in this product; the endpoint exists only because Better Auth ships
+ * it.
  */
-const PASSWORD_PATHS = [
+const DISABLED_PATHS = [
   "/sign-in/email",
   "/sign-up/email",
   "/forget-password",
@@ -148,6 +159,7 @@ const PASSWORD_PATHS = [
   "/change-email",
   "/verify-email",
   "/send-verification-email",
+  "/update-user",
 ];
 
 /**
@@ -182,9 +194,9 @@ export function buildAuthOptions(input: AuthOptionsInput) {
     // conditional UPDATE, so the count stays exact under concurrency.
     rateLimit: { enabled: true, storage: "database", window: 60, max: 100 },
 
-    // Passkeys only. `emailAndPassword` already defaults to disabled; this
-    // makes the router 404 the routes outright so there is nothing to probe.
-    disabledPaths: PASSWORD_PATHS,
+    // `emailAndPassword` already defaults to disabled; this makes the router
+    // 404 those routes, and the identity-mutating ones, outright.
+    disabledPaths: DISABLED_PATHS,
 
     experimental: { joins: true },
 

@@ -1,13 +1,30 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type { RateLimitRepo } from "../services/types.ts";
-import { retryAfterSeconds } from "./rate-limit-window.ts";
-import { uploadRateLimit as t } from "./schema/rate-limit.sqlite.ts";
+import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
+import {
+  unlockRateLimit,
+  uploadRateLimit,
+} from "./schema/rate-limit.sqlite.ts";
 import type { SqliteSchema } from "./sqlite-shared.ts";
 
 type SqliteDb = BaseSQLiteDatabase<"sync" | "async", unknown, SqliteSchema>;
 
-export function createSqliteRateLimitRepo(db: SqliteDb): RateLimitRepo {
+/**
+ * Either counter table. They differ only in name and in whether the key
+ * cascades from `user`, neither of which the statements below can see.
+ */
+export type RateLimitTable = typeof uploadRateLimit | typeof unlockRateLimit;
+
+/**
+ * One implementation for both counter tables: the decision is identical, only
+ * the bucket differs. `unlock_rate_limit` is structurally the same table
+ * without the user cascade.
+ */
+export function createSqliteRateLimitRepo(
+  db: SqliteDb,
+  t: RateLimitTable = uploadRateLimit,
+): RateLimitRepo {
   return {
     async consume(key, max, windowSeconds) {
       const windowMs = windowSeconds * 1000;
@@ -60,6 +77,37 @@ export function createSqliteRateLimitRepo(db: SqliteDb): RateLimitRepo {
             ? windowSeconds
             : retryAfterSeconds(start, now, windowMs),
       };
+    },
+  };
+}
+
+/**
+ * The unlock bucket, which prunes itself.
+ *
+ * `upload_rate_limit` needs no sweep: its key cascades from `user`, so a
+ * counter goes when its account does. This table's key is a digest of a client
+ * address, with nothing to cascade from, so an unauthenticated caller could
+ * otherwise plant a row per address for good. A closed window can only ever be
+ * reset, never refused, so deleting one never changes a decision.
+ *
+ * `shouldSweep` is injected so the pruning test can ask for one instead of
+ * rolling dice until it gets one.
+ */
+export function createSqliteUnlockRateLimitRepo(
+  db: SqliteDb,
+  shouldSweep: () => boolean = sometimes,
+): RateLimitRepo {
+  const counter = createSqliteRateLimitRepo(db, unlockRateLimit);
+  return {
+    async consume(key, max, windowSeconds) {
+      if (shouldSweep()) {
+        await db
+          .delete(unlockRateLimit)
+          .where(
+            lte(unlockRateLimit.windowStart, Date.now() - windowSeconds * 1000),
+          );
+      }
+      return await counter.consume(key, max, windowSeconds);
     },
   };
 }

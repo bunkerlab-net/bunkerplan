@@ -1,0 +1,19 @@
+# EditorConfig is awesome: https://EditorConfig.org
+
+# Top-most EditorConfig file
+root = true
+
+# Unix-style newlines with a newline ending every file
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+tab_width = 2
+
+# No per-type overrides. Markdown would need `trim_trailing_whitespace = false`
+# to keep two-space hard breaks, and this repo writes none; `hk.pkl` already
+# gets the indentation above. An override that restates a default only looks
+# like it protects something.

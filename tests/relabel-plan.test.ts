@@ -5,6 +5,7 @@ import {
 } from "../src/http/plan-label.ts";
 import { relabelPlan } from "../src/http/relabel-plan.ts";
 import type { PlanRepo } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 const OWNER = "user-a";
 const OTHER = "user-b";
@@ -15,6 +16,7 @@ function fakes() {
   const stored: { label: string | null } = { label: null };
 
   const plans: PlanRepo = {
+    ...basePlanRepoStub,
     insert: async () => "created",
     listByUser: async () => [],
     findOwner: async () => OWNER,

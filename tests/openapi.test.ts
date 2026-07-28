@@ -6,6 +6,7 @@ import { createApp } from "../src/app.ts";
 const CONFIG = {
   publicBaseUrl: "https://plans.example.test",
   maxUploadBytes: 1234,
+  shareCodeLength: 24,
 };
 
 const doc = openApiDocument(CONFIG);
@@ -112,6 +113,33 @@ describe("the published document", () => {
     );
   });
 
+  /**
+   * `describeShareCode` writes this at build time because a Zod component is
+   * a module-level singleton and cannot hold a per-deployment value. Nothing
+   * else would notice if that write silently stopped landing.
+   */
+  test("publishes this deployment's share-code length, not the default", () => {
+    const codeOf = (name: string) => {
+      const schema = doc.components.schemas[name] as {
+        properties: Record<string, { description?: string }>;
+      };
+      return schema.properties["code"]?.description ?? "";
+    };
+
+    for (const name of ["PlanCreated", "ShareCodeCreated"]) {
+      expect(codeOf(name)).toContain(`${CONFIG.shareCodeLength} characters`);
+      // The repository default must not leak through in its place.
+      expect(codeOf(name)).not.toContain("16 characters");
+    }
+
+    const createPlan = doc.paths["/api/plans"]?.["put"] as {
+      description: string;
+    };
+    expect(createPlan.description).toContain(
+      `${CONFIG.shareCodeLength} characters`,
+    );
+  });
+
   test("every $ref points at a component that exists", () => {
     const names = new Set(Object.keys(doc.components.schemas));
     const refs = [...JSON.stringify(doc).matchAll(/"\$ref":"([^"]+)"/g)].map(
@@ -147,6 +175,11 @@ describe("coverage of the routes the app actually serves", () => {
       "/api/openapi.json",
       "/api/plans",
       "/api/plans/{id}",
+      "/api/plans/{id}/grants",
+      "/api/plans/{id}/grants/{handle}",
+      "/api/plans/{id}/share-code",
+      "/api/plans/{id}/sharing",
+      "/api/plans/{id}/unlock",
       "/dashboard",
       "/healthz",
       "/p/{id}",

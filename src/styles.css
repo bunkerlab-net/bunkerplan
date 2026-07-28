@@ -142,9 +142,29 @@ main {
   gap: 8px;
 }
 
+/* A squeezed nav must not break a control mid-phrase - "Sign / out" reads as
+   two things. Wrapping is handled by the breakpoint at the end of this file. */
+.nav-right > * {
+  white-space: nowrap;
+}
+
 .nav-handle {
   font-family: var(--mono);
   font-size: var(--text-caption);
+  color: var(--text-muted);
+}
+
+/* Sans against the mono value, so the label reads as chrome and the handle
+   reads as the literal it is - the same split the rest of the nav uses. */
+.nav-handle-label {
+  font-family: var(--sans);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-right: 6px;
+  /* Not `--cloud-dark`: at 12px that is 3.15:1 on the canvas, under the
+     4.5:1 this size needs - and the reference reserves that token for
+     borders and dividers rather than text. `--text-muted` is 9.38:1. */
   color: var(--text-muted);
 }
 
@@ -448,7 +468,9 @@ button:disabled {
 
 /* --- Forms -------------------------------------------------------------- */
 
-input,
+/* Radios keep their native box: the padded, bordered treatment below is for
+   text fields, and applying it to a radio inflates it into a bordered square. */
+input:not([type="radio"]),
 select {
   font-size: var(--text-body-sm);
   padding: 10px 12px;
@@ -503,6 +525,29 @@ select {
 
 /* --- Tables ------------------------------------------------------------- */
 
+/*
+ * A table is the wrong shape below about 780px - the plans one alone wants
+ * 688px of columns - and left alone it pushes the whole page sideways rather
+ * than staying inside its card. Scrolling the table keeps the overflow local.
+ *
+ * Focusable and labelled because a scrollable region has to be reachable
+ * without a pointer.
+ */
+.table-scroll {
+  overflow-x: auto;
+  /* Load-bearing. The hidden file picker in each row is `position: absolute`,
+     and without a positioned ancestor here its containing block is outside
+     this box - so it escapes the clip and drags the page's scroll area out to
+     the table's full width, which is the whole bug this rule exists to fix. */
+  position: relative;
+}
+
+.table-scroll table {
+  /* Without this the table would shrink to the container instead of
+     scrolling, and every column would collapse into unreadable wrapping. */
+  min-width: max-content;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -533,6 +578,77 @@ tr:last-child td {
 td.actions {
   text-align: right;
   white-space: nowrap;
+}
+
+/* The sharing editor, opened inline under the row it belongs to. Surface 3
+   (oat) rather than another ivory card: it is a grouped panel nested inside a
+   card, and the tonal step is how this system shows nesting - never a shadow. */
+.sharing {
+  background: var(--oat-warm);
+  border-radius: var(--radius-card);
+  padding: 24px;
+  display: grid;
+  gap: 24px;
+}
+
+/* A grid item floors at `min-width: auto`, which is its content width. The
+   share link inside is a `white-space: pre` block that must scroll rather
+   than widen its container, and without this it pushes the whole panel - and
+   the table it sits in - past the viewport on a narrow screen. */
+.sharing > * {
+  min-width: 0;
+}
+
+/* A group label inside the panel. Smaller than `.card-title` on purpose: the
+   panel already sits two levels down, and a 24px heading there would outrank
+   the card it is nested in. */
+.sharing h3 {
+  font-family: var(--sans);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+}
+
+.sharing > div > p {
+  margin: 12px 0 0;
+}
+
+.choices {
+  display: grid;
+  gap: 8px;
+}
+
+.choice {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--text-body-sm);
+}
+
+.choice input {
+  /* Aligns the control with the first line of a label that wraps. */
+  translate: 0 2px;
+  accent-color: var(--clay-deep);
+}
+
+/* Handles a plan is shared with. A badge here is weighted text in flow, not a
+   container - see the badge note in the design reference. */
+.tag-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.tag-list li {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
 }
 
 /* An editable cell, not a form field: no chrome until it is hovered or
@@ -599,6 +715,12 @@ td.actions {
   /* Scroll rather than wrap: a broken URL mid-token is not copy-pasteable. */
   white-space: pre;
   overflow-x: auto;
+}
+
+/* Oat on oat is invisible; step up to the card surface, the same move
+   `.card-feature .notice` makes one tone higher. */
+.sharing .snippet {
+  background: var(--ivory-light);
 }
 
 /* --- Footer ------------------------------------------------------------- */
@@ -684,6 +806,37 @@ td.actions {
 
   .section {
     padding-top: 48px;
+  }
+}
+
+/*
+ * The wordmark, the handle, and Sign out stop fitting on one line somewhere
+ * between 360px and 400px, and the button splits mid-phrase.
+ *
+ * Wrapping only - no forced second row. `.nav-right` drops beneath the
+ * wordmark when it genuinely does not fit, so a signed-out nav carrying one
+ * "Sign in" stays on a single line while the signed-in one, which also holds
+ * the handle, takes two.
+ *
+ * The handle is never the thing that gives way: a phone is exactly where it
+ * is least discoverable, since there is no hover to reveal a tooltip.
+ */
+@media (max-width: 420px) {
+  .nav-inner {
+    flex-wrap: wrap;
+    /* The row gap is deliberately smaller than the column one: this only
+       applies once the nav has wrapped, where zero left the two lines
+       touching, and 12px reads as a gap between separate blocks. */
+    gap: 6px 12px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  /* The controls wrap among themselves as well. Signed in and away from the
+     dashboard the row also carries a Dashboard link, and those three overflow
+     the viewport at 320px even after dropping below the wordmark. */
+  .nav-right {
+    flex-wrap: wrap;
   }
 }
 

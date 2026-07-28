@@ -2,6 +2,7 @@ import type { Child } from "hono/jsx";
 import { SiteFrame } from "../client/Chrome.tsx";
 import { PAGE_PROPS_ID, ROOT_ID } from "../client/mount.ts";
 import { NotFound } from "../client/NotFound.tsx";
+import { PlanGate } from "../client/PlanGate.tsx";
 import type { PageProps } from "../client/pages.tsx";
 import { DashboardPage, LandingPage } from "../client/pages.tsx";
 import type { AssetManifest } from "./assets.ts";
@@ -83,9 +84,12 @@ function Document({ assets, social, page, children }: DocumentProps) {
           <script
             type="application/json"
             id={PAGE_PROPS_ID}
-            // Server-authored constants only - an origin from configuration
-            // and a path Hono already matched. `<` is escaped so a value can
-            // never close the script element.
+            // Not all server-authored: the gate's `planId` comes from the
+            // request. It is safe because it cannot reach here unvalidated -
+            // `resolvePlanAccess` answers `missing` unless `isPlanId` passes,
+            // and that alphabet is lowercase alphanumerics, so no quote,
+            // backslash, or angle bracket survives it. `<` is escaped anyway,
+            // which is what holds if a future field is added carelessly.
             dangerouslySetInnerHTML={{
               __html: JSON.stringify(page).replaceAll("<", "\\u003c"),
             }}
@@ -123,6 +127,28 @@ export function renderDashboard(
   return document(
     <Document assets={assets} social={{ origin, path }} page={page}>
       <DashboardPage {...page} />
+    </Document>,
+  );
+}
+
+/**
+ * The page a visitor gets when a plan exists but they may not read it.
+ *
+ * `social` is omitted deliberately, so `Document` emits `robots: noindex`: a
+ * gate carries no content worth indexing, and an indexed one would advertise
+ * that a private plan exists at that URL.
+ */
+export function renderPlanGate(
+  assets: AssetManifest,
+  planId: string,
+  hasCode: boolean,
+  origin: string,
+): string {
+  const path = `/p/${planId}`;
+  const page: PageProps = { name: "gate", path, origin, planId, hasCode };
+  return document(
+    <Document assets={assets} page={page}>
+      <PlanGate {...page} />
     </Document>,
   );
 }

@@ -34,6 +34,7 @@ export interface Config {
   clientIpHeader: string;
   maxUploadBytes: number;
   planIdLength: number;
+  shareCodeLength: number;
   /**
    * Per-account ceiling on stored plans. Bounds total storage at this times
    * `maxUploadBytes`, which the upload rate limit alone cannot do - that caps
@@ -42,6 +43,16 @@ export interface Config {
   maxPlansPerUser: number;
   uploadRateMax: number;
   uploadRateWindowSec: number;
+  /**
+   * Share-code redemptions allowed per client address per window.
+   *
+   * Not a defence against guessing the code - that rests on its entropy, and
+   * no reachable rate would change it. This bounds what an anonymous caller
+   * can spend of the deployment's own resources on the one route that takes no
+   * credential.
+   */
+  unlockRateMax: number;
+  unlockRateWindowSec: number;
   logFormat: LogFormat;
   logLevel: LogLevel;
   logColor: boolean;
@@ -73,9 +84,11 @@ const MIN_RATE_WINDOW_SEC = 60;
 const DEFAULT_MAX_UPLOAD_BYTES = 2_097_152;
 const DEFAULT_PLAN_ID_LENGTH = 16;
 /**
- * Plan URLs are public and unlisted, so the id is the only thing keeping a
- * document from being found by guessing. Eight lowercase alphanumeric
- * characters is about 41 bits, which is the floor worth allowing.
+ * A public plan URL is unlisted, so the id is the only thing keeping that
+ * document from being found by guessing - and for a private one the id still
+ * bounds what the gate leaks, since a 401 confirms a plan exists. Eight
+ * lowercase alphanumeric characters is about 41 bits, the floor worth
+ * allowing.
  */
 const MIN_PLAN_ID_LENGTH = 8;
 /**
@@ -87,6 +100,22 @@ const MIN_PLAN_ID_LENGTH = 8;
  * to `{id}.{host}` stays a redirect instead of a re-encoding.
  */
 const MAX_PLAN_ID_LENGTH = 63;
+const DEFAULT_SHARE_CODE_LENGTH = 16;
+/**
+ * A share code is the only thing gating an unauthenticated read, so unlike a
+ * plan id there is no short end worth allowing: 16 base62 characters is ~95
+ * bits, and the floor is the default. Exported for the same reason as the
+ * ceiling - it is the stable bound the API documents accepting, independent
+ * of what this deployment mints.
+ */
+export const MIN_SHARE_CODE_LENGTH = 16;
+/**
+ * The ceiling on a minted code, and so also the longest `?code=` the read gate
+ * will hash. Exported because those two have to be the same number: a gate
+ * bounded lower than this would silently refuse codes this deployment can
+ * mint.
+ */
+export const MAX_SHARE_CODE_LENGTH = 64;
 
 function str(env: Env, key: string): string | undefined {
   const raw = env[key];
@@ -290,9 +319,12 @@ function parseLogging(env: Env, problems: string[]): LogSettings {
 interface Limits {
   maxUploadBytes: number;
   planIdLength: number;
+  shareCodeLength: number;
   maxPlansPerUser: number;
   uploadRateMax: number;
   uploadRateWindowSec: number;
+  unlockRateMax: number;
+  unlockRateWindowSec: number;
 }
 
 function parseLimits(env: Env, problems: string[]): Limits {
@@ -312,12 +344,30 @@ function parseLimits(env: Env, problems: string[]): Limits {
       problems,
       MAX_PLAN_ID_LENGTH,
     ),
+    shareCodeLength: int(
+      env,
+      "SHARE_CODE_LENGTH",
+      DEFAULT_SHARE_CODE_LENGTH,
+      MIN_SHARE_CODE_LENGTH,
+      problems,
+      MAX_SHARE_CODE_LENGTH,
+    ),
     maxPlansPerUser: int(env, "MAX_PLANS_PER_USER", 250, 1, problems),
     uploadRateMax: int(env, "UPLOAD_RATE_MAX", 30, 1, problems),
     uploadRateWindowSec: Math.max(
       MIN_RATE_WINDOW_SEC,
       int(env, "UPLOAD_RATE_WINDOW_SEC", MIN_RATE_WINDOW_SEC, 1, problems),
     ),
+    // Redeeming a share code is the one unauthenticated write, so its bucket
+    // is the client address rather than an account. Generous by default: a
+    // reader types a code once or twice, and a whole office can share one
+    // address.
+    unlockRateMax: int(env, "UNLOCK_RATE_MAX", 30, 1, problems),
+    // No `MIN_RATE_WINDOW_SEC` floor: that constant exists because Workers KV
+    // rejects an `expirationTtl` under 60s, and this counter is a database row
+    // with no TTL. A shorter window is a weaker limit, which is the operator's
+    // call to make.
+    unlockRateWindowSec: int(env, "UNLOCK_RATE_WINDOW_SEC", 60, 1, problems),
   };
 }
 

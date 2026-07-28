@@ -93,5 +93,44 @@ export function describeSchema(
       await fixture.addPasskey(second, credentialId);
       expect(await fixture.countPasskeys(second)).toBe(1);
     });
+
+    /**
+     * `visibility` decides who may read a plan, and `PlanVisibility` is only a
+     * compile-time claim: a migration, a repair script, or a console session
+     * writes past it. The read gate treats every value that is not `public` as
+     * private, so a junk value fails safe - but a plan nobody can classify is
+     * still a plan whose sharing UI cannot describe it, and the column is
+     * cheap to keep honest.
+     */
+    test("the visibility column refuses a value that is neither", async () => {
+      const owner = await fixture.seedUser();
+      await expect(
+        fixture.insertPlanWithVisibility(
+          `p-${crypto.randomUUID()}`,
+          owner,
+          "sneaky",
+        ),
+      ).rejects.toThrow();
+      // Blank is the one a careless `SET visibility = ''` would produce.
+      await expect(
+        fixture.insertPlanWithVisibility(`p-${crypto.randomUUID()}`, owner, ""),
+      ).rejects.toThrow();
+      expect(await fixture.countPlans(owner)).toBe(0);
+    });
+
+    test("both values the column is for are still accepted", async () => {
+      const owner = await fixture.seedUser();
+      await fixture.insertPlanWithVisibility(
+        `p-${crypto.randomUUID()}`,
+        owner,
+        "public",
+      );
+      await fixture.insertPlanWithVisibility(
+        `p-${crypto.randomUUID()}`,
+        owner,
+        "private",
+      );
+      expect(await fixture.countPlans(owner)).toBe(2);
+    });
   });
 }

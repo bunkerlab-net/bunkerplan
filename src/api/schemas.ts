@@ -36,6 +36,8 @@
  * identical code.
  */
 import * as z from "zod";
+import { MAX_SHARE_CODE_LENGTH, MIN_SHARE_CODE_LENGTH } from "../config.ts";
+import { MAX_GRANTS_PER_REQUEST } from "../http/account-list.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 
 /**
@@ -69,8 +71,54 @@ export function ref(schema: z.ZodType): { $ref: string } {
 /** A JSON Schema object, as it appears inside the OpenAPI document. */
 export type JsonSchema = Record<string, unknown>;
 
-/** Every registered component, as OpenAPI 3.1 schema objects. */
-export function componentSchemas(): Record<string, JsonSchema> {
+/**
+ * The one sentence describing a share code's shape. Only the running
+ * deployment knows the length, and `SHARE_CODE_LENGTH` is an operator
+ * setting, so this cannot be baked into the module-level schema.
+ */
+export function shareCodeFormat(length: number): string {
+  return `Mixed-case alphanumeric, ${length} characters on this deployment.`;
+}
+
+/**
+ * Writes the deployment's own code format onto the two schemas that carry a
+ * plaintext code, after generation. Throws rather than silently doing nothing
+ * if either shape is renamed - a description that quietly vanished would be
+ * indistinguishable from one that was never wanted.
+ */
+function describeShareCode(
+  schemas: Record<string, JsonSchema>,
+  id: string,
+  length: number,
+): void {
+  const properties = schemas[id]?.["properties"];
+  if (
+    typeof properties !== "object" ||
+    properties === null ||
+    !("code" in properties)
+  ) {
+    throw new Error(`${id} has no code property to describe`);
+  }
+  const code = properties.code;
+  if (typeof code !== "object" || code === null) {
+    throw new Error(`${id}.code is not a schema object`);
+  }
+  Object.assign(code, {
+    description:
+      "The plaintext share code, returned this once and never again - the " +
+      `column holds a digest. ${shareCodeFormat(length)}`,
+  });
+}
+
+/**
+ * Every registered component, as OpenAPI 3.1 schema objects.
+ *
+ * `shareCodeLength` is the deployment's `SHARE_CODE_LENGTH`, so a self-hosted
+ * instance publishes its own value rather than this repository's default.
+ */
+export function componentSchemas(
+  shareCodeLength: number,
+): Record<string, JsonSchema> {
   const { schemas } = z.toJSONSchema(components, {
     // OpenAPI 3.1's Schema Object *is* JSON Schema 2020-12.
     target: "draft-2020-12",
@@ -94,6 +142,9 @@ export function componentSchemas(): Record<string, JsonSchema> {
     delete schema.$schema;
   }
 
+  describeShareCode(schemas, "PlanCreated", shareCodeLength);
+  describeShareCode(schemas, "ShareCodeCreated", shareCodeLength);
+
   return schemas;
 }
 
@@ -116,7 +167,9 @@ const PlanId = z.string().meta({
 });
 
 const PlanUrl = z.url().meta({
-  description: "Where the document is publicly readable.",
+  description:
+    "Where the document is served. Who may read it depends on the plan's " +
+    "visibility; a private one gates this URL.",
   examples: ["https://plan.example.com/p/k3mp7q2xr9vt4nzb"],
 });
 
@@ -150,6 +203,67 @@ export const ErrorBody = component(
  */
 export type ErrorBody = z.infer<typeof ErrorBody>;
 
+/**
+ * What a plan's `visibility` column holds. `code` is an upload intent, not a
+ * stored state - see `PlanVisibilityQuery`.
+ */
+export const PlanVisibility = component(
+  "PlanVisibility",
+  z.enum(["public", "private"]).meta({
+    title: "PlanVisibility",
+    description:
+      "public: anyone holding the URL may read it. private: only the owner, " +
+      "the accounts it has been granted to, and anyone holding its share code.",
+  }),
+);
+
+/**
+ * Handles are what a grant is addressed by; `user.name` is the handle.
+ *
+ * The handler trims and refuses what is left when it is empty
+ * (`src/http/plan-sharing.ts`, `grantPlan`), so a handle must carry at least
+ * one non-whitespace character. `\S` is that rule; `minLength` is implied by
+ * it and published alongside because it is the part a reader of the document
+ * is looking for. No ceiling: handles are minted at a fixed length, but an
+ * operator who has renamed one must still be able to name it here.
+ */
+const PlanHandle = z
+  .string()
+  .min(1)
+  .regex(/\S/)
+  .meta({
+    description: "An account handle, as shown in the dashboard.",
+    examples: ["k7mjq2rvxn"],
+  });
+
+/**
+ * Either identifier an account answers to.
+ *
+ * Grants are addressed by handle or by account id: the handle is what a
+ * person reads off their own dashboard and passes to a colleague, the id is
+ * what `/api/auth/get-session` returns to the signed-in account and what a
+ * script is likelier to be holding already. Same constraints as a handle,
+ * because the only rule either has to satisfy here is being non-blank.
+ *
+ * Registered, unlike `PlanHandle`: seven fields across three components take
+ * one of these, so the `$ref` saves the document seven copies of the same
+ * string. `PlanHandle` reaches one component and one path parameter that is
+ * inlined deliberately, so the indirection would not be earned there.
+ */
+const PlanAccount = component(
+  "PlanAccount",
+  z
+    .string()
+    .min(1)
+    .regex(/\S/)
+    .meta({
+      title: "PlanAccount",
+      description:
+        "An account handle, as shown in the dashboard, or an account id.",
+      examples: ["k7mjq2rvxn", "PTvWlDlbZeEKHbnAIlscbcyduj6ayFc2"],
+    }),
+);
+
 export const PlanSummary = component(
   "PlanSummary",
   z
@@ -164,6 +278,12 @@ export const PlanSummary = component(
         .meta({ description: "Size of the stored document, in bytes." }),
       createdAt: z.iso.datetime().meta({
         description: "When the plan was created, as RFC 3339 UTC.",
+      }),
+      visibility: PlanVisibility,
+      hasShareCode: z.boolean().meta({
+        description:
+          "True when a share code is set. The code itself is stored as a " +
+          "digest and is never returned after the request that minted it.",
       }),
     })
     .meta({ title: "PlanSummary", description: "One row of the plan list." }),
@@ -189,11 +309,150 @@ export type PlanList = z.infer<typeof PlanList>;
 export const PlanCreated = component(
   "PlanCreated",
   z
-    .object({ id: PlanId, url: PlanUrl, label: PlanLabel })
+    .object({
+      id: PlanId,
+      url: PlanUrl,
+      label: PlanLabel,
+      // `describeShareCode` writes this field's description at document
+      // build time, because it names a per-deployment length.
+      code: z.string().optional(),
+      // All three present only when `?grants=` named someone, so an upload
+      // that shared with nobody does not carry three empty arrays.
+      granted: z.array(PlanAccount).optional().meta({
+        description: "Accounts `?grants=` gave access to.",
+      }),
+      unknown: z.array(PlanAccount).optional().meta({
+        description: "Entries from `?grants=` that no account answers to.",
+      }),
+      failed: z
+        .array(PlanAccount)
+        .optional()
+        .meta({
+          description:
+            "Entries from `?grants=` whose grant errored. The plan is stored " +
+            "either way; retry these against POST /api/plans/{id}/grants.",
+        }),
+    })
     .meta({ title: "PlanCreated" }),
 );
 
 export type PlanCreated = z.infer<typeof PlanCreated>;
+
+export const PlanSharing = component(
+  "PlanSharing",
+  z
+    .object({
+      visibility: PlanVisibility,
+      // Same name as `PlanSummary.hasShareCode`: both are the JSON API
+      // reporting the same fact, and two spellings for one field is a trap.
+      hasShareCode: z.boolean().meta({
+        description: "True when a share code is set.",
+      }),
+      grants: z.array(PlanHandle).meta({
+        description: "Handles of the accounts this plan is shared with.",
+      }),
+    })
+    .meta({ title: "PlanSharing" }),
+);
+
+export type PlanSharing = z.infer<typeof PlanSharing>;
+
+export const ShareCodeCreated = component(
+  "ShareCodeCreated",
+  z
+    .object({
+      code: z.string(),
+    })
+    .meta({ title: "ShareCodeCreated" }),
+);
+
+export type ShareCodeCreated = z.infer<typeof ShareCodeCreated>;
+
+/**
+ * The bounds are the stable ones, not this deployment's
+ * `SHARE_CODE_LENGTH`: lowering that setting must not stop a code minted
+ * under the old one from being redeemed.
+ */
+const ShareCodeValue = z
+  .string()
+  .regex(/^[0-9A-Za-z]+$/)
+  .min(MIN_SHARE_CODE_LENGTH)
+  .max(MAX_SHARE_CODE_LENGTH);
+
+export const UnlockRequest = component(
+  "UnlockRequest",
+  z
+    .looseObject({ code: ShareCodeValue })
+    .meta({ title: "UnlockRequest", description: "A plaintext share code." }),
+);
+
+/**
+ * A comma-separated string or an array; entries in an array are split too, so
+ * `"a, b"` and `["a", "b"]` are the same request. One shape rather than a
+ * separate single-account field, because a list of one is not a special case.
+ */
+export const GrantRequest = component(
+  "GrantRequest",
+  z
+    .looseObject({
+      // The cap is on the array branch only. A comma-separated string can
+      // carry as many as it likes as far as JSON Schema is concerned; the
+      // parser counts them after splitting, and the body bound stops the
+      // absurd case before that.
+      accounts: z.union([
+        // `\S` as well as a length, matching the parser: `"   "` splits to
+        // nothing and is refused, so a bare `minLength` would publish a
+        // contract the handler is stricter than.
+        z.string().min(1).regex(/\S/),
+        z.array(PlanAccount).min(1).max(MAX_GRANTS_PER_REQUEST),
+      ]),
+    })
+    .meta({
+      title: "GrantRequest",
+      description:
+        "The accounts to grant. Each entry is a handle or an account id; an " +
+        "exact id wins, and the handle is only consulted when no account " +
+        "carries that id. Blank entries are skipped and duplicates collapse; " +
+        `at most ${MAX_GRANTS_PER_REQUEST} accounts in one request.`,
+    }),
+);
+
+export const GrantResult = component(
+  "GrantResult",
+  z
+    .object({
+      granted: z.array(PlanAccount).meta({
+        description:
+          "Accounts that now have access, including any that already did, " +
+          "echoed back as they were given.",
+      }),
+      unknown: z.array(PlanAccount).meta({
+        description:
+          "Entries no account answers to. Reported rather than fatal, so one " +
+          "mistyped name does not refuse the rest of the list.",
+      }),
+      failed: z.array(PlanAccount).meta({
+        description:
+          "Entries whose grant errored rather than being refused. Safe to " +
+          "retry: granting is idempotent, so a retry that had in fact landed " +
+          "comes back under `granted`.",
+      }),
+    })
+    .meta({ title: "GrantResult" }),
+);
+
+export type GrantResult = z.infer<typeof GrantResult>;
+
+export const SharingRequest = component(
+  "SharingRequest",
+  z.looseObject({ visibility: PlanVisibility }).meta({
+    title: "SharingRequest",
+    description:
+      "Flips a plan between public and private. Giving a plan a share code " +
+      "is POST /api/plans/{id}/share-code, because that is the request that " +
+      "returns the plaintext.",
+  }),
+);
 
 export const PlanReplaced = component(
   "PlanReplaced",
@@ -250,5 +509,26 @@ export const PlanLabelQuery = z
     examples: ["Q3 rollout"],
   });
 
+/**
+ * The optional `?visibility=` on upload. `code` is an intent rather than a
+ * stored state: it stores `private` and mints a share code in the same
+ * statement.
+ */
+export const PlanVisibilityQuery = z.enum(["public", "private", "code"]).meta({
+  description:
+    "Who may read the new plan. Defaults to private. `code` stores it " +
+    "private and mints a share code, returned once in the response body.",
+});
+
+/** The optional `?code=` on a plan document. */
+export const ShareCodeQuery = ShareCodeValue.meta({
+  description:
+    "A share code. Grants access to this one plan and sets a path-scoped " +
+    "cookie, so the parameter is only needed once per reader.",
+});
+
 /** The `{id}` path parameter, which is a plan id. */
 export const PlanIdParam = PlanId;
+
+/** The `{handle}` path parameter on a grant, which is an account handle. */
+export const PlanHandleParam = PlanHandle;

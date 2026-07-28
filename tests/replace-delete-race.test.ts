@@ -3,6 +3,7 @@ import { pino } from "pino";
 import { deletePlan } from "../src/http/delete-plan.ts";
 import { replacePlan } from "../src/http/replace-plan.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 const OWNER = "user-a";
 const ID = "plan-1";
@@ -56,6 +57,7 @@ function stores() {
   };
 
   const plans: PlanRepo = {
+    ...basePlanRepoStub,
     insert: async () => "created",
     listByUser: async () => [],
     findOwner: async (id) => rows.get(id)?.userId ?? null,

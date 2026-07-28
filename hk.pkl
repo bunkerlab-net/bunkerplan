@@ -18,11 +18,7 @@ import "package://github.com/jdx/hk/releases/download/v1.53.0/hk@1.53.0#/Builtin
 // excluded from the linter in biome.json instead.
 // `src/server/manifest.generated.ts` is written by `scripts/build.ts` on every
 // build and is excluded from biome entirely.
-local vendored =
-  List(
-    ".agents/skills/**",
-    "drizzle/**",
-  )
+local vendored = List(".agents/skills/**")
 
 local linters = new Mapping<String, Step> {
   // https://hk.jdx.dev/builtins.html

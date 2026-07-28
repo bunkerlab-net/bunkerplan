@@ -1,14 +1,16 @@
 import type { AppAuth } from "../auth/instance.ts";
 
 /**
- * An API key authorises PUT (upload and replace) and DELETE (remove) and
- * nothing else, so only the write routes accept one. Management routes -
- * listing plans, keys, and passkeys, relabelling, deleting the account - are
- * session-only. No session is ever minted
- * for a key (`enableSessionForAPIKeys` stays at its `false` default), so there
- * is exactly one code path per credential type.
+ * The user an API key or a session acts for.
+ *
+ * A key acts for its owner on upload, replacement, delete, and reading a plan
+ * that owner is allowed to read. Management routes - listing plans, keys, and
+ * passkeys, relabelling, sharing, deleting the account - are session-only, so
+ * they call `resolveSessionUserId` instead. No session is ever minted for a
+ * key (`enableSessionForAPIKeys` stays at its `false` default), so there is
+ * exactly one code path per credential type.
  */
-export async function resolveWriteUserId(
+export async function resolveUserId(
   auth: AppAuth,
   request: Request,
 ): Promise<string | null> {

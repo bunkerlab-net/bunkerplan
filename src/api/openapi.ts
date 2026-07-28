@@ -7,24 +7,36 @@
  * hand here is exactly the drift this module exists to avoid.
  */
 import type { ZodType } from "zod";
-import type { Config } from "../config.ts";
+import { type Config, MIN_SHARE_CODE_LENGTH } from "../config.ts";
+import { MAX_GRANTS_PER_REQUEST } from "../http/account-list.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import { MAX_LABEL_BODY_BYTES } from "../http/relabel-plan.ts";
+import { SHARE_CODE_ALPHABET_LENGTH } from "../ids.ts";
 import { PLAN_PAGE_SIZE } from "../services/types.ts";
 import {
   componentSchemas,
   ErrorBody,
+  GrantRequest,
+  GrantResult,
   Health,
   inlineSchema,
   type JsonSchema,
   PlanCreated,
+  PlanHandleParam,
   PlanIdParam,
   PlanLabelQuery,
   PlanList,
   PlanRelabelled,
   PlanReplaced,
+  PlanSharing,
+  PlanVisibilityQuery,
   RelabelRequest,
   ref,
+  ShareCodeCreated,
+  ShareCodeQuery,
+  SharingRequest,
+  shareCodeFormat,
+  UnlockRequest,
 } from "./schemas.ts";
 
 export const API_TITLE = "BunkerPlan API";
@@ -39,8 +51,17 @@ const API_VERSION = "1.0.0";
 const API_KEY_SCHEME = "apiKey";
 const SESSION_SCHEME = "session";
 
-/** Only upload, replace, and delete take a key; see src/http/require-user.ts. */
+/**
+ * A key acts for its owner on upload, replacement, delete, and reading a plan
+ * that owner may read. See src/http/require-user.ts.
+ */
 const WRITE_AUTH = [{ [API_KEY_SCHEME]: [] }, { [SESSION_SCHEME]: [] }];
+/**
+ * A public plan needs no credential and a private one needs either. The
+ * leading empty Security Requirement Object is how OpenAPI 3.1 spells
+ * "optional here".
+ */
+const OPTIONAL_AUTH = [{}, { [API_KEY_SCHEME]: [] }, { [SESSION_SCHEME]: [] }];
 const SESSION_AUTH = [{ [SESSION_SCHEME]: [] }];
 
 /** An OpenAPI Response Object. */
@@ -139,6 +160,34 @@ const LABEL_QUERY_PARAM = {
   schema: inlineSchema(PlanLabelQuery),
 };
 
+const VISIBILITY_QUERY_PARAM = {
+  name: "visibility",
+  in: "query",
+  required: false,
+  description: "Who may read the new plan. Defaults to private.",
+  schema: inlineSchema(PlanVisibilityQuery),
+};
+
+const HANDLE_PATH_PARAM = {
+  name: "handle",
+  in: "path",
+  required: true,
+  description: "The granted account's handle.",
+  schema: inlineSchema(PlanHandleParam),
+};
+
+const GRANTS_QUERY_PARAM = {
+  name: "grants",
+  in: "query",
+  required: false,
+  description:
+    "Accounts to share the new plan with, comma-separated. Names them in " +
+    "the same request that stores the plan, so a private plan need never " +
+    "exist unshared. Each entry is a handle or an account id, and at most " +
+    `${MAX_GRANTS_PER_REQUEST} of them. The 201 reports which ones landed.`,
+  schema: { type: "string", examples: ["k7mjq2rvxn,q5qkesmr5v"] },
+};
+
 const LOCATION_HEADER = {
   location: {
     description: "The plan's public URL, same as `url`.",
@@ -146,14 +195,22 @@ const LOCATION_HEADER = {
   },
 };
 
-/** `tooLarge` differs per deployment; everything else here is fixed. */
-function createPlanOperation(tooLarge: string): Record<string, unknown> {
+/** `tooLarge` and the code format differ per deployment. */
+function createPlanOperation(
+  tooLarge: string,
+  codeFormat: string,
+): Record<string, unknown> {
   return {
     operationId: "createPlan",
     summary: "Upload a plan",
     tags: ["Plans"],
     security: WRITE_AUTH,
-    parameters: [LABEL_QUERY_PARAM],
+    description:
+      "`?visibility=code` stores the plan private and mints a share code, " +
+      `returned once as \`code\` in the response body (${codeFormat}) ` +
+      "and never readable afterwards. Compose the share link by appending " +
+      "`?code=` to `url`.",
+    parameters: [LABEL_QUERY_PARAM, VISIBILITY_QUERY_PARAM, GRANTS_QUERY_PARAM],
     requestBody: UPLOAD_BODY,
     responses: {
       "201": {
@@ -161,7 +218,7 @@ function createPlanOperation(tooLarge: string): Record<string, unknown> {
         headers: LOCATION_HEADER,
       },
       ...failures({
-        400: `\`label\` is longer than ${MAX_PLAN_LABEL_LENGTH} characters, or carries control or text-direction characters.`,
+        400: `\`label\` is longer than ${MAX_PLAN_LABEL_LENGTH} characters or carries control or text-direction characters, or \`visibility\` is not public, private, or code.`,
         401: UNAUTHORISED,
         404:
           "The account was deleted while the upload was in flight, so the " +
@@ -186,8 +243,8 @@ function replacePlanOperation(tooLarge: string): Record<string, unknown> {
     summary: "Replace a plan's document",
     description:
       "The id, the public URL, and the label all survive; only the bytes " +
-      "change. Caches hold a plan for five minutes, so a replacement can " +
-      "take that long to reach a reader who has already seen the old one.",
+      "change. A public plan is served `public, no-cache`, so a reader who " +
+      "already has the old one revalidates and picks the new bytes up at once.",
     tags: ["Plans"],
     security: WRITE_AUTH,
     requestBody: UPLOAD_BODY,
@@ -254,17 +311,244 @@ const DELETE_PLAN_OPERATION = {
   },
 };
 
+/**
+ * Sharing is session-only, and deliberately not widened to match the read
+ * gate. A key already reads, replaces, and deletes its owner's plans; letting
+ * it hand out access to other people would turn a leaked key from a data-loss
+ * problem into a persistent backdoor.
+ */
+const SHARING_NOTE =
+  "Session-only. An API key reads and writes its owner's plans but cannot " +
+  "change who else may read them.";
+
+const GET_SHARING_OPERATION = {
+  operationId: "getPlanSharing",
+  summary: "Read a plan's sharing state",
+  description: SHARING_NOTE,
+  tags: ["Sharing"],
+  security: SESSION_AUTH,
+  responses: {
+    "200": json(PlanSharing, "Who may read this plan."),
+    ...failures({ 401: UNAUTHORISED, 404: NOT_FOUND }),
+  },
+};
+
+const SET_SHARING_OPERATION = {
+  operationId: "setPlanSharing",
+  summary: "Make a plan public or private",
+  description:
+    `${SHARING_NOTE} Giving a plan a share code is a separate request, ` +
+    "because that is the one that returns a plaintext code. A plan flipped " +
+    "to private stops being served at once: a public plan carries " +
+    "`public, no-cache`, so every read revalidates against this API.\n\n" +
+    "Setting `public` retires any share code, in the same write. A code is a " +
+    "bearer secret that cannot be recalled, so it is not left dormant to " +
+    "start working again if the plan goes private later; the unlock cookies " +
+    "minted under it are bound to its digest and stop verifying too. " +
+    "`hasShareCode` in the response says so. Grants are untouched - those " +
+    "name accounts the owner chose, and each is revocable on its own. " +
+    "Setting `private` does not clear a code: every code-shared plan is " +
+    "private with a code, so this field cannot distinguish keeping one from " +
+    "dropping it - `DELETE /api/plans/{id}/share-code` is that request.",
+  tags: ["Sharing"],
+  security: SESSION_AUTH,
+  requestBody: {
+    required: true,
+    content: { "application/json": { schema: ref(SharingRequest) } },
+  },
+  responses: {
+    "200": json(PlanSharing, "The new sharing state."),
+    ...failures({
+      400: "The body is not JSON, or `visibility` is not public or private.",
+      401: UNAUTHORISED,
+      404: NOT_FOUND,
+      413: "The body is too large to be this request.",
+    }),
+  },
+};
+
+function rotateShareCodeOperation(codeFormat: string): Record<string, unknown> {
+  return {
+    operationId: "rotateShareCode",
+    summary: "Mint a share code",
+    description:
+      `${SHARING_NOTE} Returns the plaintext code once; nothing reads it ` +
+      `back afterwards (${codeFormat}). Calling this again replaces the ` +
+      "code and immediately invalidates every unlock cookie issued under " +
+      "the old one. The plan must be private: a public one is readable by " +
+      "anyone holding its URL, so a code would gate nothing and would only " +
+      "sit waiting to matter again.",
+    tags: ["Sharing"],
+    security: SESSION_AUTH,
+    responses: {
+      "201": json(ShareCodeCreated, "The new code, shown this once."),
+      ...failures({
+        401: UNAUTHORISED,
+        404: NOT_FOUND,
+        409: "The plan is public, so it needs no share code.",
+      }),
+    },
+  };
+}
+
+const CLEAR_SHARE_CODE_OPERATION = {
+  operationId: "clearShareCode",
+  summary: "Remove a plan's share code",
+  description: `${SHARING_NOTE} Existing unlock cookies stop working.`,
+  tags: ["Sharing"],
+  security: SESSION_AUTH,
+  responses: {
+    "204": { description: "The plan has no share code. No body." },
+    ...failures({ 401: UNAUTHORISED, 404: NOT_FOUND }),
+  },
+};
+
+const GRANT_PLAN_OPERATION = {
+  operationId: "grantPlan",
+  summary: "Share a plan with one or more accounts",
+  description:
+    `${SHARING_NOTE} \`accounts\` takes a comma-separated string or an ` +
+    "array, so a whole team is one request; at most " +
+    `${MAX_GRANTS_PER_REQUEST} accounts. Each entry is a handle or an ` +
+    "account id - an exact id wins, and the handle is only consulted when " +
+    "no account carries that id. Naming the same account twice succeeds: " +
+    "the state asked for already holds. An entry no account answers to is " +
+    "reported in `unknown` rather than refusing the rest of the list.",
+  tags: ["Sharing"],
+  security: SESSION_AUTH,
+  requestBody: {
+    required: true,
+    content: { "application/json": { schema: ref(GrantRequest) } },
+  },
+  responses: {
+    "200": json(GrantResult, "Which of the named accounts now have access."),
+    ...failures({
+      400: "The body is not JSON, or `accounts` is missing, empty, or too long.",
+      401: UNAUTHORISED,
+      404: NOT_FOUND,
+      413: "The body is too large to be this request.",
+    }),
+  },
+};
+
+const REVOKE_GRANT_OPERATION = {
+  operationId: "revokePlanGrant",
+  summary: "Stop sharing a plan with an account",
+  description: SHARING_NOTE,
+  tags: ["Sharing"],
+  security: SESSION_AUTH,
+  responses: {
+    "204": { description: "The grant is gone. No body." },
+    ...failures({
+      401: UNAUTHORISED,
+      404: `${NOT_FOUND} Also returned when that handle held no grant.`,
+    }),
+  },
+};
+
+/**
+ * Bits in the shortest code this deployment will still redeem.
+ *
+ * Derived from `MIN_SHARE_CODE_LENGTH`, not from `SHARE_CODE_LENGTH`: what the
+ * document should publish is the weakest code that can still be presented, and
+ * lowering the mint length does not retire codes issued under the old one. The
+ * alphabet's length comes from src/ids.ts, which owns it, so neither raising
+ * the floor nor changing the alphabet can leave a stale number here.
+ */
+const MIN_CODE_BITS = Math.round(
+  MIN_SHARE_CODE_LENGTH * Math.log2(SHARE_CODE_ALPHABET_LENGTH),
+);
+
+function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
+  return {
+    operationId: "unlockPlan",
+    summary: "Redeem a share code",
+    description:
+      "Unauthenticated: this is what the gate page calls. A correct code " +
+      "sets a path-scoped, HttpOnly cookie for this one plan, after which " +
+      "`/p/{id}` serves it with no parameter and no session. " +
+      `${codeFormat} Throttled per client address, set by UNLOCK_RATE_MAX ` +
+      "and UNLOCK_RATE_WINDOW_SEC. That bounds what an anonymous caller can " +
+      "spend, not what it can guess: the shortest redeemable code carries " +
+      `about ${MIN_CODE_BITS} bits, which no reachable rate would improve ` +
+      "on. The bucket is the address rather than the plan, because the plan " +
+      "id is in the share link and a per-plan bucket would let anyone " +
+      "holding it lock the other readers out.",
+    tags: ["Sharing"],
+    security: [],
+    requestBody: {
+      required: true,
+      content: { "application/json": { schema: ref(UnlockRequest) } },
+    },
+    responses: {
+      "204": {
+        description: "The code matched. No body.",
+        headers: {
+          "set-cookie": {
+            description: "The unlock cookie, scoped to `/p/{id}`.",
+            schema: { type: "string" },
+          },
+        },
+      },
+      ...failures({
+        400:
+          "The body is not JSON, or `code` is missing, not a string, or " +
+          "empty. One status for all three: the gate page is the only caller " +
+          "and they mean the same thing to it.",
+        401: "The code did not match.",
+        404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
+        413: "The body is larger than a code could make it.",
+      }),
+      "429": {
+        ...json(
+          ErrorBody,
+          "Too many redemptions from this address. `retry-after` says for " +
+            "how long. The bucket is the client address, so one address " +
+            "cannot spend another address's allowance - but callers sharing " +
+            "an address, behind one office NAT or mobile gateway, share the " +
+            "allowance too.",
+        ),
+        headers: {
+          "retry-after": {
+            description: "Seconds until the allowance refills.",
+            schema: { type: "integer", minimum: 0 },
+          },
+        },
+      },
+    },
+  };
+}
+
+const CODE_QUERY_PARAM = {
+  name: "code",
+  in: "query",
+  required: false,
+  description:
+    "A share code. Needed once: the response also sets a path-scoped cookie, " +
+    "so a reader that keeps cookies never sends it again. Being a query " +
+    "parameter it does travel in the URL, where it can reach browser " +
+    "history, a `Referer` header, and any proxy that logs query strings - " +
+    "regenerate the code to invalidate a link that has leaked. This app logs " +
+    "no URLs. `POST /api/plans/{id}/unlock` redeems a code in a body instead.",
+  schema: inlineSchema(ShareCodeQuery),
+};
+
 const DOCUMENT_PATH: PathItem = {
-  parameters: [PLAN_ID_PARAM],
+  parameters: [PLAN_ID_PARAM, CODE_QUERY_PARAM],
   get: {
     operationId: "readPlan",
     summary: "Read a published plan",
     description:
-      "Public and unauthenticated. Served under a `sandbox` " +
-      "Content-Security-Policy, which puts the document in an opaque origin " +
-      "so it cannot reach the uploader's session.",
+      "A public plan needs no credential. A private one needs any one of: " +
+      "its share code as `?code=`, the unlock cookie a previous `?code=` or " +
+      "redemption set, an API key whose owner may read it, or a session for " +
+      "the owner or a granted account. Anything else gets 401 and an HTML " +
+      "gate page.\n\n" +
+      "Served under a `sandbox` Content-Security-Policy, which puts the " +
+      "document in an opaque origin so it cannot reach the uploader's " +
+      "session.",
     tags: ["Documents"],
-    security: [],
+    security: OPTIONAL_AUTH,
     responses: {
       "200": {
         description: "The stored document.",
@@ -272,7 +556,24 @@ const DOCUMENT_PATH: PathItem = {
         headers: {
           etag: { schema: { type: "string" } },
           "cache-control": {
-            description: "Five minutes, revalidated.",
+            description:
+              "`public, no-cache` for a public plan, which a cache may store " +
+              "but must revalidate on every read; `private, no-store` for a " +
+              "private one.",
+            schema: { type: "string" },
+          },
+          vary: {
+            description:
+              "`cookie, x-api-key` on a private plan, whose response turns " +
+              "on which credential opened the gate. Absent on a public one, " +
+              "which is the same for everyone. Declared here rather than " +
+              "only described, so a generated client sees it.",
+            schema: { type: "string" },
+          },
+          "set-cookie": {
+            description:
+              "Present when `?code=` was what granted access: the unlock " +
+              "cookie, so the parameter is not needed again.",
             schema: { type: "string" },
           },
           "content-security-policy": {
@@ -282,6 +583,14 @@ const DOCUMENT_PATH: PathItem = {
         },
       },
       "304": { description: "`if-none-match` matched the stored etag." },
+      "401": {
+        description:
+          "The plan is private and nothing presented authorises reading it. " +
+          "The body is the gate page, which offers a code box and a sign-in " +
+          "button. Not 200, because the sandbox policy is pinned to 200 and " +
+          "304 and would leave that page unable to do either.",
+        content: { "text/html": { schema: { type: "string" } } },
+      },
       "404": {
         description:
           "No such plan, or an id this deployment could never have issued. " +
@@ -327,8 +636,13 @@ const INFO = {
     "paths. Inline `<style>`, inline `<script>`, `data:` URIs, and ordinary",
     "links are fine.",
     "",
-    "An API key authorises upload, replacement, and delete, and nothing",
-    "else. Listing plans and editing a label are session-only.",
+    "Plans are private by default. A private plan is readable by its owner,",
+    "by accounts it has been granted to, and by anyone holding its share",
+    "code; a public one by anyone holding its URL.",
+    "",
+    "An API key authorises upload, replacement, delete, and reading any plan",
+    "its owner may read. Listing plans, editing a label, and every sharing",
+    "route are session-only - a key cannot change who may read a plan.",
     "",
     "Registration and sign-in live under `/api/auth/*`, which Better Auth",
     "owns and which is not described here.",
@@ -338,6 +652,7 @@ const INFO = {
 
 const TAGS = [
   { name: "Plans", description: "Managing your own plans." },
+  { name: "Sharing", description: "Who may read a plan." },
   { name: "Documents", description: "Reading a published plan." },
   { name: "Operations", description: "Self-hosting probes." },
 ];
@@ -348,8 +663,9 @@ const SECURITY_SCHEMES = {
     in: "header",
     name: "x-api-key",
     description:
-      "A key minted from the dashboard. Authorises upload, replacement, and " +
-      "delete for its owner's plans, and nothing else.",
+      "A key minted from the dashboard. Acts for its owner on upload, " +
+      "replacement, delete, and reading any plan that owner may read. It " +
+      "cannot list plans, edit a label, or change who a plan is shared with.",
   },
   [SESSION_SCHEME]: {
     type: "apiKey",
@@ -362,14 +678,15 @@ const SECURITY_SCHEMES = {
 };
 
 /**
- * The document. Takes the two settings it actually reports, so a self-hosted
- * deployment publishes its own origin and its own upload cap rather than this
- * repository's defaults.
+ * The document. Takes the three settings it actually reports, so a
+ * self-hosted deployment publishes its own origin, its own upload cap, and
+ * its own share-code length rather than this repository's defaults.
  */
 export function openApiDocument(
-  config: Pick<Config, "publicBaseUrl" | "maxUploadBytes">,
+  config: Pick<Config, "publicBaseUrl" | "maxUploadBytes" | "shareCodeLength">,
 ): OpenApiDocument {
   const tooLarge = `The document exceeds MAX_UPLOAD_BYTES (${config.maxUploadBytes} on this deployment). Measured while reading, not taken from \`content-length\`.`;
+  const codeFormat = shareCodeFormat(config.shareCodeLength);
 
   return {
     openapi: "3.1.0",
@@ -379,7 +696,7 @@ export function openApiDocument(
     tags: TAGS,
     paths: {
       "/api/plans": {
-        put: createPlanOperation(tooLarge),
+        put: createPlanOperation(tooLarge, codeFormat),
         get: LIST_PLANS_OPERATION,
       },
       "/api/plans/{id}": {
@@ -388,11 +705,33 @@ export function openApiDocument(
         patch: RELABEL_PLAN_OPERATION,
         delete: DELETE_PLAN_OPERATION,
       },
+      "/api/plans/{id}/sharing": {
+        parameters: [PLAN_ID_PARAM],
+        get: GET_SHARING_OPERATION,
+        put: SET_SHARING_OPERATION,
+      },
+      "/api/plans/{id}/share-code": {
+        parameters: [PLAN_ID_PARAM],
+        post: rotateShareCodeOperation(codeFormat),
+        delete: CLEAR_SHARE_CODE_OPERATION,
+      },
+      "/api/plans/{id}/grants": {
+        parameters: [PLAN_ID_PARAM],
+        post: GRANT_PLAN_OPERATION,
+      },
+      "/api/plans/{id}/grants/{handle}": {
+        parameters: [PLAN_ID_PARAM, HANDLE_PATH_PARAM],
+        delete: REVOKE_GRANT_OPERATION,
+      },
+      "/api/plans/{id}/unlock": {
+        parameters: [PLAN_ID_PARAM],
+        post: unlockPlanOperation(codeFormat),
+      },
       "/p/{id}": DOCUMENT_PATH,
       "/healthz": HEALTH_PATH,
     },
     components: {
-      schemas: componentSchemas(),
+      schemas: componentSchemas(config.shareCodeLength),
       securitySchemes: SECURITY_SCHEMES,
     },
   };

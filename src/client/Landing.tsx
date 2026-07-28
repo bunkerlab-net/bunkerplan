@@ -62,9 +62,10 @@ function HowItWorks({
           dashboard, or <code>PUT</code> it from a script with an API key.
         </li>
         <li>
-          <span className="step-lead">Paste the link.</span> You get back a
-          short <code>/p/</code> URL. Anyone holding it can read the page; it is
-          listed nowhere else.
+          <span className="step-lead">Share the link.</span> You get back a
+          short <code>/p/</code> URL. It is private until you say otherwise -
+          open it to anyone holding the link, hand out a share code, or name the
+          accounts that may read it.
         </li>
         <li>
           <span className="step-lead">Revised it? Upload again.</span> Replacing
@@ -110,9 +111,20 @@ function HowItWorks({
 
 function CurlSnippet({ origin }: { origin: string }) {
   return (
-    <code className="snippet">
-      {`curl -X PUT ${origin}/api/plans \\\n  -H "x-api-key: $KEY" \\\n  -H "content-type: text/html" \\\n  --data-binary @report.html`}
-    </code>
+    // A section, not a bare `code`: the block scrolls sideways, so it has to
+    // be focusable (WCAG 2.1.1), and a focus stop with no name is worse than
+    // none. The `code` stays inside it, so the markup still says "this is
+    // code" rather than leaning on the styling to imply it.
+    <section
+      className="snippet"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+      tabIndex={0}
+      aria-label="Example upload command"
+    >
+      <code>
+        {`curl -X PUT ${origin}/api/plans \\\n  -H "x-api-key: $KEY" \\\n  -H "content-type: text/html" \\\n  --data-binary @report.html`}
+      </code>
+    </section>
   );
 }
 

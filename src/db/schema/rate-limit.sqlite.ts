@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { user } from "./auth.sqlite.ts";
 
 /**
@@ -24,3 +24,29 @@ export const uploadRateLimit = sqliteTable("upload_rate_limit", {
   count: integer("count").notNull(),
   windowStart: integer("window_start").notNull(),
 });
+
+/**
+ * Share-code redemption counters, one row per client address, fixed window.
+ *
+ * Same shape as `upload_rate_limit` and read by the same repository, but with
+ * no cascade: the key is a digest of an address, not a user id, so there is no
+ * row for a foreign key to hang from. The unlock repo sweeps closed windows on
+ * a fraction of attempts instead, which is what keeps an unauthenticated caller
+ * from planting rows here for good.
+ */
+export const unlockRateLimit = sqliteTable(
+  "unlock_rate_limit",
+  {
+    /**
+     * A keyed digest of the client address, not the address - see
+     * `unlockBucketKey` in src/http/share-auth.ts. Deterministic, so one
+     * address keeps one bucket.
+     */
+    key: text("key").primaryKey(),
+    count: integer("count").notNull(),
+    windowStart: integer("window_start").notNull(),
+  },
+  // The sweep in src/db/rate-limits.sqlite.ts deletes by window, so without this
+  // pruning would scan the whole table on every redemption.
+  (table) => [index("unlock_rate_limit_windowStart_idx").on(table.windowStart)],
+);

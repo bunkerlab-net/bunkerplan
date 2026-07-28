@@ -4,11 +4,13 @@ import { DOCS_PAGE, SCALAR_SCRIPT_PATH } from "../../src/api/docs-page.ts";
 import { ErrorBody, PlanCreated, PlanReplaced } from "../../src/api/schemas.ts";
 import { PLAN_CSP } from "../../src/http/security-headers.ts";
 import {
+  type FetchInit,
   type FetchResponse,
   type Harness,
   html,
   MAX_PLANS_PER_USER,
   PUBLIC_BASE_URL,
+  SHARE_CODE_LENGTH,
   startWorker,
   UPLOAD_RATE_MAX,
   upload,
@@ -38,6 +40,11 @@ interface Created {
   id: string;
   url: string;
   label: string | null;
+  /** Present only for `?visibility=code`; the plaintext, shown once. */
+  code?: string;
+  /** Both present only for `?grants=`. */
+  granted?: string[];
+  unknown?: string[];
 }
 
 /** `Response.json()` erases the body; assertions need something to compare. */
@@ -47,14 +54,28 @@ async function jsonBody(
   return (await response.json()) as Record<string, unknown>;
 }
 
+/**
+ * Plans are private unless asked otherwise, so most tests here that only need
+ * a servable document ask for `public` - the gate itself is exercised by its
+ * own describe block below.
+ */
 async function createPlan(
   key: string,
   body: string,
-  label?: string,
+  over: {
+    label?: string;
+    visibility?: "public" | "private" | "code";
+    grants?: string;
+  } = {},
 ): Promise<Created> {
-  const query =
-    label === undefined ? "" : `?label=${encodeURIComponent(label)}`;
-  const response = await app.fetch(`/api/plans${query}`, upload(key, body));
+  const query = new URLSearchParams();
+  if (over.label !== undefined) query.set("label", over.label);
+  if (over.grants !== undefined) query.set("grants", over.grants);
+  query.set("visibility", over.visibility ?? "public");
+  const response = await app.fetch(
+    `/api/plans?${query.toString()}`,
+    upload(key, body),
+  );
   expect(response.status).toBe(201);
   return (await response.json()) as Created;
 }
@@ -88,7 +109,7 @@ describe("plan lifecycle over HTTP", () => {
   test("uploads a plan and serves it sandboxed at its public URL", async () => {
     const key = await app.account();
     const body = html("published");
-    const created = await createPlan(key, body, "Q3 rollout");
+    const created = await createPlan(key, body, { label: "Q3 rollout" });
 
     expect(created.url).toBe(`${PUBLIC_BASE_URL}/p/${created.id}`);
     expect(created.label).toBe("Q3 rollout");
@@ -127,7 +148,7 @@ describe("plan lifecycle over HTTP", () => {
 
   test("replaces the document behind an id, keeping the URL and the label", async () => {
     const key = await app.account();
-    const created = await createPlan(key, html("before"), "keep me");
+    const created = await createPlan(key, html("before"), { label: "keep me" });
 
     const revised = html("after, and rather longer than before");
     const response = await app.fetch(
@@ -451,5 +472,854 @@ describe("the reference UI", () => {
 
     expect(await built.exists()).toBe(true);
     expect(await built.text()).toContain("window.Scalar={");
+  });
+});
+
+/**
+ * The `bkp_share_*` cookie from a response, as a browser would send it back.
+ *
+ * `getSetCookie()` rather than `get("set-cookie")`: several cookies can share
+ * one response, and `get` folds them into a single comma-joined string that
+ * splitting on `;` would mangle.
+ */
+function shareCookie(response: FetchResponse): string {
+  const values = response.headers.getSetCookie();
+  const share = values.find((value) => value.startsWith("bkp_share_"));
+  expect(share).toBeDefined();
+  return (share ?? "").split(";")[0] ?? "";
+}
+
+describe("gated sharing", () => {
+  /**
+   * Everything below leans on this cookie, so it is proved first. Inserting a
+   * `session` row and sending the raw token does not work: Better Auth reads
+   * the cookie signed, so an unsigned value is silently unauthenticated and
+   * every session-only assertion would pass for the wrong reason.
+   */
+  test("the harness mints a session the Worker actually accepts", async () => {
+    const { cookie } = await app.accountWithSession();
+
+    const signedIn = await app.fetch("/api/plans", { headers: { cookie } });
+    expect(signedIn.status).toBe(200);
+
+    expect((await app.fetch("/api/plans")).status).toBe(401);
+  });
+
+  /**
+   * A grant is displayed as `user.name` but resolved through the synthetic
+   * `@passkey.invalid` address derived from that name at registration. If a
+   * grantee could rename itself, the owner would be shown a handle whose
+   * revoke computes an address belonging to nobody - the grant would still be
+   * live and no longer removable through the API or the dashboard.
+   *
+   * Better Auth ships `/update-user`, so this is a route that has to stay
+   * switched off rather than one that was never there.
+   */
+  test("a session cannot rename its account out of a grant", async () => {
+    const owner = await app.accountWithSession();
+    const guest = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("immutable"), {
+      visibility: "private",
+    });
+    const session = { cookie: owner.cookie };
+
+    const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { ...session, "content-type": "application/json" },
+      body: JSON.stringify({ accounts: guest.handle }),
+    });
+    expect(granted.status).toBe(200);
+
+    const renamed = await app.fetch("/api/auth/update-user", {
+      method: "POST",
+      headers: { cookie: guest.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "sneakyrename" }),
+    });
+    expect(renamed.status).toBe(404);
+
+    // The owner still sees the handle they granted, and revoking it works.
+    const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: session,
+    });
+    expect((await jsonBody(sharing))["grants"]).toEqual([guest.handle]);
+
+    const revoked = await app.fetch(
+      `/api/plans/${created.id}/grants/${guest.handle}`,
+      { method: "DELETE", headers: session },
+    );
+    expect(revoked.status).toBe(204);
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { cookie: guest.cookie },
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  test("a plan is private unless the upload asked otherwise", async () => {
+    const key = await app.account();
+    const created = await createPlan(key, html("secret"), {
+      visibility: "private",
+    });
+
+    const gated = await app.fetch(`/p/${created.id}`);
+    expect(gated.status).toBe(401);
+    expect(gated.headers.get("content-type")).toStartWith("text/html");
+
+    // No `?visibility=` at all is the same thing, and is what a client that
+    // predates this feature sends.
+    const response = await app.fetch("/api/plans", upload(key, html("bare")));
+    expect(response.status).toBe(201);
+    const bare = (await response.json()) as Created;
+    expect((await app.fetch(`/p/${bare.id}`)).status).toBe(401);
+  });
+
+  test("a public plan is served to anyone, revalidated on every read", async () => {
+    const key = await app.account();
+    const created = await createPlan(key, html("open"), {
+      visibility: "public",
+    });
+
+    const served = await app.fetch(`/p/${created.id}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("cache-control")).toBe("public, no-cache");
+  });
+
+  test("an unusable visibility is refused before a row is written", async () => {
+    const key = await app.account();
+    const countPlans = async () =>
+      (
+        await app.db
+          .prepare("select count(*) as total from plan")
+          .first<{ total: number }>()
+      )?.total ?? -1;
+
+    const before = await countPlans();
+    const response = await app.fetch(
+      "/api/plans?visibility=nonsense",
+      upload(key, html("rejected")),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await jsonBody(response)).toEqual({
+      error: "visibility must be public, private, or code",
+    });
+    // Nothing was claimed: the parse happens before the body is even read, so
+    // a refusal cannot leave a row behind with no object.
+    expect(await countPlans()).toBe(before);
+  });
+
+  test("no response carrying a plaintext code may be cached", async () => {
+    const { key, cookie } = await app.accountWithSession();
+
+    // The upload that mints one.
+    const upload201 = await app.fetch(
+      "/api/plans?visibility=code",
+      upload(key, html("uncacheable")),
+    );
+    expect(upload201.status).toBe(201);
+    expect(upload201.headers.get("cache-control")).toBe("no-store");
+    const created = (await upload201.json()) as Created;
+
+    // And the rotate that mints another.
+    const rotated = await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(rotated.status).toBe(201);
+    expect(rotated.headers.get("cache-control")).toBe("no-store");
+
+    // The sharing state names every account a plan is shared with.
+    const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: { cookie },
+    });
+    // Status first, like the two above: a 404 also carries `no-store`, so the
+    // header alone would pass on a request that never reached the handler.
+    expect(sharing.status).toBe(200);
+    expect(sharing.headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("?visibility=code returns the plaintext once and stores it private", async () => {
+    const { key, cookie } = await app.accountWithSession();
+    const created = await createPlan(key, html("coded"), {
+      visibility: "code",
+    });
+
+    expect(created.code).toMatch(
+      new RegExp(`^[0-9A-Za-z]{${SHARE_CODE_LENGTH}}$`),
+    );
+
+    const listed = await app.fetch("/api/plans", { headers: { cookie } });
+    const body = await listed.text();
+    const plans = (JSON.parse(body) as { plans: Record<string, unknown>[] })
+      .plans;
+    expect(plans[0]).toMatchObject({
+      id: created.id,
+      visibility: "private",
+      hasShareCode: true,
+    });
+    // The one place the plaintext ever appears is the 201 above.
+    expect(body).not.toContain(created.code ?? "never");
+  });
+
+  test("?code= serves the plan and hands back a cookie for next time", async () => {
+    const key = await app.account();
+    const document = html("code shared");
+    const created = await createPlan(key, document, { visibility: "code" });
+
+    const served = await app.fetch(`/p/${created.id}?code=${created.code}`);
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe(document);
+    expect(served.headers.get("cache-control")).toBe("private, no-store");
+    expect(served.headers.get("vary")).toBe("cookie, x-api-key");
+    // Still sandboxed: the gate does not loosen the policy on the way past.
+    expect(served.headers.get("content-security-policy")).toBe(PLAN_CSP);
+    // This cookie is a bearer credential for the plan, so its attributes are
+    // the control, not decoration: path-scoped so a browser never sends it to
+    // another plan, HttpOnly so a script on the page cannot read it, and
+    // SameSite so a cross-site request cannot ride it. `Secure` is not
+    // asserted here on purpose - this harness serves over http, where
+    // `mintShareCookie` omits it; tests/share-auth.test.ts covers both sides
+    // of that.
+    const cookie = served.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain(`Path=/p/${created.id}`);
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Lax");
+
+    // The parameter is needed once.
+    const returning = await app.fetch(`/p/${created.id}`, {
+      headers: { cookie: shareCookie(served) },
+    });
+    expect(returning.status).toBe(200);
+    expect(await returning.text()).toBe(document);
+  });
+
+  test("a wrong code, and another plan's code, both stay out", async () => {
+    const key = await app.account();
+    const mine = await createPlan(key, html("mine"), { visibility: "code" });
+    const theirs = await createPlan(key, html("theirs"), {
+      visibility: "code",
+    });
+
+    expect((await app.fetch(`/p/${mine.id}?code=wrong`)).status).toBe(401);
+    // A code is scoped to the plan it was minted for, not to the account.
+    expect((await app.fetch(`/p/${mine.id}?code=${theirs.code}`)).status).toBe(
+      401,
+    );
+  });
+
+  test("a public plan ignores the parameter entirely", async () => {
+    const key = await app.account();
+    const created = await createPlan(key, html("open"), {
+      visibility: "public",
+    });
+
+    const served = await app.fetch(`/p/${created.id}?code=anything`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("cache-control")).toBe("public, no-cache");
+  });
+
+  test("either of the owner's credentials opens the gate; a stranger's does not", async () => {
+    const owner = await app.accountWithSession();
+    const stranger = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("owned"), {
+      visibility: "private",
+    });
+
+    const byKey = await app.fetch(`/p/${created.id}`, {
+      headers: { "x-api-key": owner.key },
+    });
+    expect(byKey.status).toBe(200);
+    expect(byKey.headers.get("cache-control")).toBe("private, no-store");
+
+    const bySession = await app.fetch(`/p/${created.id}`, {
+      headers: { cookie: owner.cookie },
+    });
+    expect(bySession.status).toBe(200);
+
+    expect((await app.fetch(`/p/${created.id}`)).status).toBe(401);
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { "x-api-key": stranger.key },
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { cookie: stranger.cookie },
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  test("a grant authorises the account, whichever credential it presents", async () => {
+    const owner = await app.accountWithSession();
+    const guest = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("granted"), {
+      visibility: "private",
+    });
+
+    const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { cookie: owner.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ accounts: guest.handle }),
+    });
+    expect(granted.status).toBe(200);
+
+    // The gate authorises the user behind a credential, not a credential type.
+    for (const headers of [
+      { "x-api-key": guest.key },
+      { cookie: guest.cookie },
+    ]) {
+      expect((await app.fetch(`/p/${created.id}`, { headers })).status).toBe(
+        200,
+      );
+    }
+
+    const revoked = await app.fetch(
+      `/api/plans/${created.id}/grants/${guest.handle}`,
+      { method: "DELETE", headers: { cookie: owner.cookie } },
+    );
+    expect(revoked.status).toBe(204);
+
+    for (const headers of [
+      { "x-api-key": guest.key },
+      { cookie: guest.cookie },
+    ]) {
+      expect((await app.fetch(`/p/${created.id}`, { headers })).status).toBe(
+        401,
+      );
+    }
+  });
+
+  test("granting an unknown handle says so, distinctly from an unknown plan", async () => {
+    const owner = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("granting"), {
+      visibility: "private",
+    });
+
+    const unknown = await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { cookie: owner.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ accounts: "nobodyatall" }),
+    });
+    // Reported rather than fatal: naming five colleagues and mistyping one
+    // must still share the plan with the four.
+    expect(unknown.status).toBe(200);
+    expect(await jsonBody(unknown)).toEqual({
+      granted: [],
+      unknown: ["nobodyatall"],
+      failed: [],
+    });
+  });
+
+  test("one request shares a plan with a whole list", async () => {
+    const owner = await app.accountWithSession();
+    const first = await app.accountWithSession();
+    const second = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("team"), {
+      visibility: "private",
+    });
+
+    const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { cookie: owner.cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        accounts: ` ${first.handle}, ${second.handle} ,nobodyatall,`,
+      }),
+    });
+    expect(granted.status).toBe(200);
+    expect(await jsonBody(granted)).toEqual({
+      granted: [first.handle, second.handle],
+      unknown: ["nobodyatall"],
+      failed: [],
+    });
+
+    // Both can actually read it, which is the point of the request.
+    for (const account of [first, second]) {
+      const served = await app.fetch(`/p/${created.id}`, {
+        headers: { cookie: account.cookie },
+      });
+      expect(served.status).toBe(200);
+    }
+
+    const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: { cookie: owner.cookie },
+    });
+    // Sorted on both sides: an exact set, so a duplicate or an extra grant
+    // fails rather than slipping past a containment check.
+    const grants = (await jsonBody(sharing))["grants"] as string[];
+    expect([...grants].sort()).toEqual([first.handle, second.handle].sort());
+  });
+
+  test("a list may name accounts by id as readily as by handle", async () => {
+    // The dashboard shows a handle, but `/api/auth/get-session` hands the
+    // signed-in account its id, so a script is likelier to hold that.
+    const owner = await app.accountWithSession();
+    const byId = await app.accountWithSession();
+    const byHandle = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("mixed"), {
+      visibility: "private",
+    });
+
+    const granted = await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { cookie: owner.cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        accounts: `${byId.userId}, ${byHandle.handle}`,
+      }),
+    });
+    expect(granted.status).toBe(200);
+    // Echoed back as given, so a caller can match the answer to what it sent.
+    expect(await jsonBody(granted)).toEqual({
+      granted: [byId.userId, byHandle.handle],
+      unknown: [],
+      failed: [],
+    });
+
+    for (const account of [byId, byHandle]) {
+      const served = await app.fetch(`/p/${created.id}`, {
+        headers: { cookie: account.cookie },
+      });
+      expect(served.status).toBe(200);
+    }
+
+    // The sharing list answers in handles either way: that is the identifier
+    // a person can read off their own dashboard.
+    const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: { cookie: owner.cookie },
+    });
+    // An exact set: the account named by id must resolve to exactly one
+    // row, so a duplicate here would mean the two lookups matched separately.
+    const listed = (await jsonBody(sharing))["grants"] as string[];
+    expect([...listed].sort()).toEqual([byId.handle, byHandle.handle].sort());
+  });
+
+  test("?grants= takes account ids too", async () => {
+    const owner = await app.accountWithSession();
+    const guest = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("id-at-upload"), {
+      visibility: "private",
+      grants: guest.userId,
+    });
+
+    expect(created.granted).toEqual([guest.userId]);
+    const served = await app.fetch(`/p/${created.id}`, {
+      headers: { cookie: guest.cookie },
+    });
+    expect(served.status).toBe(200);
+  });
+
+  test("?grants= shares the plan in the request that stores it", async () => {
+    // So a private plan never has to exist unshared, even briefly.
+    const owner = await app.accountWithSession();
+    const guest = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("born-shared"), {
+      visibility: "private",
+      grants: `${guest.handle},nobodyatall`,
+    });
+
+    expect(created.granted).toEqual([guest.handle]);
+    expect(created.unknown).toEqual(["nobodyatall"]);
+
+    const served = await app.fetch(`/p/${created.id}`, {
+      headers: { cookie: guest.cookie },
+    });
+    expect(served.status).toBe(200);
+
+    // Still private: naming accounts is not the same as publishing.
+    const gated = await app.fetch(`/p/${created.id}`);
+    expect(gated.status).toBe(401);
+  });
+
+  test("an upload naming nobody carries no grant fields at all", async () => {
+    const owner = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("solo"), {
+      visibility: "private",
+    });
+    expect(created.granted).toBeUndefined();
+    expect(created.unknown).toBeUndefined();
+  });
+
+  test("an unusable ?grants= is refused before a row is written", async () => {
+    const owner = await app.accountWithSession();
+    const countPlans = async () =>
+      (
+        await app.db
+          .prepare("select count(*) as total from plan")
+          .first<{ total: number }>()
+      )?.total ?? -1;
+
+    const before = await countPlans();
+    // Present but empty: `?grants=` with nothing usable after it is a typo,
+    // not a request to share with nobody.
+    const response = await app.fetch(
+      "/api/plans?visibility=private&grants=%20%2C%20",
+      upload(owner.key, html("rejected")),
+    );
+    expect(response.status).toBe(400);
+    expect(await countPlans()).toBe(before);
+  });
+
+  test("a key is not a skeleton key for sharing management", async () => {
+    const owner = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("managed"), {
+      visibility: "private",
+    });
+
+    // It reads the plan, but it cannot see or change who else may.
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { "x-api-key": owner.key },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await app.fetch(`/api/plans/${created.id}/sharing`, {
+          headers: { "x-api-key": owner.key },
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  test("the owner mints, redeems, rotates, and clears a code", async () => {
+    const owner = await app.accountWithSession();
+    const document = html("rotating");
+    const created = await createPlan(owner.key, document, {
+      visibility: "private",
+    });
+    const session = { cookie: owner.cookie };
+
+    const minted = await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "POST",
+      headers: session,
+    });
+    expect(minted.status).toBe(201);
+    const first = ((await minted.json()) as { code: string }).code;
+    expect(first).toMatch(new RegExp(`^[0-9A-Za-z]{${SHARE_CODE_LENGTH}}$`));
+
+    const unlocked = await app.fetch(`/api/plans/${created.id}/unlock`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // One address for this test's reader: the unlock ceiling is per address
+        // and its window outlives the run, so the default bucket is shared.
+        "cf-connecting-ip": "198.18.5.5",
+      },
+      body: JSON.stringify({ code: first }),
+    });
+    expect(unlocked.status).toBe(204);
+    const firstCookie = shareCookie(unlocked);
+
+    const served = await app.fetch(`/p/${created.id}`, {
+      headers: { cookie: firstCookie },
+    });
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe(document);
+
+    const wrong = await app.fetch(`/api/plans/${created.id}/unlock`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // One address for this test's reader: the unlock ceiling is per address
+        // and its window outlives the run, so the default bucket is shared.
+        "cf-connecting-ip": "198.18.5.5",
+      },
+      body: JSON.stringify({ code: "definitely-not-it" }),
+    });
+    expect(wrong.status).toBe(401);
+    expect(wrong.headers.get("set-cookie")).toBeNull();
+
+    // Rotating binds a new digest, and the cookie carries the old one - so
+    // every outstanding cookie dies with no column to sweep.
+    const rotated = await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "POST",
+      headers: session,
+    });
+    expect(rotated.status).toBe(201);
+    const second = ((await rotated.json()) as { code: string }).code;
+    expect(second).not.toBe(first);
+
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { cookie: firstCookie },
+        })
+      ).status,
+    ).toBe(401);
+    expect((await app.fetch(`/p/${created.id}?code=${first}`)).status).toBe(
+      401,
+    );
+    expect((await app.fetch(`/p/${created.id}?code=${second}`)).status).toBe(
+      200,
+    );
+
+    // Redeem the rotated code, so there is a live cookie to invalidate.
+    const reUnlocked = await app.fetch(`/api/plans/${created.id}/unlock`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // One address for this test's reader: the unlock ceiling is per address
+        // and its window outlives the run, so the default bucket is shared.
+        "cf-connecting-ip": "198.18.5.5",
+      },
+      body: JSON.stringify({ code: second }),
+    });
+    expect(reUnlocked.status).toBe(204);
+    const secondCookie = shareCookie(reUnlocked);
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { cookie: secondCookie },
+        })
+      ).status,
+    ).toBe(200);
+
+    const cleared = await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "DELETE",
+      headers: session,
+    });
+    expect(cleared.status).toBe(204);
+
+    // Clearing has to reach the readers already holding a cookie, not just
+    // stop new redemptions - the cookie carries the digest, so removing the
+    // column is what retires it.
+    expect(
+      (
+        await app.fetch(`/p/${created.id}`, {
+          headers: { cookie: secondCookie },
+        })
+      ).status,
+    ).toBe(401);
+
+    // With no code at all the endpoint cannot say a plan is code-shared.
+    const afterClear = await app.fetch(`/api/plans/${created.id}/unlock`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // One address for this test's reader: the unlock ceiling is per address
+        // and its window outlives the run, so the default bucket is shared.
+        "cf-connecting-ip": "198.18.5.5",
+      },
+      body: JSON.stringify({ code: second }),
+    });
+    expect(afterClear.status).toBe(404);
+  });
+
+  test("the sharing state reports visibility, the code flag, and grants", async () => {
+    const owner = await app.accountWithSession();
+    const guest = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("state"), {
+      visibility: "private",
+    });
+    const session = { cookie: owner.cookie };
+
+    const initial = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      headers: session,
+    });
+    expect(initial.status).toBe(200);
+    expect(await jsonBody(initial)).toEqual({
+      visibility: "private",
+      hasShareCode: false,
+      grants: [],
+    });
+
+    await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "POST",
+      headers: session,
+    });
+    await app.fetch(`/api/plans/${created.id}/grants`, {
+      method: "POST",
+      headers: { ...session, "content-type": "application/json" },
+      body: JSON.stringify({ accounts: guest.handle }),
+    });
+
+    const flipped = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      method: "PUT",
+      headers: { ...session, "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "public" }),
+    });
+    expect(flipped.status).toBe(200);
+    // The code is retired by the flip, not merely made inert: a bearer secret
+    // must not reactivate if this goes private again. Grants are named accounts
+    // and survive.
+    expect(await jsonBody(flipped)).toEqual({
+      visibility: "public",
+      hasShareCode: false,
+      grants: [guest.handle],
+    });
+
+    // `code` is an upload intent, not a state this endpoint can be flipped to.
+    const refused = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      method: "PUT",
+      headers: { ...session, "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "code" }),
+    });
+    expect(refused.status).toBe(400);
+    expect(await jsonBody(refused)).toEqual({
+      error: "visibility must be public or private",
+    });
+  });
+
+  test("a public plan is refused a code, and gets one once private", async () => {
+    const { key, cookie } = await app.accountWithSession();
+    const session = { cookie };
+    const created = await createPlan(key, html("open"), {
+      visibility: "public",
+    });
+    const mint = () =>
+      app.fetch(`/api/plans/${created.id}/share-code`, {
+        method: "POST",
+        headers: session,
+      });
+
+    // A public plan is readable by anyone holding the URL, so a code would gate
+    // nothing now and would only start to matter if the plan went private.
+    const refused = await mint();
+    expect(refused.status).toBe(409);
+    expect(await jsonBody(refused)).toEqual({
+      error: "a public plan needs no share code",
+    });
+
+    const toPrivate = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      method: "PUT",
+      headers: { ...session, "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "private" }),
+    });
+    expect(toPrivate.status).toBe(200);
+    expect(await jsonBody(toPrivate)).toEqual({
+      visibility: "private",
+      hasShareCode: false,
+      grants: [],
+    });
+
+    const minted = await mint();
+    expect(minted.status).toBe(201);
+
+    // And back to public retires it, rather than leaving it to reactivate.
+    const toPublic = await app.fetch(`/api/plans/${created.id}/sharing`, {
+      method: "PUT",
+      headers: { ...session, "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "public" }),
+    });
+    expect(await jsonBody(toPublic)).toEqual({
+      visibility: "public",
+      hasShareCode: false,
+      grants: [],
+    });
+  });
+
+  test("a retired code and its cookie both stop opening the plan", async () => {
+    const { key, cookie } = await app.accountWithSession();
+    const session = { cookie };
+    const created = await createPlan(key, html("secret"), {
+      visibility: "private",
+    });
+    const minted = await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "POST",
+      headers: session,
+    });
+    const code = ((await minted.json()) as { code: string }).code;
+
+    // Its own address: the unlock ceiling is per address, and the window
+    // outlives this run.
+    const redeemed = await app.fetch(`/api/plans/${created.id}/unlock`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cf-connecting-ip": "198.18.9.9",
+      },
+      body: JSON.stringify({ code }),
+    });
+    expect(redeemed.status).toBe(204);
+    const shared = shareCookie(redeemed);
+
+    // Both really worked, so the assertions below are about the round trip and
+    // not about a credential that never opened anything.
+    expect((await app.fetch(`/p/${created.id}?code=${code}`)).status).toBe(200);
+    expect(
+      (await app.fetch(`/p/${created.id}`, { headers: { cookie: shared } }))
+        .status,
+    ).toBe(200);
+
+    const flip = (visibility: string) =>
+      app.fetch(`/api/plans/${created.id}/sharing`, {
+        method: "PUT",
+        headers: { ...session, "content-type": "application/json" },
+        body: JSON.stringify({ visibility }),
+      });
+    expect((await flip("public")).status).toBe(200);
+    expect((await flip("private")).status).toBe(200);
+
+    // The point of the whole change: going public retired the digest, so the
+    // code a stranger still holds no longer matches anything, and the cookie -
+    // signed over that digest - no longer verifies. Neither gets the document
+    // back now the plan is private again.
+    expect((await app.fetch(`/p/${created.id}?code=${code}`)).status).toBe(401);
+    expect(
+      (await app.fetch(`/p/${created.id}`, { headers: { cookie: shared } }))
+        .status,
+    ).toBe(401);
+  });
+
+  test("every sharing route refuses no session and a stranger's session", async () => {
+    const owner = await app.accountWithSession();
+    const stranger = await app.accountWithSession();
+    const created = await createPlan(owner.key, html("guarded"), {
+      visibility: "private",
+    });
+    const json = { "content-type": "application/json" };
+
+    // Headers typed as a plain record, not `HeadersInit`: the loop below
+    // spreads them to add a cookie, and spreading a `Headers` instance would
+    // silently yield `{}` and drop the content type.
+    type Route = {
+      path: string;
+      init: Omit<NonNullable<FetchInit>, "headers"> & {
+        headers?: Record<string, string>;
+      };
+    };
+    const routes: Route[] = [
+      { path: `/api/plans/${created.id}/sharing`, init: { method: "GET" } },
+      {
+        path: `/api/plans/${created.id}/sharing`,
+        init: {
+          method: "PUT",
+          headers: json,
+          body: '{"visibility":"public"}',
+        },
+      },
+      {
+        path: `/api/plans/${created.id}/share-code`,
+        init: { method: "POST" },
+      },
+      {
+        path: `/api/plans/${created.id}/share-code`,
+        init: { method: "DELETE" },
+      },
+      {
+        path: `/api/plans/${created.id}/grants`,
+        init: { method: "POST", headers: json, body: '{"accounts":"someone"}' },
+      },
+      {
+        path: `/api/plans/${created.id}/grants/${stranger.handle}`,
+        init: { method: "DELETE" },
+      },
+    ];
+
+    for (const { path, init } of routes) {
+      const anonymous = await app.fetch(path, init);
+      expect(anonymous.status).toBe(401);
+
+      const headers = { ...(init.headers ?? {}), cookie: stranger.cookie };
+      const outsider = await app.fetch(path, { ...init, headers });
+      // Not 403: never confirm that someone else's plan id exists.
+      expect(outsider.status).toBe(404);
+    }
   });
 });

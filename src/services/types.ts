@@ -56,12 +56,37 @@ export interface RateLimitRepo {
   ): Promise<RateLimitResult>;
 }
 
+export type PlanVisibility = "public" | "private";
+
+/**
+ * What the read gate needs, in one row.
+ *
+ * `shareCodeHash` is a digest, and it is here to be compared against a
+ * presented code - `resolvePlanAccess` and the cookie it mints are the only
+ * readers. It MUST NOT reach a response body or a log: it is the one value
+ * that would let a holder forge the unlock cookie for this plan.
+ */
+export interface PlanAccessRow {
+  ownerId: string;
+  visibility: PlanVisibility;
+  shareCodeHash: string | null;
+}
+
+/**
+ * Why `grantByHandle` reports three outcomes: the caller renders a different
+ * message for an unknown handle than for a plan it does not own.
+ */
+export type GrantOutcome = "granted" | "no-plan" | "no-user";
+
 export interface PlanRow {
   id: string;
   /** Owner-facing text, null until one is set. */
   label: string | null;
   size: number;
   createdAt: Date;
+  visibility: PlanVisibility;
+  /** Whether a share code is set. The hash itself never leaves the repo. */
+  hasShareCode: boolean;
 }
 
 /**
@@ -85,6 +110,8 @@ export interface PlanRepo {
       userId: string;
       label: string | null;
       size: number;
+      visibility: PlanVisibility;
+      shareCodeHash: string | null;
     },
     maxPlans: number,
   ): Promise<PlanInsert>;
@@ -110,6 +137,50 @@ export interface PlanRepo {
   resize(id: string, userId: string, size: number): Promise<boolean>;
   /** False means not found or not owned by `userId`. */
   deleteOwned(id: string, userId: string): Promise<boolean>;
+  /** One read for the gate. Null means no such plan. */
+  findAccess(id: string): Promise<PlanAccessRow | null>;
+  hasGrant(planId: string, userId: string): Promise<boolean>;
+  /**
+   * False means not found or not owned by `userId`.
+   *
+   * Neither visibility leaves a code on a public plan. `public` clears any
+   * hash outright; `private` clears one only when the row was public, which
+   * catches the pair `insert` still accepts and rows written before this rule.
+   * A plan that was already private keeps its code - that is the code-shared
+   * state itself, and `DELETE /share-code` is how it is dropped. Unlock
+   * cookies are bound to the digest, so they die with it. Grants are untouched.
+   */
+  setVisibility(
+    id: string,
+    userId: string,
+    visibility: PlanVisibility,
+  ): Promise<boolean>;
+  /**
+   * `hash` null clears the code. False means not found or not owned.
+   *
+   * Setting a hash additionally requires the plan to be private, which is what
+   * holds the invariant that a public plan never carries one. Clearing is
+   * always allowed, so a public row can still be tidied. False therefore also
+   * means "the plan is public"; the caller re-reads to tell them apart.
+   */
+  setShareCodeHash(
+    id: string,
+    userId: string,
+    hash: string | null,
+  ): Promise<boolean>;
+  /** Handles of every granted account. Null means not found or not owned. */
+  listGrantHandles(planId: string, ownerId: string): Promise<string[] | null>;
+  grantByHandle(
+    planId: string,
+    ownerId: string,
+    handle: string,
+  ): Promise<GrantOutcome>;
+  /** False means not found, not owned, or the handle held no grant. */
+  revokeByHandle(
+    planId: string,
+    ownerId: string,
+    handle: string,
+  ): Promise<boolean>;
 }
 
 /**
@@ -143,6 +214,11 @@ export interface Db {
   provider: "sqlite" | "pg";
   plans: PlanRepo;
   uploadRateLimits: RateLimitRepo;
+  /**
+   * Share-code redemptions, bucketed by client address. Its own table: the key
+   * is not a user id, so it cannot cascade and prunes itself instead.
+   */
+  unlockRateLimits: RateLimitRepo;
   accountClosing: AccountClosingRepo;
   probe(): Promise<void>;
 }

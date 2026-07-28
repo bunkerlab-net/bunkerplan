@@ -18,7 +18,8 @@ export function NotFound() {
             A plan may have been deleted by its owner, or the address may be
             mistyped. Plans are unlisted, so there is nothing to browse from
             here - <a href="/">start from the home page</a> to publish one of
-            your own.
+            your own. A plan that exists but is not shared with you says so
+            instead of showing this page.
           </p>
         </div>
       </div>
