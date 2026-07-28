@@ -17,7 +17,7 @@ function messageOf(failure: unknown): string {
 }
 
 /**
- * Where a ceremony lands, refused unless it is a path on this origin.
+ * Where a ceremony lands, refused unless it is a path on `origin`.
  *
  * Today every caller passes a literal or a plan id the server validated to
  * lowercase alphanumerics, so nothing can reach here with a scheme in it.
@@ -25,14 +25,17 @@ function messageOf(failure: unknown): string {
  * `location.assign`, and an open redirect out of a signed-in ceremony is a
  * phishing primitive.
  *
- * Resolved against the current origin rather than pattern-matched, because
- * the string checks alone are not enough: a URL parser strips tabs, newlines,
- * and carriage returns before parsing, so `/\tevil.com` and `/<CR>/evil.com`
- * do not look protocol-relative until after they already are. Those are
- * refused outright, backslashes with them, and anything that resolves off
- * this origin.
+ * Resolved against the origin rather than pattern-matched, because the string
+ * checks alone are not enough: a URL parser strips tabs, newlines, and
+ * carriage returns before parsing, so `/\tevil.com` and `/<CR>/evil.com` do
+ * not look protocol-relative until after they already are. Those are refused
+ * outright, backslashes with them, and anything that resolves off `origin`.
+ *
+ * `origin` is a parameter rather than read from `window` so this is a pure
+ * function with a test; the control is small enough that its behaviour has to
+ * be pinned rather than argued about.
  */
-function samePathOnly(destination: string): string {
+export function samePathOnly(destination: string, origin: string): string {
   if (
     !destination.startsWith("/") ||
     /[\t\n\r\\]/.test(destination) ||
@@ -41,9 +44,16 @@ function samePathOnly(destination: string): string {
     return "/dashboard";
   }
   try {
-    const resolved = new URL(destination, window.location.origin);
-    if (resolved.origin !== window.location.origin) return "/dashboard";
-    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+    const resolved = new URL(destination, origin);
+    if (resolved.origin !== origin) return "/dashboard";
+    const path = `${resolved.pathname}${resolved.search}${resolved.hash}`;
+    // The resolved path is checked too, not just the input. `/..//evil.example`
+    // resolves onto this origin with a pathname of `//evil.example`, and
+    // handing that to `location.assign` is a protocol-relative navigation to
+    // someone else's host - the leading-`//` test above cannot see it,
+    // because it is normalisation that produces it.
+    if (!path.startsWith("/") || path.startsWith("//")) return "/dashboard";
+    return path;
   } catch {
     return "/dashboard";
   }
@@ -78,7 +88,7 @@ export function usePasskeyAction(destination = "/dashboard") {
       // client's session store (it normally runs with a session already
       // present), so an in-page transition would arrive still believing it is
       // signed out and bounce straight back off the guard.
-      window.location.assign(samePathOnly(destination));
+      window.location.assign(samePathOnly(destination, window.location.origin));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setBusy(false);

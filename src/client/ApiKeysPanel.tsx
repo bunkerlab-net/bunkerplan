@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
+import { messageOf } from "./errors.ts";
 
 interface KeyRow {
   id: string;
@@ -73,7 +74,7 @@ function useKeyList() {
       setError(null);
       setKeys(result.data?.apiKeys ?? []);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(messageOf(cause, "could not list API keys"));
     }
   }, []);
 
@@ -110,7 +111,7 @@ function useApiKeys() {
       await refresh();
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(messageOf(cause, "could not create API key"));
       return false;
     } finally {
       setBusy(false);
@@ -128,7 +129,7 @@ function useApiKeys() {
       setError(null);
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(messageOf(cause, "could not revoke API key"));
     } finally {
       setBusy(false);
     }

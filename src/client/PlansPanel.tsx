@@ -326,6 +326,11 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
     // button carries must be repeated here.
     const wanted = handle.trim();
     if (locked || wanted === "") return;
+    // The last attempt's verdict goes before this one starts. Otherwise a
+    // corrected handle sits under the alert naming the old typo for as long
+    // as the request takes, and keeps it for good if the request throws.
+    setUnknown([]);
+    setFailed([]);
     void guard(async () => {
       // Sent as typed: the server splits on commas, so a list written here
       // and a list written against the API are parsed by the same code.
@@ -354,19 +359,7 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
         <strong>Sign out</strong> on that person's own dashboard - ask them for
         it. An account id works too. Separate several with commas.
       </p>
-      {/* Two separate lines, and neither says what the other's entries did:
-          "everyone else was added" is false the moment something failed. */}
-      {unknown.length > 0 && (
-        <p className="error" role="alert">
-          No account holds {unknown.join(", ")} - check the spelling.
-        </p>
-      )}
-      {failed.length > 0 && (
-        <p className="error" role="alert">
-          Could not share with {failed.join(", ")} just now. Adding them again
-          is safe.
-        </p>
-      )}
+      <GrantVerdict unknown={unknown} failed={failed} />
       {/* A real form, not a button beside an input: Enter in a text field
           submitting its form is native behaviour, and typing a handle then
           pressing Enter is what anyone will do. */}
@@ -388,6 +381,30 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
         </button>
       </form>
     </div>
+  );
+}
+
+/**
+ * What the last submission did to the accounts that did not land.
+ *
+ * Two separate lines, and neither says what the other's entries did:
+ * "everyone else was added" is false the moment something failed.
+ */
+function GrantVerdict(props: { unknown: string[]; failed: string[] }) {
+  return (
+    <>
+      {props.unknown.length > 0 && (
+        <p className="error" role="alert">
+          No account holds {props.unknown.join(", ")} - check the spelling.
+        </p>
+      )}
+      {props.failed.length > 0 && (
+        <p className="error" role="alert">
+          Could not share with {props.failed.join(", ")} just now. Adding them
+          again is safe.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -565,6 +582,34 @@ function RowActions({
 }
 
 /**
+ * Puts focus back where closing the editor left a hole.
+ *
+ * Closing moves focus nowhere on its own, which drops a keyboard user at the
+ * top of the document. Three steps, because each one can be gone: the control
+ * they pressed; the table its row was in, when deleting that row is what
+ * closed the editor; and the panel heading, because deleting the *last* plan
+ * unmounts the table too and there would otherwise be nothing left to land
+ * on.
+ *
+ * Does nothing when no opener was remembered. The effect calling this also
+ * runs on mount, where nothing was ever open, and taking focus off whatever
+ * the page had it on would be worse than the hole.
+ */
+function restoreFocus(
+  openedBy: { current: HTMLElement | null },
+  table: { current: HTMLElement | null },
+  heading: { current: HTMLElement | null },
+): void {
+  const opener = openedBy.current;
+  openedBy.current = null;
+  if (opener === null) return;
+  const target = opener.isConnected
+    ? opener
+    : (table.current ?? heading.current);
+  target?.focus();
+}
+
+/**
  * Which row's sharing editor is open, and the element it renders into.
  *
  * Held above the rows because the editor renders below the table: inside it,
@@ -575,16 +620,14 @@ function useExpandedPlan(plans: PlanSummary[]) {
   const editorRef = useRef<HTMLElement>(null);
   /** The Share button that opened the editor, so closing can go back to it. */
   const openedByRef = useRef<HTMLElement | null>(null);
+  /** Where focus goes when that button has gone with its row. */
+  const tableRef = useRef<HTMLElement>(null);
+  /** And when the table has gone too, because that was the last plan. */
+  const headingRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (expanded === null) {
-      // Closing moves focus nowhere on its own, which drops a keyboard user
-      // at the top of the document. Go back to the control they pressed - but
-      // only if it is still on the page, since deleting the row is one of the
-      // ways the editor closes.
-      const opener = openedByRef.current;
-      openedByRef.current = null;
-      if (opener?.isConnected) opener.focus();
+      restoreFocus(openedByRef, tableRef, headingRef);
       return;
     }
 
@@ -616,6 +659,8 @@ function useExpandedPlan(plans: PlanSummary[]) {
     // it.
     expandedPlan: plans.find((item) => item.id === expanded),
     editorRef,
+    tableRef,
+    headingRef,
   };
 }
 
@@ -741,8 +786,14 @@ function usePlanUploads(guard: Guard, onError: (reason: string) => void) {
 
 export function PlansPanel() {
   const { plans, error, setError, busy, guard, loaded } = usePlanList();
-  const { expanded, setExpanded, expandedPlan, editorRef } =
-    useExpandedPlan(plans);
+  const {
+    expanded,
+    setExpanded,
+    expandedPlan,
+    editorRef,
+    tableRef,
+    headingRef,
+  } = useExpandedPlan(plans);
   const { submit, replace } = usePlanUploads(guard, setError);
   const [dragging, setDragging] = useState(false);
 
@@ -750,7 +801,11 @@ export function PlansPanel() {
 
   return (
     <section className="card">
-      <h2 className="card-title">Plans</h2>
+      {/* `tabIndex={-1}` so focus can land here after the last plan is
+          deleted, without adding a tab stop nobody asked for. */}
+      <h2 className="card-title" ref={headingRef} tabIndex={-1}>
+        Plans
+      </h2>
       <p className="muted">
         Upload a standalone HTML document. External scripts, stylesheets,
         images, fonts, and iframes are all refused. A new plan is private - use{" "}
@@ -782,6 +837,7 @@ export function PlansPanel() {
             setExpanded={setExpanded}
             guard={guard}
             onReplace={replace}
+            containerRef={tableRef}
           />
           {expandedPlan !== undefined && (
             <ExpandedSharing
@@ -804,10 +860,17 @@ function PlansTable(props: {
   setExpanded: (id: string | null) => void;
   guard: Guard;
   onReplace: (id: string, files: FileList | null) => void;
+  /**
+   * Structural rather than a `ref` prop: `ref` on a custom component is JSX
+   * machinery, not an ordinary prop. Focus lands here when the editor closes
+   * because its row was deleted, so the button that opened it has gone.
+   */
+  containerRef: { current: HTMLElement | null };
 }) {
   const { plans, busy, expanded, setExpanded, guard } = props;
   return (
     <section
+      ref={props.containerRef}
       className="table-scroll"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
       tabIndex={0}

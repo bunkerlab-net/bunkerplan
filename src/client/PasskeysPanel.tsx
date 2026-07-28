@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
+import { messageOf } from "./errors.ts";
 
 interface PasskeyRow {
   id: string;
@@ -7,25 +8,17 @@ interface PasskeyRow {
   createdAt?: Date | null | undefined;
 }
 
-/**
- * The message to show for a failure that was thrown rather than returned.
- *
- * Falls back to the wording the same failure carries when it comes back as a
- * `result.error`, so the two paths read alike. `String(cause)` is not that
- * fallback: on a plain object it renders "[object Object]", and an `Error`
- * with an empty message would blank the line entirely.
- */
-function reason(cause: unknown, fallback: string): string {
-  return cause instanceof Error && cause.message !== ""
-    ? cause.message
-    : fallback;
-}
-
 /** Passkeys, and the two ceremonies that change them. */
 function usePasskeys() {
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * False until the first list call has answered. Without it the panel says
+   * "No passkeys" for the length of that request, to an account that cannot
+   * exist without one.
+   */
+  const [loaded, setLoaded] = useState(false);
 
   /**
    * None of these three may reject. Every caller is `void add()` or
@@ -44,7 +37,9 @@ function usePasskeys() {
       setError(null);
       setPasskeys(result.data ?? []);
     } catch (cause) {
-      setError(reason(cause, "could not list passkeys"));
+      setError(messageOf(cause, "could not list passkeys"));
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -65,7 +60,7 @@ function usePasskeys() {
       setError(null);
       await refresh();
     } catch (cause) {
-      setError(reason(cause, "could not add a passkey"));
+      setError(messageOf(cause, "could not add a passkey"));
     } finally {
       setBusy(false);
     }
@@ -82,17 +77,17 @@ function usePasskeys() {
       setError(null);
       await refresh();
     } catch (cause) {
-      setError(reason(cause, "could not delete the passkey"));
+      setError(messageOf(cause, "could not delete the passkey"));
     } finally {
       setBusy(false);
     }
   };
 
-  return { passkeys, error, busy, add, remove };
+  return { passkeys, error, busy, loaded, add, remove };
 }
 
 export function PasskeysPanel() {
-  const { passkeys, error, busy, add, remove } = usePasskeys();
+  const { passkeys, error, busy, loaded, add, remove } = usePasskeys();
   // Deleting the last one would lock the account out.
   const onlyOne = passkeys.length === 1;
 
@@ -115,9 +110,14 @@ export function PasskeysPanel() {
       </div>
       {error !== null && <p className="error">{error}</p>}
       {passkeys.length === 0 ? (
-        <p className="empty" style={{ marginTop: "24px" }}>
-          No passkeys.
-        </p>
+        // Nothing is claimed while the first list is in flight, and nothing
+        // at all when it failed: the error line above is the whole story
+        // then, and "No passkeys" beside it would be a second, wrong one.
+        error === null && (
+          <p className="empty" style={{ marginTop: "24px" }}>
+            {loaded ? "No passkeys." : "Loading..."}
+          </p>
+        )
       ) : (
         <PasskeysTable
           passkeys={passkeys}

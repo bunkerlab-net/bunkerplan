@@ -1,3 +1,4 @@
+import type { Logger } from "../log.ts";
 import type { GrantOutcome, PlanRepo } from "../services/types.ts";
 
 /**
@@ -121,6 +122,12 @@ export async function applyGrants(
   planId: string,
   ownerId: string,
   accounts: string[],
+  /**
+   * Optional so the unit fakes need not carry one. Without it a failure is
+   * reported to the caller and to nobody else: the operator sees a `failed`
+   * account in a response body they never read, and nothing in the logs.
+   */
+  logger?: Pick<Logger, "warn">,
 ): Promise<GrantOutcomes | null> {
   if ((await plans.findOwner(planId)) !== ownerId) return null;
 
@@ -132,7 +139,8 @@ export async function applyGrants(
     let outcome: GrantOutcome;
     try {
       outcome = await plans.grantByHandle(planId, ownerId, account);
-    } catch {
+    } catch (cause) {
+      logger?.warn({ err: cause, planId }, "granting one account failed");
       failed.push(account);
       continue;
     }

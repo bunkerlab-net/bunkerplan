@@ -6,6 +6,7 @@ import type {
 import type { AppAuth } from "../auth/instance.ts";
 import type { Config } from "../config.ts";
 import { newShareCode } from "../ids.ts";
+import type { Logger } from "../log.ts";
 import type { PlanRepo } from "../services/types.ts";
 import {
   applyGrants,
@@ -186,6 +187,8 @@ export async function grantPlan(
   plans: PlanRepo,
   request: Request,
   planId: string,
+  /** Optional so the unit fakes need not carry one. */
+  logger?: Pick<Logger, "warn">,
 ): Promise<Response> {
   const ownerId = await resolveSessionUserId(auth, request);
   if (ownerId === null) return problem(401, "authentication required");
@@ -200,7 +203,13 @@ export async function grantPlan(
   const parsed = parseAccountList(body.accounts);
   if ("error" in parsed) return problem(400, parsed.error);
 
-  const outcomes = await applyGrants(plans, planId, ownerId, parsed.accounts);
+  const outcomes = await applyGrants(
+    plans,
+    planId,
+    ownerId,
+    parsed.accounts,
+    logger,
+  );
   if (outcomes === null) return problem(404, "not found");
 
   return Response.json(outcomes satisfies GrantResult, {

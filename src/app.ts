@@ -150,8 +150,14 @@ function registerPlanSharing(app: Hono, getServices: GetServices): void {
   });
 
   app.post("/api/plans/:id/grants", async (c) => {
-    const { auth, db } = await getServices();
-    return await grantPlan(auth, db.plans, c.req.raw, c.req.param("id"));
+    const { auth, db, logger } = await getServices();
+    return await grantPlan(
+      auth,
+      db.plans,
+      c.req.raw,
+      c.req.param("id"),
+      logger,
+    );
   });
 
   app.delete("/api/plans/:id/grants/:handle", async (c) => {

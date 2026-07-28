@@ -193,7 +193,13 @@ async function grantOnUpload(
 ): Promise<UploadGrants> {
   if (accounts.length === 0) return { grants: null };
   try {
-    const outcomes = await applyGrants(deps.plans, planId, userId, accounts);
+    const outcomes = await applyGrants(
+      deps.plans,
+      planId,
+      userId,
+      accounts,
+      deps.logger,
+    );
     if (outcomes !== null) return { grants: outcomes };
     deps.logger.warn({ planId }, "plan vanished before its grants applied");
     return { gone: true };
