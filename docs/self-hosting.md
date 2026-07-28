@@ -340,16 +340,37 @@ fonts, iframes, or CSS `url()`/`@import` targets - including relative paths,
 which have nothing to resolve against. A non-empty `iframe[srcdoc]` is rejected
 outright: it carries a whole nested document, and its value is entity-encoded,
 so validating it would mean trusting a hand-rolled entity decoder as a security
-boundary. Inline `<style>`, inline `<script>`,
-`data:` URIs and ordinary `<a href>` links are all fine. A rejection returns
-`422` naming where the reference was found and the target it pointed at - the
-first 120 characters of it, with a trailing ellipsis when it was longer:
+boundary. Inline `<style>`, inline `<script>`, `data:` URIs and ordinary
+`<a href>` links are all fine.
+
+A `link` is judged by its `rel`. Values that reach the network are refused:
+`stylesheet` (including `alternate stylesheet`), `icon`, `preload`, `prefetch`,
+`modulepreload`, `manifest`, `prerender`, and also `preconnect` and
+`dns-prefetch`, which display nothing but still open a connection or resolve a
+third-party name. Values that reach nothing are accepted: `canonical`,
+`alternate`, `license`, `prev`, `next`, `me`. An unrecognised
+`rel`, or a `link` with none at all, is refused - the allowlist is deliberate,
+so a newly minted relationship is not admitted before anybody has judged it.
+
+A rejection returns `422` listing up to ten of the references it objected to,
+so one upload is usually enough to learn everything that has to change. `error`
+is the first fault, `errors` holds them all when there was more than one, and
+each target is cut to its first 120 characters with a trailing ellipsis when it
+was longer:
 
 ```json
 {
-  "error": "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet"
+  "error": "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet",
+  "errors": [
+    "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet",
+    "external reference: img[src] /logo.png",
+    "external reference: style /background.png"
+  ]
 }
 ```
+
+At most ten faults are listed. A document with more carries `"truncated": true`
+beside them, so the cap is never mistaken for the whole list.
 
 Note that this is a static check. A plan's inline script can still call `fetch`
 at runtime; the CSP sandbox is what contains it.

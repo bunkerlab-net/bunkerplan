@@ -70,4 +70,47 @@ describe("readUploadBody", () => {
     const response = (await readUploadBody(htmlRequest(html), MAX)) as Response;
     expect(response.status).toBe(422);
   });
+
+  /**
+   * The wire shape, not just the status. `error` alone for one fault keeps a
+   * client that reads only that field seeing what it always saw.
+   */
+  test("reports one fault as `error` with no list beside it", async () => {
+    const html = `${HEAD}<img src="/logo.png">${TAIL}`;
+    const response = (await readUploadBody(htmlRequest(html), MAX)) as Response;
+    expect(await response.json()).toEqual({
+      error: "external reference: img[src] /logo.png",
+    });
+  });
+
+  test("reports several faults as `error` plus the whole list", async () => {
+    const html = `${HEAD}<img src="/a.png"><img src="/b.png">${TAIL}`;
+    const response = (await readUploadBody(htmlRequest(html), MAX)) as Response;
+    expect(await response.json()).toEqual({
+      error: "external reference: img[src] /a.png",
+      errors: [
+        "external reference: img[src] /a.png",
+        "external reference: img[src] /b.png",
+      ],
+    });
+  });
+
+  test("marks a capped list so the cap is not mistaken for the whole", async () => {
+    const images = Array.from(
+      { length: 40 },
+      (_, n) => `<img src="/i${n}.png">`,
+    ).join("");
+    const response = (await readUploadBody(
+      htmlRequest(`${HEAD}${images}${TAIL}`),
+      MAX,
+    )) as Response;
+    const body = (await response.json()) as {
+      error: string;
+      errors: string[];
+      truncated: boolean;
+    };
+    expect(body.errors).toHaveLength(10);
+    expect(body.truncated).toBe(true);
+    expect(body.error).toBe(body.errors[0]);
+  });
 });

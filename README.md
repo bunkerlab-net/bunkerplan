@@ -147,8 +147,11 @@ long to reach a visitor who has already seen the old one.
 Uploads must be self-contained: no external scripts, stylesheets, images,
 iframes, or CSS `url()`/`@import` targets, including relative paths, and no
 non-empty `iframe[srcdoc]`. Inline `<style>`, inline `<script>`, `data:` URIs
-and ordinary links are fine. A rejection returns `422` naming where the
-reference was found and the target it pointed at.
+and ordinary links are fine, as are `link` relationships that fetch nothing -
+`canonical`, `alternate`, `license` and the like. A rejection returns `422`
+listing up to ten of the references it objected to, each named with the target
+it pointed at, so one upload is usually enough to learn everything that has to
+change.
 
 Webfonts are covered by that, so a branded document carries its typefaces as
 `data:` URIs in `@font-face`. That is cheaper than it sounds - a latin subset

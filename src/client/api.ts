@@ -28,21 +28,35 @@ export interface GrantResult {
   failed: string[];
 }
 
+/**
+ * The message an error body carries. A failing upload reports every fault it
+ * listed rather than only the first, so `errors` is preferred over `error` when
+ * it is present - `error` is only ever the first of the same list, and
+ * `truncated` says the server had more than it listed.
+ */
 async function readError(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json();
-    if (
-      typeof body === "object" &&
-      body !== null &&
-      "error" in body &&
-      typeof body.error === "string"
-    ) {
-      return body.error;
+    if (typeof body === "object" && body !== null) {
+      const lines =
+        "errors" in body && Array.isArray(body.errors)
+          ? body.errors.filter(
+              (line): line is string => typeof line === "string",
+            )
+          : [];
+      if (lines.length > 0) {
+        if ("truncated" in body && body.truncated === true) {
+          lines.push("...and more not listed.");
+        }
+        return lines.join("\n");
+      }
+      if ("error" in body && typeof body.error === "string") return body.error;
     }
   } catch {
     // Fall through to the status line.
   }
-  return `${response.status} ${response.statusText}`;
+  // Trimmed: a response carrying no reason phrase would leave a dangling space.
+  return `${response.status} ${response.statusText}`.trim();
 }
 
 export async function listPlans(): Promise<PlanSummary[]> {

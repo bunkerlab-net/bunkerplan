@@ -116,10 +116,13 @@ const NOT_FOUND =
   "indistinguishable on purpose, so an id can never be confirmed to exist.";
 const UNSUPPORTED_MEDIA = "`content-type` was not `text/html`.";
 const NOT_STANDALONE =
-  "The document loads something external. The message names where the " +
-  "reference was found and the target it pointed at: the first 120 " +
-  "characters of it, followed by an ellipsis when it was longer. " +
-  "Webfonts count: they have to travel as `data:` URIs in `@font-face`.";
+  "The document loads something external. Up to ten of the references " +
+  "objected to are listed, so one upload is usually enough to learn all of " +
+  "them: `error` is the first, `errors` holds them all when there was more " +
+  "than one, and `truncated` is present when the cap dropped others. Each " +
+  "target is cut to its first 120 characters, followed by an ellipsis when it " +
+  "was longer. Webfonts count: they have to travel as `data:` URIs in " +
+  "`@font-face`.";
 const STORAGE_DOWN = "The object store could not be reached.";
 
 /** Upload and replace share one allowance, counted per user. */
