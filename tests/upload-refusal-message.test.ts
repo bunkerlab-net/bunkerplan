@@ -18,10 +18,16 @@ describe("the message a refused upload shows", () => {
     const original = globalThis.fetch;
     // `Object.assign` rather than a cast: Bun's `fetch` carries statics like
     // `preconnect`, and the stub has to satisfy the same type.
+    const json = typeof body !== "string";
     globalThis.fetch = Object.assign(
       async () =>
-        new Response(typeof body === "string" ? body : JSON.stringify(body), {
+        new Response(json ? JSON.stringify(body) : body, {
           status: 422,
+          // As `problem()` sends it, so the stub cannot pass on a shape the
+          // real handler would never produce.
+          headers: {
+            "content-type": json ? "application/json" : "text/html",
+          },
           ...(statusText === undefined ? {} : { statusText }),
         }),
       { preconnect: original.preconnect },
@@ -80,6 +86,15 @@ describe("the message a refused upload shows", () => {
   test("never shows only the trailer", async () => {
     const message = await withFetch({
       error: "not standalone",
+      truncated: true,
+    });
+    expect(message).toBe("not standalone");
+  });
+
+  test("never shows only the trailer for an empty list either", async () => {
+    const message = await withFetch({
+      error: "not standalone",
+      errors: [],
       truncated: true,
     });
     expect(message).toBe("not standalone");

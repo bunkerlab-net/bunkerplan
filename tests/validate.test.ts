@@ -541,7 +541,14 @@ describe("validateStandaloneHtml - every offender at once", () => {
     const result = check(DOC(images));
     expect(result).toMatchObject({ ok: false, truncated: true });
     if (result.ok) throw new Error("expected a refusal");
-    expect(result.reasons).toHaveLength(10);
+    // The first ten in document order, not ten arbitrary ones: a caller fixes
+    // them from the top of the file down.
+    expect(result.reasons).toEqual(
+      Array.from(
+        { length: 10 },
+        (_, n) => `external reference: img[src] /img-${n}.png`,
+      ),
+    );
   });
 
   /** Exactly at the cap is the boundary that must NOT report truncation. */
@@ -761,6 +768,43 @@ describe("validateStandaloneHtml - CSS text is not CSS code", () => {
       check(style(String.raw`a{background:u\72l(https://e.example/x.png)}`)),
     ).toEqual({ ok: true });
   });
+
+  /**
+   * `@import` takes its target FIRST, then any `layer()`, `supports()` or media
+   * clause. So a prelude before the target is invalid CSS and imports nothing,
+   * and only an at-rule actually followed by a quoted target waits for one.
+   */
+  test.each([
+    ['@import "https://e.example/a.css" layer(base);', "a layer prelude after"],
+    [
+      '@import "https://e.example/a.css" supports(display:grid);',
+      "a supports prelude after",
+    ],
+    [
+      '@import "https://e.example/a.css" screen and (min-width:1px);',
+      "a media query after",
+    ],
+    ['@import url("https://e.example/a.css") layer(base);', "url() then layer"],
+  ])("reads an @import target with %s", (css) => {
+    expect(check(style(css))).toMatchObject({
+      ok: false,
+      reasons: ["external reference: style https://e.example/a.css"],
+    });
+  });
+
+  /**
+   * An `@import` that names nothing must not leave the next string in the file
+   * looking like its target.
+   */
+  test.each([
+    ["@import foo;", "a bare identifier"],
+    ["@import;", "nothing at all"],
+    ["@import layer(base);", "only a prelude"],
+  ])("does not adopt a later string after %s", (opener) => {
+    expect(
+      check(style(`${opener}\np::after{content:"https://e.example/text"}`)),
+    ).toEqual({ ok: true });
+  });
 });
 
 /**
@@ -828,6 +872,18 @@ describe("validateStandaloneHtml - link rel", () => {
   test("refuses an unknown rel, so a new one is not admitted by default", () => {
     expect(
       check(DOC(`<link rel="somethingnew" href="https://e.example/x">`)),
+    ).toMatchObject({ ok: false });
+  });
+
+  /**
+   * EVERY token has to be inert, not merely one of them: an unrecognised token
+   * beside `canonical` could be anything, including something that fetches.
+   */
+  test("refuses an inert token beside an unknown one", () => {
+    expect(
+      check(
+        DOC(`<link rel="canonical somethingnew" href="https://e.example/x">`),
+      ),
     ).toMatchObject({ ok: false });
   });
 

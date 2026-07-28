@@ -152,8 +152,10 @@ nothing: `canonical`, `alternate`, `license`, `prev`, `next`, `me`. Anything
 else is refused, including an unrecognised `rel` and combinations such as
 `alternate stylesheet`, which is still a stylesheet. A rejection returns `422`
 listing up to ten of the references it objected to, each named with the target
-it pointed at, so one upload is usually enough to learn everything that has to
-change.
+it pointed at and cut to 120 characters, and carrying `truncated` when there
+were more than it listed - so one upload is usually enough to learn everything
+that has to change. The full response shape is under
+[API](docs/self-hosting.md#api) in the self-hosting guide.
 
 Webfonts are covered by that, so a branded document carries its typefaces as
 `data:` URIs in `@font-face`. That is cheaper than it sounds - a latin subset

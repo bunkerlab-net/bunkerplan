@@ -95,7 +95,7 @@ function isExternalRef(raw: string): boolean {
   return true;
 }
 
-/** ASCII whitespace, which is what `srcset` tokenises on. */
+/** ASCII whitespace, which is what `srcset` and CSS both tokenise on. */
 const SPACE = " \t\n\r\f";
 
 /**
@@ -309,6 +309,21 @@ function importAt(css: string, index: number): boolean {
 }
 
 /**
+ * Whether a quoted string is the next thing after `index`, past whitespace.
+ *
+ * What arms an `@import`, so only an at-rule that really is followed by a
+ * target waits for one. `@import foo;` names nothing, and leaving the wait
+ * armed made the next string anywhere in the stylesheet its target: a plain
+ * `content:"https://host/x"` several rules later was reported as an import.
+ */
+function quotedTargetFollows(css: string, index: number): boolean {
+  let at = index;
+  while (at < css.length && SPACE.includes(css[at] as string)) at += 1;
+  const char = css[at];
+  return char === '"' || char === "'";
+}
+
+/**
  * Yields the target the string spanning `index` to `end` names, and returns
  * whether an `@import` is still waiting for one.
  *
@@ -407,8 +422,10 @@ function* externalInCss(rawCss: string): Generator<string> {
     }
 
     if (char === "@" && importAt(css, index)) {
-      importing = true;
+      // `@import url(...)` is read by the `url()` frame instead, so only a
+      // quoted target is waited for here.
       index += "@import".length;
+      importing = quotedTargetFollows(css, index);
       continue;
     }
 
@@ -467,6 +484,27 @@ const FONT_HINT = " - embed fonts as data: URIs in @font-face";
 const STYLESHEET_HINT = " - inline the stylesheet";
 
 /**
+ * `flat` cut to `MAX_TARGET_LENGTH` characters for display, with an ellipsis
+ * when it was longer.
+ *
+ * Counted in code points, so the cut never lands inside a surrogate pair: half
+ * a pair survives `JSON.stringify` as a `\ud800` escape and renders as a
+ * replacement glyph, leaving a target the uploader cannot search for. Stops at
+ * the limit rather than walking the value, which can be nearly as long as the
+ * upload.
+ */
+function forDisplay(flat: string): string {
+  let end = 0;
+  let characters = 0;
+  for (const character of flat) {
+    if (characters === MAX_TARGET_LENGTH) return `${flat.slice(0, end)}...`;
+    end += character.length;
+    characters += 1;
+  }
+  return flat;
+}
+
+/**
  * Records one refusal: where the reference was found, and what it pointed at.
  * The target is what makes a 422 actionable - without it a caller has to bisect
  * their own document to find the one `url()` that offended.
@@ -490,10 +528,7 @@ function addExternal(
   let hint = "";
   if (FONT_FILE.test(flat)) hint = FONT_HINT;
   else if (stylesheet) hint = STYLESHEET_HINT;
-  const shown =
-    flat.length > MAX_TARGET_LENGTH
-      ? `${flat.slice(0, MAX_TARGET_LENGTH)}...`
-      : flat;
+  const shown = forDisplay(flat);
   const full = `external reference: ${location} ${flat}${hint}`;
   found.set(full, `external reference: ${location} ${shown}${hint}`);
 }

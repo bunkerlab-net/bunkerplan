@@ -112,4 +112,16 @@ describe("readUploadBody", () => {
     expect(body.truncated).toBe(true);
     expect(body.errors?.[0]).toBe(body.error);
   });
+
+  /** Exactly at the cap, nothing was dropped, so the wire must not say it was. */
+  test("sends ten faults with no truncation marker", async () => {
+    const images = Array.from(
+      { length: 10 },
+      (_, n) => `<img src="/i${n}.png">`,
+    ).join("");
+    const body = await refusalBody(`${HEAD}${images}${TAIL}`);
+    expect(body.errors).toHaveLength(10);
+    expect(body.truncated).toBeUndefined();
+    expect(body.errors?.[9]).toBe("external reference: img[src] /i9.png");
+  });
 });

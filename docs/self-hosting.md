@@ -426,8 +426,10 @@ curl -s 'https://fonts.googleapis.com/css2?family=Inter:wght@400..700' \
   | awk '/^\/\* /{s=$2} /src: url\(/{match($0,/https:[^)]+/);
          print s"\t"substr($0,RSTART,RLENGTH)}'
 
-# Then turn the row you want into a data: URI
-curl -s '<the latin woff2 URL>' | base64 | tr -d '\n'
+# Then turn the row you want into a complete data: URI, ready to paste. The
+# download is checked first, so an error page cannot be encoded as a font.
+curl -fsSL '<the latin woff2 URL>' -o face.woff2 \
+  && printf 'data:font/woff2;base64,%s\n' "$(base64 < face.woff2 | tr -d '\n')"
 ```
 
 Declare the range you asked for, so one blob serves every weight in it:
