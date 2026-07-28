@@ -1007,6 +1007,15 @@ export function validateStandaloneHtml(bytes: Uint8Array): ValidationResult {
     return { ok: false, reasons: ["not an HTML document"], truncated: false };
   }
 
+  // Deliberately not wrapped in a catch that refuses the upload. There is no
+  // exception left for one to handle: the tokeniser is error-tolerant by spec and
+  // reports malformed input as tokens rather than throwing, the scan is iterative
+  // so no depth overflows a stack, and the collectors do string work on values
+  // already in hand. What a blanket catch WOULD cover is a defect in this file,
+  // reported to the uploader as a fault in their document - which is worse than a
+  // 500, because a 500 is a signal and a false refusal sends them looking for
+  // something that is not there. The recursive parser that could overflow, and
+  // the `could not parse document` refusal that admitted it, are both gone.
   const found = new Map<string, string>();
   scanDocument(text, found);
 
