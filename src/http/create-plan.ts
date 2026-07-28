@@ -163,6 +163,12 @@ function created(
   );
 }
 
+/** What the grant step decided, once the plan is already stored. */
+type UploadGrants =
+  | { grants: GrantOutcomes | null }
+  /** The plan was deleted between storing it and granting. */
+  | { gone: true };
+
 /**
  * Applies `?grants=` to a plan that is already stored, and never throws.
  *
@@ -170,35 +176,63 @@ function created(
  * would answer 500 for a plan that exists: the caller could not tell whether
  * to retry the upload, and retrying would store it twice. `applyGrants`
  * reports a per-account failure rather than raising; the catch here covers
- * the ownership read it does first. `null` when nobody was named, so the
- * response carries no grant fields at all.
+ * the ownership read it does first, and the accounts come back under
+ * `failed` so every one of them still has an outcome.
+ *
+ * `gone` is the other thing that read can mean. "Not yours" is unreachable on
+ * a plan this request just made, so it says the plan was deleted underneath -
+ * the same condition `storeAndConfirm` reports as `withdrawn`, and it gets
+ * the same 404. A 201 there would hand back a `Location` for a plan that no
+ * longer exists.
  */
 async function grantOnUpload(
   deps: Pick<CreatePlanDeps, "plans" | "logger">,
   planId: string,
   userId: string,
   accounts: string[],
-): Promise<GrantOutcomes | null> {
-  if (accounts.length === 0) return null;
+): Promise<UploadGrants> {
+  if (accounts.length === 0) return { grants: null };
   try {
-    // "Not yours" is unreachable on a plan this request just made - but a
-    // concurrent delete between storing and granting would produce it, and
-    // passing the `null` through would strip the grant fields entirely,
-    // which reads exactly like an upload that named nobody.
     const outcomes = await applyGrants(deps.plans, planId, userId, accounts);
-    if (outcomes !== null) return outcomes;
+    if (outcomes !== null) return { grants: outcomes };
     deps.logger.warn({ planId }, "plan vanished before its grants applied");
+    return { gone: true };
   } catch (cause) {
     deps.logger.warn({ err: cause, planId }, "grants failed on upload");
+    return { grants: { granted: [], unknown: [], failed: accounts } };
   }
-  return { granted: [], unknown: [], failed: accounts };
+}
+
+/**
+ * Writes the object and confirms the row survived it, as a response or null
+ * to carry on. Split out only so `createPlan` stays readable; the ordering it
+ * protects is documented on `storeAndConfirm`.
+ */
+async function store(
+  deps: CreatePlanDeps,
+  id: string,
+  userId: string,
+  body: Uint8Array,
+): Promise<Response | null> {
+  const { storage, plans, accountClosing } = deps;
+  const failure = await storeAndConfirm(
+    { storage, plans, accountClosing, logger: deps.logger },
+    id,
+    userId,
+    body,
+  );
+  if (failure === "storage-unavailable") {
+    return problem(502, "storage unavailable");
+  }
+  if (failure === "withdrawn") return problem(404, "not found");
+  return null;
 }
 
 export async function createPlan(
   deps: CreatePlanDeps,
   request: Request,
 ): Promise<Response> {
-  const { config, plans, accountClosing, storage } = deps;
+  const { config, plans } = deps;
 
   const admitted = await admit(deps, request);
   if (admitted instanceof Response) return admitted;
@@ -230,18 +264,20 @@ export async function createPlan(
   if (id === "quota") return problem(409, full);
   if (id === null) return problem(500, "could not allocate a plan id");
 
-  const failure = await storeAndConfirm(
-    { storage, plans, accountClosing, logger: deps.logger },
+  const stored = await store(deps, id, userId, body);
+  if (stored !== null) return stored;
+
+  const applied = await grantOnUpload(deps, id, userId, accounts);
+  // Deleted underneath this request, so the same answer the earlier check
+  // gives - handing back a Location for a plan that has gone would be worse
+  // than saying so.
+  if ("gone" in applied) return problem(404, "not found");
+
+  return created(
+    planUrl(config.publicBaseUrl, id),
     id,
-    userId,
-    body,
+    label,
+    code,
+    applied.grants,
   );
-  if (failure === "storage-unavailable") {
-    return problem(502, "storage unavailable");
-  }
-  if (failure === "withdrawn") return problem(404, "not found");
-
-  const grants = await grantOnUpload(deps, id, userId, accounts);
-
-  return created(planUrl(config.publicBaseUrl, id), id, label, code, grants);
 }

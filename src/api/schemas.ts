@@ -391,7 +391,10 @@ export const GrantRequest = component(
       // parser counts them after splitting, and the body bound stops the
       // absurd case before that.
       accounts: z.union([
-        z.string().min(1),
+        // `\S` as well as a length, matching the parser: `"   "` splits to
+        // nothing and is refused, so a bare `minLength` would publish a
+        // contract the handler is stricter than.
+        z.string().min(1).regex(/\S/),
         z.array(PlanAccount).min(1).max(MAX_GRANTS_PER_REQUEST),
       ]),
     })

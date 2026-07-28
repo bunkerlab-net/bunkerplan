@@ -849,11 +849,10 @@ describe("gated sharing", () => {
     const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
       headers: { cookie: owner.cookie },
     });
+    // Sorted on both sides: an exact set, so a duplicate or an extra grant
+    // fails rather than slipping past a containment check.
     const grants = (await jsonBody(sharing))["grants"] as string[];
-    expect(grants).toHaveLength(2);
-    expect(grants).toEqual(
-      expect.arrayContaining([first.handle, second.handle]),
-    );
+    expect([...grants].sort()).toEqual([first.handle, second.handle].sort());
   });
 
   test("a list may name accounts by id as readily as by handle", async () => {
@@ -893,13 +892,10 @@ describe("gated sharing", () => {
     const sharing = await app.fetch(`/api/plans/${created.id}/sharing`, {
       headers: { cookie: owner.cookie },
     });
+    // An exact set: the account named by id must resolve to exactly one
+    // row, so a duplicate here would mean the two lookups matched separately.
     const listed = (await jsonBody(sharing))["grants"] as string[];
-    // Exactly two, so a duplicate - the id and the handle resolving to
-    // separate rows - fails rather than passing on containment alone.
-    expect(listed).toHaveLength(2);
-    expect(listed).toEqual(
-      expect.arrayContaining([byId.handle, byHandle.handle]),
-    );
+    expect([...listed].sort()).toEqual([byId.handle, byHandle.handle].sort());
   });
 
   test("?grants= takes account ids too", async () => {

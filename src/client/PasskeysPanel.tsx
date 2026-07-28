@@ -7,20 +7,45 @@ interface PasskeyRow {
   createdAt?: Date | null | undefined;
 }
 
+/**
+ * The message to show for a failure that was thrown rather than returned.
+ *
+ * Falls back to the wording the same failure carries when it comes back as a
+ * `result.error`, so the two paths read alike. `String(cause)` is not that
+ * fallback: on a plain object it renders "[object Object]", and an `Error`
+ * with an empty message would blank the line entirely.
+ */
+function reason(cause: unknown, fallback: string): string {
+  return cause instanceof Error && cause.message !== ""
+    ? cause.message
+    : fallback;
+}
+
 /** Passkeys, and the two ceremonies that change them. */
 function usePasskeys() {
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  /**
+   * None of these three may reject. Every caller is `void add()` or
+   * `void remove(id)` from an event handler, so a throw from the client -
+   * a network failure, or a WebAuthn ceremony the browser aborts - would
+   * surface as an unhandled rejection and nothing on screen, rather than as
+   * the error line this panel already has.
+   */
   const refresh = useCallback(async () => {
-    const result = await authClient().passkey.listUserPasskeys();
-    if (result.error) {
-      setError(result.error.message ?? "could not list passkeys");
-      return;
+    try {
+      const result = await authClient().passkey.listUserPasskeys();
+      if (result.error) {
+        setError(result.error.message ?? "could not list passkeys");
+        return;
+      }
+      setError(null);
+      setPasskeys(result.data ?? []);
+    } catch (cause) {
+      setError(reason(cause, "could not list passkeys"));
     }
-    setError(null);
-    setPasskeys(result.data ?? []);
   }, []);
 
   useEffect(() => {
@@ -39,6 +64,8 @@ function usePasskeys() {
       }
       setError(null);
       await refresh();
+    } catch (cause) {
+      setError(reason(cause, "could not add a passkey"));
     } finally {
       setBusy(false);
     }
@@ -54,6 +81,8 @@ function usePasskeys() {
       }
       setError(null);
       await refresh();
+    } catch (cause) {
+      setError(reason(cause, "could not delete the passkey"));
     } finally {
       setBusy(false);
     }

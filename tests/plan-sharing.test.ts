@@ -53,7 +53,12 @@ interface Calls {
 
 function fakePlans(
   over: {
-    outcome?: GrantOutcome;
+    /**
+     * What `grantByHandle` answers. A function lets one request mix
+     * outcomes, which is the only way to show that an unknown account does
+     * not take the valid ones down with it.
+     */
+    outcome?: GrantOutcome | ((account: string) => GrantOutcome);
     revokes?: boolean;
     /** False models a plan that does not exist or is not the caller's. */
     owned?: boolean;
@@ -108,7 +113,10 @@ function fakePlans(
     grantByHandle: async (planId, ownerId, account) => {
       calls.granted.push({ planId, ownerId, account });
       if (account === over.throwsFor) throw new Error("database unreachable");
-      const outcome = over.outcome ?? "granted";
+      const outcome =
+        typeof over.outcome === "function"
+          ? over.outcome(account)
+          : (over.outcome ?? "granted");
       if (owned && outcome === "granted") granted.add(account);
       return outcome;
     },
@@ -432,10 +440,14 @@ describe("grantPlan", () => {
     expect(calls.granted.map((call) => call.account)).toEqual([HANDLE]);
   });
 
-  test("an unknown handle is reported, not fatal", async () => {
+  test("an unknown handle is reported, and the rest still land", async () => {
     // One mistyped name must not refuse the rest: the owner would have to
-    // work out which of five it was.
-    const { plans } = fakePlans({ outcome: "no-user" });
+    // work out which of five it was. Outcomes vary by account, because a
+    // fake that answered "no-user" to everything would leave `granted`
+    // empty and prove nothing about the split.
+    const { plans } = fakePlans({
+      outcome: (account) => (account === HANDLE ? "no-user" : "granted"),
+    });
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
@@ -445,8 +457,8 @@ describe("grantPlan", () => {
 
     expect(response.status).toBe(200);
     expect(await jsonOf(response)).toEqual({
-      granted: [],
-      unknown: [HANDLE, "second"],
+      granted: ["second"],
+      unknown: [HANDLE],
       failed: [],
     });
   });
@@ -505,16 +517,39 @@ describe("grantPlan", () => {
     expect(calls.granted).toHaveLength(1);
   });
 
-  test("refuses more handles than one request may carry", async () => {
+  const handleList = (count: number): string =>
+    Array.from({ length: count }, (_, index) => `handle${index}`).join(",");
+
+  test("accepts exactly as many handles as one request may carry", async () => {
+    // The passing side of the boundary. Without it an off-by-one that
+    // refused the last allowed account would look like the test below
+    // working.
     const { plans, calls } = fakePlans();
-    const many = Array.from(
-      { length: MAX_GRANTS_PER_REQUEST + 1 },
-      (_, index) => `handle${index}`,
-    ).join(",");
+    const wanted = handleList(MAX_GRANTS_PER_REQUEST).split(",");
     const response = await grantPlan(
       fakeAuth(OWNER),
       plans,
-      post({ accounts: many }),
+      post({ accounts: wanted.join(",") }),
+      PLAN,
+    );
+
+    expect(response.status).toBe(200);
+    // The buckets, not just the call count: a handler that asked the
+    // repository and then dropped the answers would pass on calls alone.
+    expect(await jsonOf(response)).toEqual({
+      granted: wanted,
+      unknown: [],
+      failed: [],
+    });
+    expect(calls.granted).toHaveLength(MAX_GRANTS_PER_REQUEST);
+  });
+
+  test("refuses more handles than one request may carry", async () => {
+    const { plans, calls } = fakePlans();
+    const response = await grantPlan(
+      fakeAuth(OWNER),
+      plans,
+      post({ accounts: handleList(MAX_GRANTS_PER_REQUEST + 1) }),
       PLAN,
     );
 

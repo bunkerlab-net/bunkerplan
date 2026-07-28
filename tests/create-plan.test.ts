@@ -133,11 +133,12 @@ describe("createPlan with ?grants=", () => {
   });
 
   /**
-   * A concurrent delete between storing and granting. Unreachable in ordinary
-   * use, but passing the repository's `null` straight through would strip the
-   * grant fields, which reads exactly like an upload that named nobody.
+   * A concurrent delete between storing and granting. `storeAndConfirm`
+   * answers 404 when it catches the same thing a moment earlier, so this
+   * window gets the same answer rather than a 201 whose `Location` names a
+   * plan that has gone.
    */
-  test("a plan that vanishes before its grants reports them failed, not absent", async () => {
+  test("a plan that vanishes before its grants is the same 404", async () => {
     let reads = 0;
     const { deps: d } = deps({
       findOwner: async () => {
@@ -148,14 +149,10 @@ describe("createPlan with ?grants=", () => {
 
     const response = await createPlan(d, upload("grants=first"));
 
-    expect(response.status).toBe(201);
-    const body = (await response.json()) as Record<string, unknown>;
-    // Every account asked for lands in exactly one bucket, and all three are
-    // present whenever `?grants=` was supplied - that is what stops a
-    // failure reading like an upload that named nobody.
-    expect(body["granted"]).toEqual([]);
-    expect(body["unknown"]).toEqual([]);
-    expect(body["failed"]).toEqual(["first"]);
+    expect(response.status).toBe(404);
+    expect((await response.json()) as Record<string, unknown>).toEqual({
+      error: "not found",
+    });
   });
 
   test("naming nobody carries no grant fields at all", async () => {
