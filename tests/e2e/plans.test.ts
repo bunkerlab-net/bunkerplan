@@ -243,7 +243,9 @@ describe("plan lifecycle over HTTP", () => {
       '<!doctype html><html><head><link href="https://ex.example/p" rel=canonical></head><body>hi</body></html>';
     const created = await createPlan(key, body);
 
-    expect(await (await app.fetch(`/p/${created.id}`)).text()).toBe(body);
+    const served = await app.fetch(`/p/${created.id}`);
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe(body);
   });
 
   test("counts replacements against the same allowance as uploads", async () => {

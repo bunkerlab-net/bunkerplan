@@ -1075,6 +1075,11 @@ describe("validateStandaloneHtml - parser conformance", () => {
     });
   });
 
+  /** The same rule accepting: an inert value first is the one that counts. */
+  test("keeps the first of a repeated attribute when it is the inert one", () => {
+    expect(check(DOC(`<img src="data:," src="${EXT}">`))).toEqual({ ok: true });
+  });
+
   /**
    * HTML `<image>` is rewritten to `img`, so the reference has to be judged as
    * `img[src]`. `URL_ATTRS.image` is the SVG entry and lists no `src`, so a
@@ -1113,17 +1118,6 @@ describe("validateStandaloneHtml - parser conformance", () => {
    */
   test("scans the CSS of a self-closing <style/>", () => {
     expect(check(DOC(`<style/>@import url("${EXT}");</style>`))).toEqual({
-      ok: false,
-      reasons: [`external reference: style ${EXT}`],
-      truncated: false,
-    });
-  });
-
-  /** No end tag ever arrives, and a browser applies the CSS anyway. */
-  test("scans the CSS of a <style> left unclosed at EOF", () => {
-    expect(
-      check(`<!doctype html><html><head><style>@import url("${EXT}");`),
-    ).toEqual({
       ok: false,
       reasons: [`external reference: style ${EXT}`],
       truncated: false,
@@ -1286,8 +1280,11 @@ describe("validateStandaloneHtml - parser conformance", () => {
    * assert that the scanner agrees with itself.
    *
    * `parse5` builds the tree, and the answer is the CHILD text content of each
-   * style element it holds. `UNACCOUNTABLE` is deliberately excluded: those are
-   * refused for their markup, and the gate makes no claim about the reference.
+   * style element it holds. Two lists are deliberately excluded. `UNACCOUNTABLE`
+   * is refused for its markup, so the gate makes no claim about the reference.
+   * `DIVERGED` is refused because the parse has stopped describing the document,
+   * so a tree built from the same bytes is exactly what the scanner can no longer
+   * follow, and the two would disagree there by design.
    * Cheap on fixtures this size; a tree is what the gate cannot afford on a 2 MiB
    * upload, which is why the scanner streams instead.
    */
@@ -1324,7 +1321,10 @@ describe("validateStandaloneHtml - parser conformance", () => {
    * to be discovered by a wrong verdict after an upgrade.
    */
   describe("assumptions about the parser", () => {
-    /** EOF has to arrive synchronously, or an unclosed block is lost. */
+    /**
+     * EOF has to arrive synchronously, or an unclosed block is lost - and a
+     * browser applies that CSS regardless, so it is a verdict either way.
+     */
     test("delivers the last text before returning a verdict", () => {
       expect(
         check(`<!doctype html><html><head><style>@import url("${EXT}");`),

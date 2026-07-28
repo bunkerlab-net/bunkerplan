@@ -155,10 +155,11 @@ listing up to ten of the references it objected to, each named with the target
 it pointed at and cut to 120 characters, and carrying `truncated` when there
 were more than it listed - so one upload is usually enough to learn everything
 that has to change. Two refusals name markup instead of a reference: an element
-inside an SVG `<style>`, which is fixed by keeping that stylesheet to text, and
-foreign nesting the check cannot follow - a self-closing `<svg/>` or `<math/>`,
-or end tags that cross - which is fixed by giving each one its own end tag, in
-order. Both spellings are read normally. The full response shape is under
+inside an SVG `<style>`, and foreign nesting the check cannot follow - a
+self-closing `<svg/>` or `<math/>`, or end tags that cross. Neither costs a
+legitimate document anything: keep that stylesheet to text, and give each
+`<svg>` and `<math>` its own end tag in order, and both are read normally.
+The full response shape is under
 [API](docs/self-hosting.md#api) in the self-hosting guide.
 
 Webfonts are covered by that, so a branded document carries its typefaces as
