@@ -111,9 +111,20 @@ function HowItWorks({
 
 function CurlSnippet({ origin }: { origin: string }) {
   return (
-    <code className="snippet">
-      {`curl -X PUT ${origin}/api/plans \\\n  -H "x-api-key: $KEY" \\\n  -H "content-type: text/html" \\\n  --data-binary @report.html`}
-    </code>
+    // A section, not a bare `code`: the block scrolls sideways, so it has to
+    // be focusable (WCAG 2.1.1), and a focus stop with no name is worse than
+    // none. The `code` stays inside it, so the markup still says "this is
+    // code" rather than leaning on the styling to imply it.
+    <section
+      className="snippet"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+      tabIndex={0}
+      aria-label="Example upload command"
+    >
+      <code>
+        {`curl -X PUT ${origin}/api/plans \\\n  -H "x-api-key: $KEY" \\\n  -H "content-type: text/html" \\\n  --data-binary @report.html`}
+      </code>
+    </section>
   );
 }
 

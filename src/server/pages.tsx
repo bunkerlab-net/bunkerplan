@@ -84,9 +84,12 @@ function Document({ assets, social, page, children }: DocumentProps) {
           <script
             type="application/json"
             id={PAGE_PROPS_ID}
-            // Server-authored constants only - an origin from configuration
-            // and a path Hono already matched. `<` is escaped so a value can
-            // never close the script element.
+            // Not all server-authored: the gate's `planId` comes from the
+            // request. It is safe because it cannot reach here unvalidated -
+            // `resolvePlanAccess` answers `missing` unless `isPlanId` passes,
+            // and that alphabet is lowercase alphanumerics, so no quote,
+            // backslash, or angle bracket survives it. `<` is escaped anyway,
+            // which is what holds if a future field is added carelessly.
             dangerouslySetInnerHTML={{
               __html: JSON.stringify(page).replaceAll("<", "\\u003c"),
             }}

@@ -245,9 +245,17 @@ function ShareCodeBlock(
           {/* Encoded even though the alphabet is base62 and needs none: the
               link is built here, and a future alphabet change must not
               silently start producing broken URLs. */}
-          <code className="snippet">
-            {`${plan.url}?code=${encodeURIComponent(code)}`}
-          </code>
+          {/* A section, not a bare `code`: the block scrolls sideways, so it
+              has to be focusable, and a focus stop with no name is worse than
+              none. The `code` stays inside it. */}
+          <section
+            className="snippet"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+            tabIndex={0}
+            aria-label="Share link"
+          >
+            <code>{`${plan.url}?code=${encodeURIComponent(code)}`}</code>
+          </section>
         </>
       )}
       {code === null && props.hasShareCode && (
@@ -536,6 +544,15 @@ function useExpandedPlan(plans: PlanSummary[]) {
     editorRef.current?.scrollIntoView({ block: "nearest" });
     editorRef.current?.focus();
   }, [expanded]);
+
+  // A refresh can take the open row away - deleting it, or another tab doing
+  // so. Clearing the selection rather than leaving it dangling is what routes
+  // that case through the close branch above, so focus is restored and the
+  // remembered button is dropped instead of being held detached.
+  const stillListed = plans.some((item) => item.id === expanded);
+  useEffect(() => {
+    if (expanded !== null && !stillListed) setExpanded(null);
+  }, [expanded, stillListed]);
 
   return {
     expanded,

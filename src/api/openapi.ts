@@ -7,7 +7,7 @@
  * hand here is exactly the drift this module exists to avoid.
  */
 import type { ZodType } from "zod";
-import type { Config } from "../config.ts";
+import { type Config, MIN_SHARE_CODE_LENGTH } from "../config.ts";
 import { MAX_GRANTS_PER_REQUEST } from "../http/account-list.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import { MAX_LABEL_BODY_BYTES } from "../http/relabel-plan.ts";
@@ -430,38 +430,53 @@ const REVOKE_GRANT_OPERATION = {
   },
 };
 
-const UNLOCK_PLAN_OPERATION = {
-  operationId: "unlockPlan",
-  summary: "Redeem a share code",
-  description:
-    "Unauthenticated: this is what the gate page calls. A correct code sets " +
-    "a path-scoped, HttpOnly cookie for this one plan, after which `/p/{id}` " +
-    "serves it with no parameter and no session. Deliberately unlimited - a " +
-    "code carries about 95 bits, so a limiter buys nothing against guessing " +
-    "while an anonymous one would let a passer-by lock out the owner's link.",
-  tags: ["Sharing"],
-  security: [],
-  requestBody: {
-    required: true,
-    content: { "application/json": { schema: ref(UnlockRequest) } },
-  },
-  responses: {
-    "204": {
-      description: "The code matched. No body.",
-      headers: {
-        "set-cookie": {
-          description: "The unlock cookie, scoped to `/p/{id}`.",
-          schema: { type: "string" },
+/**
+ * Bits in the shortest code this deployment will still redeem.
+ *
+ * Derived from `MIN_SHARE_CODE_LENGTH`, not from `SHARE_CODE_LENGTH`: the
+ * argument for leaving the route unthrottled rests on the weakest code that
+ * can be presented, and lowering the mint length does not retire codes issued
+ * under the old one. Computed rather than written down, so raising the floor
+ * cannot leave the document publishing a number that used to be true.
+ */
+const MIN_CODE_BITS = Math.round(MIN_SHARE_CODE_LENGTH * Math.log2(62));
+
+function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
+  return {
+    operationId: "unlockPlan",
+    summary: "Redeem a share code",
+    description:
+      "Unauthenticated: this is what the gate page calls. A correct code " +
+      "sets a path-scoped, HttpOnly cookie for this one plan, after which " +
+      "`/p/{id}` serves it with no parameter and no session. " +
+      `${codeFormat} Deliberately unthrottled - the shortest redeemable ` +
+      `code carries about ${MIN_CODE_BITS} bits, so a limiter buys nothing ` +
+      "against guessing, while an anonymous one keyed on the plan would let " +
+      "a passer-by lock out the owner's own link.",
+    tags: ["Sharing"],
+    security: [],
+    requestBody: {
+      required: true,
+      content: { "application/json": { schema: ref(UnlockRequest) } },
+    },
+    responses: {
+      "204": {
+        description: "The code matched. No body.",
+        headers: {
+          "set-cookie": {
+            description: "The unlock cookie, scoped to `/p/{id}`.",
+            schema: { type: "string" },
+          },
         },
       },
+      ...failures({
+        400: "The body is not JSON, or `code` is missing or not a string.",
+        401: "The code did not match.",
+        404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
+      }),
     },
-    ...failures({
-      400: "The body is not JSON, or `code` is missing or not a string.",
-      401: "The code did not match.",
-      404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
-    }),
-  },
-};
+  };
+}
 
 const CODE_QUERY_PARAM = {
   name: "code",
@@ -502,9 +517,16 @@ const DOCUMENT_PATH: PathItem = {
           "cache-control": {
             description:
               "`public, no-cache` for a public plan, which a cache may store " +
-              "but must revalidate on every read; " +
-              "`private, no-store` for a private one, which also carries " +
-              "`vary: cookie, x-api-key`.",
+              "but must revalidate on every read; `private, no-store` for a " +
+              "private one.",
+            schema: { type: "string" },
+          },
+          vary: {
+            description:
+              "`cookie, x-api-key` on a private plan, whose response turns " +
+              "on which credential opened the gate. Absent on a public one, " +
+              "which is the same for everyone. Declared here rather than " +
+              "only described, so a generated client sees it.",
             schema: { type: "string" },
           },
           "set-cookie": {
@@ -662,7 +684,7 @@ export function openApiDocument(
       },
       "/api/plans/{id}/unlock": {
         parameters: [PLAN_ID_PARAM],
-        post: UNLOCK_PLAN_OPERATION,
+        post: unlockPlanOperation(codeFormat),
       },
       "/p/{id}": DOCUMENT_PATH,
       "/healthz": HEALTH_PATH,

@@ -672,7 +672,17 @@ describe("gated sharing", () => {
     expect(served.headers.get("vary")).toBe("cookie, x-api-key");
     // Still sandboxed: the gate does not loosen the policy on the way past.
     expect(served.headers.get("content-security-policy")).toBe(PLAN_CSP);
-    expect(served.headers.get("set-cookie")).toContain(`Path=/p/${created.id}`);
+    // This cookie is a bearer credential for the plan, so its attributes are
+    // the control, not decoration: path-scoped so a browser never sends it to
+    // another plan, HttpOnly so a script on the page cannot read it, and
+    // SameSite so a cross-site request cannot ride it. `Secure` is not
+    // asserted here on purpose - this harness serves over http, where
+    // `mintShareCookie` omits it; tests/share-auth.test.ts covers both sides
+    // of that.
+    const cookie = served.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain(`Path=/p/${created.id}`);
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Lax");
 
     // The parameter is needed once.
     const returning = await app.fetch(`/p/${created.id}`, {
