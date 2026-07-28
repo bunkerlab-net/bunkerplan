@@ -5,7 +5,10 @@ import type { Db } from "../services/types.ts";
 import { createPgAccountClosingRepo } from "./account-closing.pg.ts";
 import { pgSchema } from "./pg-shared.ts";
 import { createPgPlanRepo } from "./plans.pg.ts";
-import { createPgRateLimitRepo } from "./rate-limits.pg.ts";
+import {
+  createPgRateLimitRepo,
+  createPgUnlockRateLimitRepo,
+} from "./rate-limits.pg.ts";
 
 /**
  * Postgres always enforces foreign keys, so the ON DELETE CASCADE constraints
@@ -36,6 +39,7 @@ export function createPostgresDb(connectionString: string): Db {
     provider: "pg",
     plans: createPgPlanRepo(db),
     uploadRateLimits: createPgRateLimitRepo(db),
+    unlockRateLimits: createPgUnlockRateLimitRepo(db),
     accountClosing: createPgAccountClosingRepo(db),
     async probe() {
       await db.execute(sql`select 1`);

@@ -43,6 +43,16 @@ export interface Config {
   maxPlansPerUser: number;
   uploadRateMax: number;
   uploadRateWindowSec: number;
+  /**
+   * Share-code redemptions allowed per client address per window.
+   *
+   * Not a defence against guessing the code - that rests on its entropy, and
+   * no reachable rate would change it. This bounds what an anonymous caller
+   * can spend of the deployment's own resources on the one route that takes no
+   * credential.
+   */
+  unlockRateMax: number;
+  unlockRateWindowSec: number;
   logFormat: LogFormat;
   logLevel: LogLevel;
   logColor: boolean;
@@ -313,6 +323,8 @@ interface Limits {
   maxPlansPerUser: number;
   uploadRateMax: number;
   uploadRateWindowSec: number;
+  unlockRateMax: number;
+  unlockRateWindowSec: number;
 }
 
 function parseLimits(env: Env, problems: string[]): Limits {
@@ -346,6 +358,16 @@ function parseLimits(env: Env, problems: string[]): Limits {
       MIN_RATE_WINDOW_SEC,
       int(env, "UPLOAD_RATE_WINDOW_SEC", MIN_RATE_WINDOW_SEC, 1, problems),
     ),
+    // Redeeming a share code is the one unauthenticated write, so its bucket
+    // is the client address rather than an account. Generous by default: a
+    // reader types a code once or twice, and a whole office can share one
+    // address.
+    unlockRateMax: int(env, "UNLOCK_RATE_MAX", 30, 1, problems),
+    // No `MIN_RATE_WINDOW_SEC` floor: that constant exists because Workers KV
+    // rejects an `expirationTtl` under 60s, and this counter is a database row
+    // with no TTL. A shorter window is a weaker limit, which is the operator's
+    // call to make.
+    unlockRateWindowSec: int(env, "UNLOCK_RATE_WINDOW_SEC", 60, 1, problems),
   };
 }
 

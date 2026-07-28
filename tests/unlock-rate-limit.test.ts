@@ -1,0 +1,161 @@
+import { describe, expect, test } from "bun:test";
+import { unlockPlan } from "../src/client/api.ts";
+import { checkUnlockRate } from "../src/http/unlock-rate-limit.ts";
+import type { RateLimitRepo } from "../src/services/types.ts";
+
+const CONFIG = {
+  clientIpHeader: "cf-connecting-ip",
+  unlockRateMax: 3,
+  unlockRateWindowSec: 60,
+};
+
+/** Records what bucket was charged, so the keying is asserted and not assumed. */
+function fakeLimits(allowed: boolean, retryAfter = 42) {
+  const keys: string[] = [];
+  const limits: RateLimitRepo = {
+    consume: async (key) => {
+      keys.push(key);
+      return { allowed, retryAfter };
+    },
+  };
+  return { limits, keys };
+}
+
+const post = (headers: Record<string, string> = {}) =>
+  new Request("https://plans.example.test/api/plans/abc/unlock", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ code: "x" }),
+  });
+
+describe("the unlock rate limit", () => {
+  test("charges the client address, not the plan", async () => {
+    // The security property: were the plan the bucket, anyone holding the
+    // share link could spend it and lock the other readers out.
+    const { limits, keys } = fakeLimits(true);
+    const allowed = await checkUnlockRate(
+      limits,
+      CONFIG,
+      post({ "cf-connecting-ip": "203.0.113.9" }),
+    );
+
+    expect(allowed).toBeNull();
+    expect(keys).toEqual(["203.0.113.9"]);
+  });
+
+  test("passes the configured ceiling and window through", async () => {
+    const seen: Array<[string, number, number]> = [];
+    const limits: RateLimitRepo = {
+      consume: async (key, max, window) => {
+        seen.push([key, max, window]);
+        return { allowed: true, retryAfter: 0 };
+      },
+    };
+
+    await checkUnlockRate(limits, CONFIG, post({ "cf-connecting-ip": "a" }));
+    expect(seen).toEqual([["a", 3, 60]]);
+  });
+
+  test("answers 429 with retry-after once the allowance is spent", async () => {
+    const { limits } = fakeLimits(false, 17);
+    const refused = await checkUnlockRate(
+      limits,
+      CONFIG,
+      post({ "cf-connecting-ip": "203.0.113.9" }),
+    );
+
+    expect(refused?.status).toBe(429);
+    expect(refused?.headers.get("retry-after")).toBe("17");
+  });
+
+  test("reads the header the configuration names, not a fixed one", async () => {
+    // A self-hosted deployment names its own; trusting `cf-connecting-ip`
+    // behind an nginx that does not set it would bucket every caller together.
+    const { limits, keys } = fakeLimits(true);
+    await checkUnlockRate(
+      limits,
+      { ...CONFIG, clientIpHeader: "x-forwarded-for" },
+      post({ "x-forwarded-for": "198.51.100.4", "cf-connecting-ip": "wrong" }),
+    );
+
+    expect(keys).toEqual(["198.51.100.4"]);
+  });
+
+  test("refuses when the trusted header did not arrive", async () => {
+    // Nothing identifies the caller, so there is no bucket to charge. The
+    // alternative is one shared bucket for everyone, which is the lockout the
+    // per-address keying exists to avoid.
+    const { limits, keys } = fakeLimits(true);
+    const refused = await checkUnlockRate(limits, CONFIG, post());
+
+    expect(refused?.status).toBe(429);
+    expect(keys).toEqual([]);
+  });
+
+  test("refuses a blank header rather than charging an empty bucket", async () => {
+    const { limits, keys } = fakeLimits(true);
+    const refused = await checkUnlockRate(
+      limits,
+      CONFIG,
+      post({ "cf-connecting-ip": "" }),
+    );
+
+    expect(refused?.status).toBe(429);
+    expect(keys).toEqual([]);
+  });
+});
+
+/**
+ * What the gate page shows for a 429. The server always sends `retry-after`,
+ * so the fallback is for a proxy that strips it - untestable through the real
+ * stack, which is why it is asserted here.
+ */
+describe("the message a throttled reader sees", () => {
+  const withFetch = async (response: Response): Promise<string> => {
+    const original = globalThis.fetch;
+    // `Object.assign` rather than a cast: Bun's `fetch` carries statics like
+    // `preconnect`, and the stub has to satisfy the same type.
+    globalThis.fetch = Object.assign(async () => response, {
+      preconnect: original.preconnect,
+    });
+    try {
+      await unlockPlan("abc", "code");
+      return "no error thrown";
+    } catch (cause) {
+      return cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      globalThis.fetch = original;
+    }
+  };
+
+  test("names the wait when retry-after says how long", async () => {
+    const message = await withFetch(
+      new Response(JSON.stringify({ error: "rate limit exceeded" }), {
+        status: 429,
+        headers: { "retry-after": "45" },
+      }),
+    );
+
+    // Not the bare "rate limit exceeded" the body carries: that tells someone
+    // who mistyped a code nothing they can act on.
+    expect(message).toBe("Too many attempts. Try again in 45 seconds.");
+  });
+
+  test("still says something actionable with no retry-after", async () => {
+    const message = await withFetch(
+      new Response(JSON.stringify({ error: "rate limit exceeded" }), {
+        status: 429,
+      }),
+    );
+
+    expect(message).toBe("Too many attempts. Try again shortly.");
+  });
+
+  test("falls back rather than printing NaN seconds", async () => {
+    const message = await withFetch(
+      new Response(null, { status: 429, headers: { "retry-after": "soon" } }),
+    );
+
+    expect(message).toBe("Too many attempts. Try again shortly.");
+  });
+});

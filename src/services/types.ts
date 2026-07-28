@@ -198,6 +198,11 @@ export interface Db {
   provider: "sqlite" | "pg";
   plans: PlanRepo;
   uploadRateLimits: RateLimitRepo;
+  /**
+   * Share-code redemptions, bucketed by client address. Its own table: the key
+   * is not a user id, so it cannot cascade and prunes itself instead.
+   */
+  unlockRateLimits: RateLimitRepo;
   accountClosing: AccountClosingRepo;
   probe(): Promise<void>;
 }

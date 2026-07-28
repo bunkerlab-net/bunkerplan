@@ -26,6 +26,15 @@ const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 export const UPLOAD_RATE_MAX = 5;
 export const UPLOAD_RATE_WINDOW_SEC = 60;
 
+/**
+ * Just above the longest run of redemptions a normal flow makes, so the shared
+ * default address never trips it: only a test that sets out to spend an
+ * allowance should see a 429. tests/e2e/unlock-rate.test.ts names its own
+ * addresses and exhausts whatever this says.
+ */
+export const UNLOCK_RATE_MAX = 6;
+export const UNLOCK_RATE_WINDOW_SEC = 60;
+
 /** Below `UPLOAD_RATE_MAX`, so the quota is what refuses and not the limiter. */
 export const MAX_PLANS_PER_USER = 3;
 
@@ -125,6 +134,8 @@ export async function startWorker(): Promise<Harness> {
           RP_ID: "localhost",
           UPLOAD_RATE_MAX,
           UPLOAD_RATE_WINDOW_SEC,
+          UNLOCK_RATE_MAX,
+          UNLOCK_RATE_WINDOW_SEC,
           MAX_PLANS_PER_USER,
           SHARE_CODE_LENGTH,
         },

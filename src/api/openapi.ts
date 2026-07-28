@@ -11,7 +11,7 @@ import { type Config, MIN_SHARE_CODE_LENGTH } from "../config.ts";
 import { MAX_GRANTS_PER_REQUEST } from "../http/account-list.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
 import { MAX_LABEL_BODY_BYTES } from "../http/relabel-plan.ts";
-import { SHARE_CODE_BITS_PER_CHAR } from "../ids.ts";
+import { SHARE_CODE_ALPHABET_LENGTH } from "../ids.ts";
 import { PLAN_PAGE_SIZE } from "../services/types.ts";
 import {
   componentSchemas,
@@ -434,16 +434,14 @@ const REVOKE_GRANT_OPERATION = {
 /**
  * Bits in the shortest code this deployment will still redeem.
  *
- * Derived from `MIN_SHARE_CODE_LENGTH`, not from `SHARE_CODE_LENGTH`: the
- * argument for leaving the route unthrottled rests on the weakest code that
- * can be presented, and lowering the mint length does not retire codes issued
- * under the old one. Both factors are computed rather than written down - the
- * rate comes from the alphabet in src/ids.ts that mints the codes - so neither
- * raising the floor nor changing the alphabet can leave the document
- * publishing a number that used to be true.
+ * Derived from `MIN_SHARE_CODE_LENGTH`, not from `SHARE_CODE_LENGTH`: what the
+ * document should publish is the weakest code that can still be presented, and
+ * lowering the mint length does not retire codes issued under the old one. The
+ * alphabet's length comes from src/ids.ts, which owns it, so neither raising
+ * the floor nor changing the alphabet can leave a stale number here.
  */
 const MIN_CODE_BITS = Math.round(
-  MIN_SHARE_CODE_LENGTH * SHARE_CODE_BITS_PER_CHAR,
+  MIN_SHARE_CODE_LENGTH * Math.log2(SHARE_CODE_ALPHABET_LENGTH),
 );
 
 function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
@@ -454,10 +452,13 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
       "Unauthenticated: this is what the gate page calls. A correct code " +
       "sets a path-scoped, HttpOnly cookie for this one plan, after which " +
       "`/p/{id}` serves it with no parameter and no session. " +
-      `${codeFormat} Deliberately unthrottled - the shortest redeemable ` +
-      `code carries about ${MIN_CODE_BITS} bits, so a limiter buys nothing ` +
-      "against guessing, while an anonymous one keyed on the plan would let " +
-      "a passer-by lock out the owner's own link.",
+      `${codeFormat} Throttled per client address, set by UNLOCK_RATE_MAX ` +
+      "and UNLOCK_RATE_WINDOW_SEC. That bounds what an anonymous caller can " +
+      "spend, not what it can guess: the shortest redeemable code carries " +
+      `about ${MIN_CODE_BITS} bits, which no reachable rate would improve ` +
+      "on. The bucket is the address rather than the plan, because the plan " +
+      "id is in the share link and a per-plan bucket would let anyone " +
+      "holding it lock the other readers out.",
     tags: ["Sharing"],
     security: [],
     requestBody: {
@@ -484,6 +485,22 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
         401: "The code did not match.",
         404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
       }),
+      "429": {
+        ...json(
+          ErrorBody,
+          "Too many redemptions from this address. `retry-after` says for " +
+            "how long. The bucket is the client address, so one address " +
+            "cannot spend another address's allowance - but callers sharing " +
+            "an address, behind one office NAT or mobile gateway, share the " +
+            "allowance too.",
+        ),
+        headers: {
+          "retry-after": {
+            description: "Seconds until the allowance refills.",
+            schema: { type: "integer", minimum: 0 },
+          },
+        },
+      },
     },
   };
 }

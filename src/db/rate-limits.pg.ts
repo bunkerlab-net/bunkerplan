@@ -1,13 +1,20 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, lte, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { RateLimitRepo } from "../services/types.ts";
 import type { PgSchema } from "./pg-shared.ts";
 import { retryAfterSeconds } from "./rate-limit-window.ts";
-import { uploadRateLimit as t } from "./schema/rate-limit.pg.ts";
+import { unlockRateLimit, uploadRateLimit } from "./schema/rate-limit.pg.ts";
+
+/**
+ * Either counter table. See the sqlite twin for why one implementation serves
+ * both.
+ */
+export type PgRateLimitTable = typeof uploadRateLimit | typeof unlockRateLimit;
 
 /** See src/db/rate-limits.sqlite.ts for why this is a single statement. */
 export function createPgRateLimitRepo(
   db: NodePgDatabase<PgSchema>,
+  t: PgRateLimitTable = uploadRateLimit,
 ): RateLimitRepo {
   return {
     async consume(key, max, windowSeconds) {
@@ -49,6 +56,23 @@ export function createPgRateLimitRepo(
             ? windowSeconds
             : retryAfterSeconds(start, now, windowMs),
       };
+    },
+  };
+}
+
+/** The unlock bucket. See the sqlite twin for why only this table sweeps. */
+export function createPgUnlockRateLimitRepo(
+  db: NodePgDatabase<PgSchema>,
+): RateLimitRepo {
+  const counter = createPgRateLimitRepo(db, unlockRateLimit);
+  return {
+    async consume(key, max, windowSeconds) {
+      await db
+        .delete(unlockRateLimit)
+        .where(
+          lte(unlockRateLimit.windowStart, Date.now() - windowSeconds * 1000),
+        );
+      return await counter.consume(key, max, windowSeconds);
     },
   };
 }

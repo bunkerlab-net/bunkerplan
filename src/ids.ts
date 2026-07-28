@@ -71,14 +71,14 @@ const shareCodeAlphabet =
 export const newShareCode = customAlphabet(shareCodeAlphabet);
 
 /**
- * Entropy per character of a share code, for the places that publish or reason
- * about how strong the shortest redeemable code is.
+ * How many symbols a share code draws from, for callers that publish how
+ * strong one is.
  *
- * Derived here rather than restated as a number at each use: the alphabet
- * stays private, and changing it cannot leave a caller quoting a rate that
- * used to be true.
+ * The length rather than a precomputed bit rate: this module owns what the
+ * alphabet is, and the caller that publishes an entropy figure owns the
+ * arithmetic that turns it into one.
  */
-export const SHARE_CODE_BITS_PER_CHAR = Math.log2(shareCodeAlphabet.length);
+export const SHARE_CODE_ALPHABET_LENGTH = shareCodeAlphabet.length;
 
 /**
  * The synthetic address a passkey signup gets, and the key a grant resolves a

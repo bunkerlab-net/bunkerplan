@@ -3,6 +3,7 @@ import { describeAccountClosingRepo } from "./contract/account-closing-repo.ts";
 import { describePlanRepo } from "./contract/plan-repo.ts";
 import { describeRateLimitRepo } from "./contract/rate-limit-repo.ts";
 import { describeSchema } from "./contract/schema.ts";
+import { describeUnlockRateLimitRepo } from "./contract/unlock-rate-limit-repo.ts";
 
 /**
  * `DB_DRIVER=postgres`, against a real server in a scratch schema.
@@ -16,5 +17,6 @@ const skip = DATABASE_URL === undefined;
 
 describePlanRepo("Postgres", postgresDb, { skip });
 describeRateLimitRepo("Postgres", postgresDb, { skip });
+describeUnlockRateLimitRepo("Postgres", postgresDb, { skip });
 describeAccountClosingRepo("Postgres", postgresDb, { skip });
 describeSchema("Postgres", postgresDb, { skip });

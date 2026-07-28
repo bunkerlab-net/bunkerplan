@@ -61,6 +61,8 @@ These names are the API. They are not renamed across releases.
 | `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`   |
 | `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
 | `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | clamped to a minimum of 60                                               |
+| `UNLOCK_RATE_MAX`        | no              | `30`                          | share-code redemptions per window per client address                     |
+| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | no minimum; a database row, so no KV TTL floor applies                   |
 | `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                 |
 | `SHARE_CODE_LENGTH`      | no              | `16`                          | characters in a share code; mixed-case alphanumeric, 16 to 64            |
 | `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                    |
@@ -185,10 +187,18 @@ confusing 403 much later.
   Postgres is the recommended driver regardless: SQLite is single-node.
 - **Rate limit counters live in the database, never in KV.** Workers KV
   throttles a single key to one write per second and takes up to 60s to
-  propagate, which is the opposite of what a counter needs. Both limiters -
-  Better Auth's per-IP one on `/api/auth/*` and the per-user upload one on
-  `PUT /api/plans` - decide inside a single conditional SQL statement, so a
-  concurrent burst cannot exceed the limit.
+  propagate, which is the opposite of what a counter needs. All three limiters -
+  Better Auth's per-IP one on `/api/auth/*`, the per-user upload one on
+  `PUT /api/plans`, and the per-address unlock one on
+  `POST /api/plans/{id}/unlock` - decide inside a single conditional SQL
+  statement, so a concurrent burst cannot exceed the limit.
+- **The unlock limit is keyed on the client address, never on the plan.**
+  Redeeming a share code is the only route that takes no credential, so it is
+  the only one whose bucket cannot be an account. It must not be the plan
+  either: the plan id travels in the share link, so a per-plan bucket would let
+  anyone holding that link spend the allowance and lock the other readers out.
+  Because an address has no row to cascade from, `unlock_rate_limit` prunes its
+  own closed windows on each redemption rather than relying on a foreign key.
 - **The upload limit is per user, not per credential.** An API key and the
   dashboard session draw on the same `UPLOAD_RATE_MAX` allowance, so creating
   more keys does not buy more uploads. The api-key plugin's own per-key limiter

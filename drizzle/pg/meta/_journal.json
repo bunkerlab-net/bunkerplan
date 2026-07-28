@@ -64,6 +64,13 @@
       "when": 1785174455246,
       "tag": "0008_perpetual_diamondback",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785230023937,
+      "tag": "0009_smiling_chronomancer",
+      "breakpoints": true
     }
   ]
 }

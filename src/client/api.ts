@@ -176,5 +176,16 @@ export async function unlockPlan(id: string, code: string): Promise<void> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ code }),
   });
+  // The gate page is this route's only caller, and "rate limit exceeded" tells
+  // a reader who mistyped a code nothing they can act on. `retry-after` is on
+  // the response, so the wait is named instead.
+  if (response.status === 429) {
+    const seconds = Number(response.headers.get("retry-after"));
+    throw new Error(
+      Number.isFinite(seconds) && seconds > 0
+        ? `Too many attempts. Try again in ${seconds} seconds.`
+        : "Too many attempts. Try again shortly.",
+    );
+  }
   if (!response.ok) throw new Error(await readError(response));
 }

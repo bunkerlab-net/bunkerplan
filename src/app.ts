@@ -20,6 +20,7 @@ import { replacePlan } from "./http/replace-plan.ts";
 import { resolveSessionUserId, resolveUserId } from "./http/require-user.ts";
 import { applySecurityHeaders } from "./http/security-headers.ts";
 import { servePlan } from "./http/serve-plan.ts";
+import { checkUnlockRate } from "./http/unlock-rate-limit.ts";
 import { checkUploadRate } from "./http/upload-rate-limit.ts";
 import type { AssetManifest } from "./server/assets.ts";
 import {
@@ -170,14 +171,27 @@ function registerPlanSharing(app: Hono, getServices: GetServices): void {
       c.req.param("handle"),
     );
   });
+}
 
-  // Unauthenticated on purpose: this is how someone holding only a share code
-  // gets in. Unthrottled on purpose too - `db.uploadRateLimits` cannot hold
-  // the bucket, because `upload_rate_limit.key` is a foreign key onto
-  // `user.id`, and keying on the plan alone would let a passer-by lock the
-  // owner's own share link out. See `unlockPlan` in src/http/plan-access.ts.
+/**
+ * Redeeming a share code, which is the one route here that takes no credential.
+ *
+ * Its own registrar because everything above is session-only: this is how
+ * someone holding just a code gets in. Throttled per client address rather than
+ * per plan - the plan id travels in the share link, so a per-plan bucket would
+ * let anyone holding that link lock the real readers out. Its own counter
+ * table, because `upload_rate_limit.key` is a foreign key onto `user.id` and
+ * there is no user here.
+ */
+function registerPlanUnlock(app: Hono, getServices: GetServices): void {
   app.post("/api/plans/:id/unlock", async (c) => {
     const { config, db } = await getServices();
+    const limited = await checkUnlockRate(
+      db.unlockRateLimits,
+      config,
+      c.req.raw,
+    );
+    if (limited !== null) return limited;
     return await unlockPlan(db.plans, config, c.req.raw, c.req.param("id"));
   });
 }
@@ -293,6 +307,7 @@ export function createApp(deps: AppDeps): Hono {
   registerPlanCollection(app, deps.getServices);
   registerPlanItem(app, deps.getServices);
   registerPlanSharing(app, deps.getServices);
+  registerPlanUnlock(app, deps.getServices);
   registerSite(app, deps);
 
   return app;
