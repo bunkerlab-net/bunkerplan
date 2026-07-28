@@ -950,20 +950,35 @@ describe("validateStandaloneHtml - resistance to hostile input", () => {
     },
   );
 
-  test("refuses a document too deeply nested to walk", () => {
+  /**
+   * A token stream has no depth, so nesting costs it nothing. The old refusal
+   * was a recursive parser overflowing its stack, not a rule, and the thing
+   * worth asserting is that depth cannot be used to smuggle a reference past
+   * the gate.
+   */
+  test("validates a document too deeply nested for a recursive parser", () => {
     const depth = 60_000;
     expect(check(DOC("<i>".repeat(depth) + "</i>".repeat(depth)))).toEqual({
-      ok: false,
-      reasons: ["could not parse document"],
-      truncated: false,
+      ok: true,
     });
   });
 
   /** Unclosed tags nest just as deeply, by another spelling. */
-  test("refuses a document of unclosed tags too deep to walk", () => {
-    expect(check(DOC("<i>".repeat(60_000)))).toEqual({
+  test("validates a document of unclosed tags nested just as deep", () => {
+    expect(check(DOC("<i>".repeat(60_000)))).toEqual({ ok: true });
+  });
+
+  test("still sees an external reference buried under 60,000 elements", () => {
+    const depth = 60_000;
+    expect(
+      check(
+        DOC(
+          `${"<i>".repeat(depth)}<img src="https://e.example/x.png">${"</i>".repeat(depth)}`,
+        ),
+      ),
+    ).toEqual({
       ok: false,
-      reasons: ["could not parse document"],
+      reasons: ["external reference: img[src] https://e.example/x.png"],
       truncated: false,
     });
   });
@@ -971,6 +986,139 @@ describe("validateStandaloneHtml - resistance to hostile input", () => {
   test("still walks a normally nested document", () => {
     expect(check(DOC("<i>".repeat(500) + "</i>".repeat(500)))).toEqual({
       ok: true,
+    });
+  });
+});
+
+/**
+ * Every case here was decided wrongly by the previous parser, whose attribute
+ * scanner only understood QUOTED values and whose tag pattern ended a tag at the
+ * first `>` wherever it appeared. Both are upstream defects
+ * (natemoo-re/ultrahtml#82 for the first), and both are the same shape as the
+ * `image-set()` faults fixed earlier: a delimiter inside a value read as the
+ * delimiter around it.
+ *
+ * The gate is not the runtime control - `PLAN_CSP` is - so what these cost was
+ * an upload-time verdict that disagreed with the browser, in both directions.
+ */
+describe("validateStandaloneHtml - parser conformance", () => {
+  const EXT = "https://e.example/x.png";
+
+  test("sees an unquoted attribute value", () => {
+    expect(check(DOC(`<img src=${EXT}>`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /**
+   * The old scanner stayed in "value" state through an unquoted value, so the
+   * NEXT quoted value bound to the previous key: this parsed as `{rel: <url>}`
+   * with no `href` at all, and the document was accepted.
+   */
+  test("does not shift a quoted value onto the preceding unquoted attribute", () => {
+    expect(check(DOC(`<link rel=stylesheet href="${EXT}">`))).toEqual({
+      ok: false,
+      reasons: [
+        `external reference: link[href] ${EXT} - inline the stylesheet`,
+      ],
+      truncated: false,
+    });
+  });
+
+  test("ends a tag at the real delimiter, not at a '>' inside a value", () => {
+    expect(check(DOC(`<img alt="a>b" src="${EXT}">`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /** A backslash escapes nothing in HTML; the quote after it closes the value. */
+  test("does not treat a backslash as escaping a closing quote", () => {
+    expect(check(DOC(`<img alt="a\\" src="${EXT}">`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /**
+   * A browser keeps the FIRST of a repeated attribute. Keeping the last let an
+   * inert duplicate hide the reference actually fetched.
+   */
+  test("keeps the first of a repeated attribute", () => {
+    expect(check(DOC(`<img src="${EXT}" src="data:,">`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /**
+   * HTML `<image>` is rewritten to `img`, so the reference has to be judged as
+   * `img[src]`. `URL_ATTRS.image` is the SVG entry and lists no `src`, so a
+   * parser that reported `image` here would find nothing to check.
+   */
+  test("judges <image src> as the img the parser builds", () => {
+    expect(check(DOC(`<image src="${EXT}">`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /** `rel` is inert, so this is an ordinary document however it is quoted. */
+  test.each([
+    `<link rel=canonical href="https://ex.example/p">`,
+    `<link href="https://ex.example/p" rel=canonical>`,
+    `<link href='https://ex.example/p' rel=next>`,
+  ])("accepts an inert rel written unquoted: %s", (tag) => {
+    expect(check(DOC(tag))).toEqual({ ok: true });
+  });
+
+  /** Text, not markup, so nothing inside them fetches. */
+  test.each(["title", "textarea"])(
+    "reads the contents of <%s> as text",
+    (tag) => {
+      expect(check(DOC(`<${tag}><img src="${EXT}"></${tag}>`))).toEqual({
+        ok: true,
+      });
+    },
+  );
+
+  /**
+   * The slash on a non-void element is ignored, and the tokeniser enters raw
+   * text regardless, so this CSS applies and must be scanned.
+   */
+  test("scans the CSS of a self-closing <style/>", () => {
+    expect(check(DOC(`<style/>@import url("${EXT}");</style>`))).toEqual({
+      ok: false,
+      reasons: [`external reference: style ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /** No end tag ever arrives, and a browser applies the CSS anyway. */
+  test("scans the CSS of a <style> left unclosed at EOF", () => {
+    expect(
+      check(`<!doctype html><html><head><style>@import url("${EXT}");`),
+    ).toEqual({
+      ok: false,
+      reasons: [`external reference: style ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /** SVG restores camelCase element names, and the table is keyed lower case. */
+  test("matches an SVG element the parser respells", () => {
+    expect(
+      check(DOC(`<svg><filter><feimage xlink:href="${EXT}"/></filter></svg>`)),
+    ).toEqual({
+      ok: false,
+      reasons: [`external reference: feimage[xlink:href] ${EXT}`],
+      truncated: false,
     });
   });
 });

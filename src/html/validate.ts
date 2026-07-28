@@ -7,10 +7,37 @@
  * access". The `Content-Security-Policy: sandbox` header on GET /{id} is the
  * runtime control, and it is what actually protects the uploader's session.
  *
- * `HTMLRewriter` is Workers-only and would behave differently under Bun, so
- * ultrahtml (zero dependencies, pure ESM) does the parsing on both runtimes.
+ * `HTMLRewriter` is Workers-only and would behave differently under Bun, so a
+ * JS parser does the work on both runtimes. It must be parser-equivalent to a
+ * browser, because every difference is a reference the browser acts on and this
+ * gate never mentioned. `parse5` is the spec reference implementation; the
+ * `SAXParser` wrapper owns the `ParserFeedbackSimulator`, which is the part that
+ * matters here - tokenising alone is not enough:
+ *
+ *   - `<image src=...>` is rewritten to `img`, so the reference has to be
+ *     judged as `img[src]`. A bare tokeniser reports `image`, whose entry in
+ *     `URL_ATTRS` is the SVG one and lists no `src` at all.
+ *   - `title` and `textarea` hold text, not markup, so a `<img>` written inside
+ *     one fetches nothing and must not be refused.
+ *   - SVG and MathML change how the tokeniser reads what follows.
+ *
+ * Driven through `tokenizer.write(text, true)` rather than the stream API: the
+ * whole document is already in memory, that call delivers every token AND the
+ * EOF synchronously, and it keeps this function synchronous for its callers.
+ *
+ * Streaming rather than building a tree, because the tree is not affordable.
+ * At the default 2 MiB `MAX_UPLOAD_BYTES`, a document of nothing but nested
+ * tags costs ~135 MB of heap as a `parse5` tree, over the 128 MB a Worker gets,
+ * and it is allocated inside `parse()` where no cap downstream can refuse it.
+ * The same document streams in ~5 MB, because nesting depth costs a token
+ * stream nothing. Nothing here accumulates per element: the only buffer is one
+ * `<style>` block's text, bounded by the upload itself.
  */
-import { ELEMENT_NODE, type Node, parse, TEXT_NODE, walkSync } from "ultrahtml";
+import type { Token } from "parse5";
+import type { StartTag } from "parse5-sax-parser";
+import { SAXParser } from "parse5-sax-parser";
+
+type Attribute = Token.Attribute;
 
 /**
  * A refusal carries up to ten distinct references the gate objected to, not
@@ -533,16 +560,35 @@ function addExternal(
   found.set(full, `external reference: ${location} ${shown}${hint}`);
 }
 
-function lowerAttributes(
-  attributes: Record<string, string>,
-): Record<string, string> {
-  // Null-prototype for the same reason as `URL_ATTRS`: the keys come from the
-  // document, so `__proto__` on a plain literal would not be an ordinary entry.
-  const lowered: Record<string, string> = Object.create(null);
-  for (const [key, value] of Object.entries(attributes)) {
-    lowered[key.toLowerCase()] = value;
+/**
+ * The tokeniser's attribute list as a lookup keyed by qualified name.
+ *
+ * Names are folded to lower case for the same reason the tag name is: the
+ * tokeniser lowercases them, but inside SVG the parser then restores camelCase
+ * spellings such as `viewBox`, and a `URL_ATTRS` entry that ever landed in that
+ * map would stop matching silently.
+ *
+ * `prefix` is rejoined because that is the name `URL_ATTRS` lists: inside SVG
+ * the parser splits `xlink:href` into a prefix and a name, and dropping the
+ * prefix would leave a bare `href` that matches the wrong entry.
+ *
+ * First occurrence wins, which is what a browser does with a repeated
+ * attribute. Taking the last would let `<img src="EXT" src="data:,">` hide the
+ * reference the browser actually fetches behind an inert one.
+ *
+ * Null-prototype for the same reason as `URL_ATTRS`: the keys come from the
+ * document, so `__proto__` on a plain literal would not be an ordinary entry.
+ */
+function attributeMap(attrs: readonly Attribute[]): Record<string, string> {
+  const map: Record<string, string> = Object.create(null);
+  for (const attr of attrs) {
+    const name = (
+      attr.prefix === undefined ? attr.name : `${attr.prefix}:${attr.name}`
+    ).toLowerCase();
+    if (name in map) continue;
+    map[name] = attr.value;
   }
-  return lowered;
+  return map;
 }
 
 /**
@@ -612,27 +658,34 @@ function collectAttributes(
   }
 }
 
-/** Records a refusal for every refusable reference on one element. */
-function collectElement(node: Node, found: Map<string, string>): void {
-  if (node.type !== ELEMENT_NODE) return;
-  const tag = String(node.name).toLowerCase();
-  const attributes = lowerAttributes(node.attributes);
+/** Records a refusal for every refusable reference on one start tag. */
+function collectStartTag(tag: StartTag, found: Map<string, string>): void {
+  const attributes = attributeMap(tag.attrs);
+  // Inside SVG the parser restores the camelCase spelling of the real element -
+  // `feimage` arrives as `feImage`, `textpath` as `textPath` - so the name is
+  // folded back to match how `URL_ATTRS` is keyed and how refusals have always
+  // read. ASCII-only in practice: the tokeniser has already lowered everything
+  // else, and these adjustments introduce ASCII capitals and nothing more.
+  const name = tag.tagName.toLowerCase();
 
   // From the declared `rel`, not inferred from the URL, so the stylesheet hint
   // states what the document says rather than what a path looks like.
-  const rel = tag === "link" ? attributes["rel"] : undefined;
+  const rel = name === "link" ? attributes["rel"] : undefined;
   const stylesheet =
     rel?.toLowerCase().split(/\s+/).includes("stylesheet") === true;
 
   // An inert `link` reaches the network through no attribute, so the whole
   // element is skipped rather than just its `href`: `imagesrcset` only fetches
   // under `rel=preload as=image`, which is not inert.
-  if (tag !== "link" || !inertLink(rel)) {
-    collectAttributes(tag, attributes, stylesheet, found);
+  if (name !== "link" || !inertLink(rel)) {
+    collectAttributes(name, attributes, stylesheet, found);
     if (found.size > MAX_FINDINGS) return;
   }
 
-  if (tag === "meta" && attributes["http-equiv"]?.toLowerCase() === "refresh") {
+  if (
+    name === "meta" &&
+    attributes["http-equiv"]?.toLowerCase() === "refresh"
+  ) {
     const target = attributes["content"];
     if (target !== undefined) {
       const url = refreshTarget(target);
@@ -644,11 +697,11 @@ function collectElement(node: Node, found: Map<string, string>): void {
   }
 
   // `srcdoc` carries a whole nested document whose own subresources would load
-  // automatically. Its value is HTML-entity encoded, and ultrahtml does not
-  // decode attribute entities - validating it recursively would mean writing an
-  // entity decoder and trusting it as a security boundary. A standalone
-  // document gains nothing from `srcdoc`, so it is rejected outright.
-  if (tag === "iframe" && (attributes["srcdoc"] ?? "").trim() !== "") {
+  // automatically. Its value arrives HTML-entity DECODED here, but validating
+  // it would mean re-entering the parser on uploader-controlled markup and
+  // trusting that recursion as a security boundary. A standalone document gains
+  // nothing from `srcdoc`, so it is rejected outright.
+  if (name === "iframe" && (attributes["srcdoc"] ?? "").trim() !== "") {
     const refusal = "nested document: iframe[srcdoc]";
     found.set(refusal, refusal);
     if (found.size > MAX_FINDINGS) return;
@@ -657,18 +710,8 @@ function collectElement(node: Node, found: Map<string, string>): void {
   const inlineStyle = attributes["style"];
   if (inlineStyle !== undefined) {
     for (const target of externalInCss(inlineStyle)) {
-      addExternal(found, `${tag}[style]`, target);
+      addExternal(found, `${name}[style]`, target);
       if (found.size > MAX_FINDINGS) return;
-    }
-  }
-
-  if (tag === "style") {
-    for (const child of node.children ?? []) {
-      if (child.type !== TEXT_NODE) continue;
-      for (const target of externalInCss(String(child.value))) {
-        addExternal(found, "style", target);
-        if (found.size > MAX_FINDINGS) return;
-      }
     }
   }
 }
@@ -685,6 +728,76 @@ function stripPreamble(text: string): string {
   }
 }
 
+/**
+ * `SAXParser` keeps its tokenizer `protected`, and a subclass is how that access
+ * is meant to be had. Everything the gate needs is already in memory, so the
+ * stream API buys nothing and costs the one thing that matters: `end()` defers
+ * `_final`, and `_final` is where EOF - and with it the last pending text - is
+ * delivered. A document ending inside an unclosed `<style>` would have its CSS
+ * arrive after the verdict had been returned.
+ */
+class DocumentScanner extends SAXParser {
+  /** Every token, and the EOF, delivered before this returns. */
+  scan(text: string): void {
+    this.tokenizer.write(text, true);
+  }
+}
+
+/** Records every refusable reference in the document. */
+function scanDocument(text: string, found: Map<string, string>): void {
+  const parser = new DocumentScanner();
+
+  // A `<style>` block's text arrives in as many pieces as the tokeniser cares to
+  // emit, and `url(` can straddle any two of them, so the block is buffered
+  // whole and scanned once. Bounded by the upload: one block, never the tree.
+  let inStyle = false;
+  let css = "";
+
+  /** Past the cap the remaining bytes cannot change the verdict. */
+  const capped = (): boolean => {
+    if (found.size <= MAX_FINDINGS) return false;
+    parser.stop();
+    return true;
+  };
+
+  const flushStyle = (): void => {
+    if (!inStyle) return;
+    inStyle = false;
+    const block = css;
+    css = "";
+    for (const target of externalInCss(block)) {
+      addExternal(found, "style", target);
+      if (capped()) return;
+    }
+  };
+
+  parser.on("startTag", (tag) => {
+    // Every `<style>` start tag opens a raw-text block, self-closing slash or
+    // not: HTML ignores the slash on a non-void element, and the tokeniser
+    // switches to RAWTEXT either way. Skipping `<style/>` here would read its
+    // CSS as ordinary text and miss every reference in it.
+    if (tag.tagName === "style") {
+      flushStyle();
+      inStyle = true;
+    }
+    collectStartTag(tag, found);
+    capped();
+  });
+
+  parser.on("text", (token) => {
+    if (inStyle) css += token.text;
+  });
+
+  parser.on("endTag", (tag) => {
+    if (tag.tagName === "style") flushStyle();
+  });
+
+  parser.scan(text);
+  // An unclosed `<style>` never sees an end tag, and a browser applies its CSS
+  // regardless, so the buffer is scanned at EOF as well.
+  flushStyle();
+}
+
 export function validateStandaloneHtml(bytes: Uint8Array): ValidationResult {
   let text: string;
   try {
@@ -699,26 +812,7 @@ export function validateStandaloneHtml(bytes: Uint8Array): ValidationResult {
   }
 
   const found = new Map<string, string>();
-  try {
-    // `walkSync` cannot be stopped from its callback, so the tree is traversed
-    // either way; past the cap this stops validating rather than stops walking.
-    walkSync(parse(text), (node) => {
-      if (found.size > MAX_FINDINGS) return;
-      collectElement(node, found);
-    });
-  } catch (cause) {
-    // ultrahtml parses and walks recursively, so a document too deeply nested
-    // overflows the stack rather than returning. What the parser cannot see
-    // through, this check cannot vouch for, so that is an upload error rather
-    // than a 500. Only that: every other exception is a defect in the collector
-    // and is rethrown, because a bug reported as a refusal blames the document.
-    if (!(cause instanceof RangeError)) throw cause;
-    return {
-      ok: false,
-      reasons: ["could not parse document"],
-      truncated: false,
-    };
-  }
+  scanDocument(text, found);
 
   if (found.size === 0) return { ok: true };
   // Collecting one past the cap is what makes the flag precise: it reports

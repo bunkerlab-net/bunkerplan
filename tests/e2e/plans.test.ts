@@ -214,6 +214,38 @@ describe("plan lifecycle over HTTP", () => {
     expect(await storedSize(created.id)).toBe(body.length);
   });
 
+  /**
+   * Attribute quoting is optional in HTML, and the gate used to disagree with
+   * the browser about both halves of that: an unquoted external reference was
+   * accepted, and an unquoted inert `rel` was refused. Held here as well as in
+   * tests/validate.test.ts because it is the verdict a caller actually receives
+   * that matters.
+   */
+  test("refuses an unquoted external reference, naming it", async () => {
+    const key = await app.account();
+    const response = await app.fetch(
+      "/api/plans",
+      upload(
+        key,
+        "<!doctype html><html><body><img src=https://cdn.example.com/x.png></body></html>",
+      ),
+    );
+
+    expect(response.status).toBe(422);
+    expect(await jsonBody(response)).toEqual({
+      error: "external reference: img[src] https://cdn.example.com/x.png",
+    });
+  });
+
+  test("serves a document whose canonical link is written unquoted", async () => {
+    const key = await app.account();
+    const body =
+      '<!doctype html><html><head><link href="https://ex.example/p" rel=canonical></head><body>hi</body></html>';
+    const created = await createPlan(key, body);
+
+    expect(await (await app.fetch(`/p/${created.id}`)).text()).toBe(body);
+  });
+
   test("counts replacements against the same allowance as uploads", async () => {
     const key = await app.account();
     const created = await createPlan(key, html("first"));
