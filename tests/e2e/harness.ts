@@ -93,10 +93,20 @@ export interface Harness {
  * bundles the Worker itself from there, so there is no separate server build
  * to wait for.
  *
- * Unconditional rather than mtime-guessed: a stale `dist` would test the
- * previous commit.
+ * Skipped when `bun run test` already did it. That script builds once and then
+ * runs `bun test --parallel`, so every file that boots a worker would otherwise
+ * rebuild - and `scripts/build.ts` opens with `rm -rf dist`, which means one
+ * file deleting the tree another is reading. Nothing errors; the reader just
+ * finds a file missing, which is how this arrived as "the bundle the page asks
+ * for is in the client build" failing on CI and nowhere else.
+ *
+ * Still unconditional for a direct `bun test <file>` run, where nothing has
+ * built and a stale `dist` would test the previous commit. Those runs are
+ * sequential, so there is no tree to pull out from under anyone.
  */
 async function build(): Promise<void> {
+  if (process.env["BUNKERPLAN_PREBUILT"] === "1") return;
+
   const result = Bun.spawnSync(["bun", "run", "build"], {
     cwd: ROOT,
     stdout: "pipe",
