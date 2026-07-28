@@ -165,14 +165,20 @@ export async function unlockPlan(
   request: Request,
   planId: string,
 ): Promise<Response> {
-  // One 400 covers every way the body can fail, because they all mean the
-  // same thing to the only caller: the gate page's fetch. The bound is not a
-  // separate contract - a code cannot exceed the ceiling above, so a body too
-  // large to read cannot have held one, and this endpoint is unauthenticated.
+  // 413 for the bound, matching `readJson` on the sharing routes: a body over
+  // the ceiling is a different fact from a malformed one, and answering the
+  // same 400 for both would be this codebase disagreeing with itself about the
+  // same condition. Everything after it is one 400, because a missing code, a
+  // non-string code, and unparseable JSON all mean the same thing to the only
+  // caller - the gate page's fetch.
   const encoded = await readBoundedBody(request, MAX_UNLOCK_BODY_BYTES);
+  if (encoded === null) {
+    return problem(413, `body exceeds ${MAX_UNLOCK_BODY_BYTES} bytes`);
+  }
+
   let body: unknown;
   try {
-    body = JSON.parse(new TextDecoder().decode(encoded ?? new Uint8Array(0)));
+    body = JSON.parse(new TextDecoder().decode(encoded));
   } catch {
     return problem(400, "code is required");
   }

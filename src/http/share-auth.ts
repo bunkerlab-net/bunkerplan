@@ -21,17 +21,50 @@ export const SHARE_COOKIE_TTL_SEC = 43_200;
  * from, anything Better Auth signs.
  */
 const COOKIE_KEY_SUFFIX = "bunkerplan-share-cookie-v1";
+/** The same separation for the rate-limit bucket, which is not a cookie. */
+const BUCKET_KEY_SUFFIX = "-unlock-bucket-v1";
 
 const encoder = new TextEncoder();
 
-/** Lowercase hex SHA-256. The stored form of a share code. */
-export async function hashShareCode(code: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(code));
+function toHex(bytes: ArrayBuffer): string {
   let hex = "";
-  for (const byte of new Uint8Array(digest)) {
+  for (const byte of new Uint8Array(bytes)) {
     hex += byte.toString(16).padStart(2, "0");
   }
   return hex;
+}
+
+/** Lowercase hex SHA-256. The stored form of a share code. */
+export async function hashShareCode(code: string): Promise<string> {
+  return toHex(await crypto.subtle.digest("SHA-256", encoder.encode(code)));
+}
+
+/**
+ * The rate-limit bucket for a client address, as a keyed digest.
+ *
+ * Stored in place of the address, so this table is not another plaintext-IP
+ * store. Redeeming a code takes no account, so the addresses landing here are
+ * those of anyone who merely poked a share link. Better Auth's own limiter does
+ * keep raw addresses for `/api/auth/*`, and `session.ip_address` keeps one per
+ * sign-in; neither is a reason to add a third.
+ *
+ * Keyed with the deployment secret, and domain-separated like the cookie above,
+ * so a stolen table cannot be walked back to addresses by hashing the address
+ * space. Deterministic, so one address keeps one bucket and the counting is
+ * exactly as before.
+ */
+export async function unlockBucketKey(
+  secret: string,
+  address: string,
+): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(`${secret}${BUCKET_KEY_SUFFIX}`),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return toHex(await crypto.subtle.sign("HMAC", key, encoder.encode(address)));
 }
 
 /**

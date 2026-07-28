@@ -2,7 +2,7 @@ import { eq, lte, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { RateLimitRepo } from "../services/types.ts";
 import type { PgSchema } from "./pg-shared.ts";
-import { retryAfterSeconds } from "./rate-limit-window.ts";
+import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
 import { unlockRateLimit, uploadRateLimit } from "./schema/rate-limit.pg.ts";
 
 /**
@@ -60,18 +60,24 @@ export function createPgRateLimitRepo(
   };
 }
 
-/** The unlock bucket. See the sqlite twin for why only this table sweeps. */
+/**
+ * The unlock bucket. See the sqlite twin for why only this table sweeps, and
+ * why it sweeps on a fraction of attempts rather than all of them.
+ */
 export function createPgUnlockRateLimitRepo(
   db: NodePgDatabase<PgSchema>,
+  shouldSweep: () => boolean = sometimes,
 ): RateLimitRepo {
   const counter = createPgRateLimitRepo(db, unlockRateLimit);
   return {
     async consume(key, max, windowSeconds) {
-      await db
-        .delete(unlockRateLimit)
-        .where(
-          lte(unlockRateLimit.windowStart, Date.now() - windowSeconds * 1000),
-        );
+      if (shouldSweep()) {
+        await db
+          .delete(unlockRateLimit)
+          .where(
+            lte(unlockRateLimit.windowStart, Date.now() - windowSeconds * 1000),
+          );
+      }
       return await counter.consume(key, max, windowSeconds);
     },
   };

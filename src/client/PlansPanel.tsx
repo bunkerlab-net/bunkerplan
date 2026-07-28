@@ -214,6 +214,14 @@ function ShareCodeBlock(
   const { plan, guard, reload, locked } = props;
   const [code, setCode] = useState<string | null>(null);
 
+  // Going public retires the code, so a plaintext held here can outlive what it
+  // opens. Dropped rather than left in state: showing it would hand the owner a
+  // link that no longer works, which is worse than showing nothing. The render
+  // below is gated too, because this runs after it.
+  useEffect(() => {
+    if (!props.hasShareCode) setCode(null);
+  }, [props.hasShareCode]);
+
   const rotate = () =>
     void guard(async () => {
       setCode(await rotateShareCode(plan.id));
@@ -250,7 +258,9 @@ function ShareCodeBlock(
           </button>
         )}
       </div>
-      {code !== null && <ShareLink url={plan.url} code={code} />}
+      {code !== null && props.hasShareCode && (
+        <ShareLink url={plan.url} code={code} />
+      )}
       {code === null && props.hasShareCode && (
         <p className="muted">
           A code is set. It cannot be read back - regenerate to get a new one,

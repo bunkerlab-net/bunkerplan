@@ -140,7 +140,12 @@ export async function applyGrants(
     try {
       outcome = await plans.grantByHandle(planId, ownerId, account);
     } catch (cause) {
-      logger?.warn({ err: cause, planId }, "granting one account failed");
+      // `stage` matches the field the upload path sets, so an ownership read
+      // failing and a single grant failing can be counted apart.
+      logger?.warn(
+        { err: cause, planId, stage: "grant-account" },
+        "granting one account failed",
+      );
       failed.push(account);
       continue;
     }

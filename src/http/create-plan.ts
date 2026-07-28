@@ -201,10 +201,27 @@ async function grantOnUpload(
       deps.logger,
     );
     if (outcomes !== null) return { grants: outcomes };
-    deps.logger.warn({ planId }, "plan vanished before its grants applied");
+    deps.logger.warn(
+      { planId, stage: "ownership-read", accounts: accounts.length },
+      "plan vanished before its grants applied",
+    );
     return { gone: true };
   } catch (cause) {
-    deps.logger.warn({ err: cause, planId }, "grants failed on upload");
+    // `applyGrants` reports a per-account failure rather than raising, so what
+    // reaches here is the ownership read it does first - no grant was attempted.
+    // Named as that, with the count still on the record, because "grants
+    // failed" would send an operator reading the wrong statement. `stage` is a
+    // field rather than only wording, so the two failure kinds can be counted
+    // apart without matching on message text.
+    deps.logger.warn(
+      {
+        err: cause,
+        planId,
+        stage: "ownership-read",
+        accounts: accounts.length,
+      },
+      "ownership read failed before granting on upload",
+    );
     return { grants: { granted: [], unknown: [], failed: accounts } };
   }
 }

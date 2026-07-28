@@ -30,11 +30,20 @@ function useUnlock(planId: string) {
     void (async () => {
       try {
         await unlockPlan(planId, trimmed);
-        // A full reload rather than a fetch of the document: the unlock
-        // response set the cookie, so the plan is now simply a normal
-        // navigation - and it must be, because the plan renders under its own
-        // sandboxed CSP.
-        window.location.reload();
+        // A full navigation rather than a fetch of the document: the unlock
+        // response set the cookie, so the plan is now an ordinary request - and
+        // it must be one, because the plan renders under its own sandboxed CSP.
+        //
+        // To the bare path, and replacing this entry rather than adding one:
+        // whatever got here may carry `?code=`, and reloading would keep that
+        // code in history and in the `Referer` of everything the document goes
+        // on to load. The cookie is what grants access from here. Taken from
+        // `pathname` rather than rebuilt from `planId`, so there is no string to
+        // get wrong; the hash is kept because it is not a secret and may mean
+        // something to the document.
+        window.location.replace(
+          window.location.pathname + window.location.hash,
+        );
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
         setBusy(false);

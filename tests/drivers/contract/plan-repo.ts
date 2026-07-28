@@ -475,7 +475,12 @@ export function describePlanRepo(
           "private",
         );
         expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
+      });
 
+      test("a public plan cannot be given a code, a private one can", async () => {
+        const owner = await fixture.seedUser();
+        const created = row(owner);
+        await plans.insert(created, 10);
         expect(await plans.setVisibility(created.id, owner, "public")).toBe(
           true,
         );
@@ -502,19 +507,32 @@ export function describePlanRepo(
           visibility: "private",
           shareCodeHash: "d".repeat(64),
         });
+      });
 
-        // Going public retires it rather than leaving it dormant.
-        expect(await plans.setVisibility(created.id, owner, "public")).toBe(
-          true,
-        );
-        expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
+      test("going public retires the code", async () => {
+        const owner = await fixture.seedUser();
+        const coded = row(owner, {
+          visibility: "private",
+          shareCodeHash: "d".repeat(64),
+        });
+        await plans.insert(coded, 10);
 
-        // Null clears it, which is how a code is removed while private. Allowed
-        // on a public row too, so a legacy one can still be tidied.
-        expect(await plans.setShareCodeHash(created.id, owner, null)).toBe(
-          true,
-        );
-        expect((await plans.findAccess(created.id))?.shareCodeHash).toBeNull();
+        expect(await plans.setVisibility(coded.id, owner, "public")).toBe(true);
+        expect((await plans.findAccess(coded.id))?.shareCodeHash).toBeNull();
+      });
+
+      test("a null hash clears the code, even on a public row", async () => {
+        const owner = await fixture.seedUser();
+        // Straight to the shape `insert` still allows, so the clear is what is
+        // being tested rather than the transition that would also have cleared.
+        const legacy = row(owner, {
+          visibility: "public",
+          shareCodeHash: "d".repeat(64),
+        });
+        await plans.insert(legacy, 10);
+
+        expect(await plans.setShareCodeHash(legacy.id, owner, null)).toBe(true);
+        expect((await plans.findAccess(legacy.id))?.shareCodeHash).toBeNull();
       });
 
       /**

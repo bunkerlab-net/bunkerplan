@@ -1,7 +1,7 @@
 import { eq, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type { RateLimitRepo } from "../services/types.ts";
-import { retryAfterSeconds } from "./rate-limit-window.ts";
+import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
 import {
   unlockRateLimit,
   uploadRateLimit,
@@ -85,20 +85,28 @@ export function createSqliteRateLimitRepo(
  * The unlock bucket, which prunes itself.
  *
  * `upload_rate_limit` needs no sweep: its key cascades from `user`, so a
- * counter goes when its account does. This table's key is a client address,
- * with nothing to cascade from, so an unauthenticated caller could otherwise
- * plant a row per address for good. A closed window can only ever be reset,
- * never refused, so deleting one never changes a decision.
+ * counter goes when its account does. This table's key is a digest of a client
+ * address, with nothing to cascade from, so an unauthenticated caller could
+ * otherwise plant a row per address for good. A closed window can only ever be
+ * reset, never refused, so deleting one never changes a decision.
+ *
+ * `shouldSweep` is injected so the pruning test can ask for one instead of
+ * rolling dice until it gets one.
  */
-export function createSqliteUnlockRateLimitRepo(db: SqliteDb): RateLimitRepo {
+export function createSqliteUnlockRateLimitRepo(
+  db: SqliteDb,
+  shouldSweep: () => boolean = sometimes,
+): RateLimitRepo {
   const counter = createSqliteRateLimitRepo(db, unlockRateLimit);
   return {
     async consume(key, max, windowSeconds) {
-      await db
-        .delete(unlockRateLimit)
-        .where(
-          lte(unlockRateLimit.windowStart, Date.now() - windowSeconds * 1000),
-        );
+      if (shouldSweep()) {
+        await db
+          .delete(unlockRateLimit)
+          .where(
+            lte(unlockRateLimit.windowStart, Date.now() - windowSeconds * 1000),
+          );
+      }
       return await counter.consume(key, max, windowSeconds);
     },
   };

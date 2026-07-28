@@ -1005,7 +1005,12 @@ describe("gated sharing", () => {
 
     const unlocked = await app.fetch(`/api/plans/${created.id}/unlock`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // One address for this test's reader: the unlock ceiling is per address
+        // and its window outlives the run, so the default bucket is shared.
+        "cf-connecting-ip": "198.18.5.5",
+      },
       body: JSON.stringify({ code: first }),
     });
     expect(unlocked.status).toBe(204);
@@ -1019,7 +1024,12 @@ describe("gated sharing", () => {
 
     const wrong = await app.fetch(`/api/plans/${created.id}/unlock`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // One address for this test's reader: the unlock ceiling is per address
+        // and its window outlives the run, so the default bucket is shared.
+        "cf-connecting-ip": "198.18.5.5",
+      },
       body: JSON.stringify({ code: "definitely-not-it" }),
     });
     expect(wrong.status).toBe(401);
@@ -1052,7 +1062,12 @@ describe("gated sharing", () => {
     // Redeem the rotated code, so there is a live cookie to invalidate.
     const reUnlocked = await app.fetch(`/api/plans/${created.id}/unlock`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // One address for this test's reader: the unlock ceiling is per address
+        // and its window outlives the run, so the default bucket is shared.
+        "cf-connecting-ip": "198.18.5.5",
+      },
       body: JSON.stringify({ code: second }),
     });
     expect(reUnlocked.status).toBe(204);
@@ -1085,7 +1100,12 @@ describe("gated sharing", () => {
     // With no code at all the endpoint cannot say a plan is code-shared.
     const afterClear = await app.fetch(`/api/plans/${created.id}/unlock`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // One address for this test's reader: the unlock ceiling is per address
+        // and its window outlives the run, so the default bucket is shared.
+        "cf-connecting-ip": "198.18.5.5",
+      },
       body: JSON.stringify({ code: second }),
     });
     expect(afterClear.status).toBe(404);

@@ -501,15 +501,6 @@ describe("unlockPlan", () => {
     ["no code field", "{}"],
     ["a non-string code", '{"code":42}'],
     ["an empty code", '{"code":""}'],
-    // Past MAX_UNLOCK_BODY_BYTES, so `readBoundedBody` refuses and returns
-    // null. That collapses into the same 400 rather than a 413: the bound is
-    // a defence on an unauthenticated route, not a second contract. Sized
-    // from the constant, so raising the ceiling cannot leave this body under
-    // the bound and the case quietly asserting nothing.
-    [
-      "a body too large to read",
-      `{"code":"${"x".repeat(MAX_UNLOCK_BODY_BYTES + 1)}"}`,
-    ],
   ])("%s is one 400", async (_, body) => {
     const response = await unlockPlan(
       fakePlans(await codedRow()),
@@ -520,6 +511,23 @@ describe("unlockPlan", () => {
 
     expect(response.status).toBe(400);
     expect(await jsonOf(response)).toEqual({ error: "code is required" });
+  });
+
+  test("a body past the ceiling is a 413, like every other bounded body", async () => {
+    // Sized from the constant, so raising the ceiling cannot leave this body
+    // under the bound with the case quietly asserting nothing.
+    const oversize = `{"code":"${"x".repeat(MAX_UNLOCK_BODY_BYTES + 1)}"}`;
+    const response = await unlockPlan(
+      fakePlans(await codedRow()),
+      CONFIG,
+      post(oversize),
+      PLAN,
+    );
+
+    expect(response.status).toBe(413);
+    expect(await jsonOf(response)).toEqual({
+      error: `body exceeds ${MAX_UNLOCK_BODY_BYTES} bytes`,
+    });
   });
 
   test("a plan with no code is indistinguishable from no plan", async () => {

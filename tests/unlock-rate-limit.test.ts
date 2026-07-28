@@ -5,6 +5,8 @@ import type { RateLimitRepo } from "../src/services/types.ts";
 
 const CONFIG = {
   clientIpHeader: "cf-connecting-ip",
+  // Keys the bucket digest; any stable value serves here.
+  secret: "test-secret-at-least-32-characters-long",
   unlockRateMax: 3,
   unlockRateWindowSec: 60,
 };
@@ -29,9 +31,10 @@ const post = (headers: Record<string, string> = {}) =>
   });
 
 describe("the unlock rate limit", () => {
-  test("charges the client address, not the plan", async () => {
-    // The security property: were the plan the bucket, anyone holding the
-    // share link could spend it and lock the other readers out.
+  test("charges a digest of the address, never the address itself", async () => {
+    // The bucket is the address, so one address cannot spend another address's
+    // allowance - callers sharing one still share it. The stored key is a keyed
+    // digest, so this table is not a log of every address that poked a link.
     const { limits, keys } = fakeLimits(true);
     const allowed = await checkUnlockRate(
       limits,
@@ -40,20 +43,39 @@ describe("the unlock rate limit", () => {
     );
 
     expect(allowed).toBeNull();
-    expect(keys).toEqual(["203.0.113.9"]);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).not.toContain("203.0.113.9");
+    expect(keys[0]).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("passes the configured ceiling and window through", async () => {
-    const seen: Array<[string, number, number]> = [];
+    const seen: Array<[number, number]> = [];
     const limits: RateLimitRepo = {
-      consume: async (key, max, window) => {
-        seen.push([key, max, window]);
+      consume: async (_key, max, window) => {
+        seen.push([max, window]);
         return { allowed: true, retryAfter: 0 };
       },
     };
 
     await checkUnlockRate(limits, CONFIG, post({ "cf-connecting-ip": "a" }));
-    expect(seen).toEqual([["a", 3, 60]]);
+    expect(seen).toEqual([[3, 60]]);
+  });
+
+  test("buckets one address together and two apart", async () => {
+    const charge = async (address: string) => {
+      const { limits, keys } = fakeLimits(true);
+      await checkUnlockRate(
+        limits,
+        CONFIG,
+        post({ "cf-connecting-ip": address }),
+      );
+      return keys[0] ?? "";
+    };
+
+    // Deterministic, or an address would get a fresh allowance per request.
+    expect(await charge("203.0.113.9")).toBe(await charge("203.0.113.9"));
+    // Distinct, or one address could spend another's.
+    expect(await charge("203.0.113.9")).not.toBe(await charge("203.0.113.10"));
   });
 
   test("answers 429 with retry-after once the allowance is spent", async () => {
@@ -71,14 +93,21 @@ describe("the unlock rate limit", () => {
   test("reads the header the configuration names, not a fixed one", async () => {
     // A self-hosted deployment names its own; trusting `cf-connecting-ip`
     // behind an nginx that does not set it would bucket every caller together.
-    const { limits, keys } = fakeLimits(true);
+    const named = fakeLimits(true);
     await checkUnlockRate(
-      limits,
+      named.limits,
       { ...CONFIG, clientIpHeader: "x-forwarded-for" },
       post({ "x-forwarded-for": "198.51.100.4", "cf-connecting-ip": "wrong" }),
     );
 
-    expect(keys).toEqual(["198.51.100.4"]);
+    // The digest of the named header's value, not of the other one.
+    const expected = fakeLimits(true);
+    await checkUnlockRate(
+      expected.limits,
+      CONFIG,
+      post({ "cf-connecting-ip": "198.51.100.4" }),
+    );
+    expect(named.keys).toEqual(expected.keys);
   });
 
   test("refuses when the trusted header did not arrive", async () => {

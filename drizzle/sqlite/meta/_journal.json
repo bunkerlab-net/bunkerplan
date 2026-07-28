@@ -71,6 +71,13 @@
       "when": 1785231675254,
       "tag": "0009_watchful_shard",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1785234852572,
+      "tag": "0010_quiet_bucket",
+      "breakpoints": true
     }
   ]
 }

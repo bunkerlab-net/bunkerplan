@@ -1,10 +1,11 @@
 import type { Config } from "../config.ts";
 import type { RateLimitRepo } from "../services/types.ts";
 import { problem } from "./problem.ts";
+import { unlockBucketKey } from "./share-auth.ts";
 
 type UnlockRateConfig = Pick<
   Config,
-  "clientIpHeader" | "unlockRateMax" | "unlockRateWindowSec"
+  "clientIpHeader" | "secret" | "unlockRateMax" | "unlockRateWindowSec"
 >;
 
 /**
@@ -21,6 +22,9 @@ type UnlockRateConfig = Pick<
  * the operator described. Refusing is the safe reading of that: the alternative
  * is one shared bucket for every caller, which is the lockout above.
  *
+ * The bucket stored is a keyed digest of the address, not the address - see
+ * `unlockBucketKey`. That changes nothing about the counting.
+ *
  * Null means proceed; otherwise the 429 to return.
  */
 export async function checkUnlockRate(
@@ -34,7 +38,7 @@ export async function checkUnlockRate(
   }
 
   const limit = await limits.consume(
-    address,
+    await unlockBucketKey(config.secret, address),
     config.unlockRateMax,
     config.unlockRateWindowSec,
   );

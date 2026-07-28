@@ -50,14 +50,22 @@ function migrate(
   // the test would be passing against a database unlike either of them.
   db.exec("PRAGMA foreign_keys = ON");
 
+  let seeded = false;
   for (const { n, statements } of migrationFiles()) {
     const guarded = n === seedBefore;
     if (guarded) {
       seed(db);
+      seeded = true;
       if (wrap) db.exec("BEGIN");
     }
     for (const statement of statements) db.exec(statement);
     if (guarded && wrap) db.exec("COMMIT");
+  }
+  // Renumbering a migration would otherwise leave the seed unrun and every
+  // assertion below trivially true against an empty database.
+  if (!seeded) {
+    db.close();
+    throw new Error(`no migration numbered ${seedBefore} to seed before`);
   }
   return db;
 }
@@ -191,8 +199,12 @@ describe.each([
  * boundary, so `plan` does not match inside `plan_grant`.
  */
 function named(statement: string, table: string): RegExp {
+  // `IF EXISTS` / `IF NOT EXISTS` sit between the verb and the name, and
+  // drizzle emits them for some statements. Optional here so this guard keeps
+  // matching a migration that uses one rather than silently passing.
   return new RegExp(
-    `${statement}\\s+(?:\`${table}\`|"${table}"|${table}\\b)`,
+    `${statement}\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?` +
+      `(?:\`${table}\`|"${table}"|${table}\\b)`,
     "i",
   );
 }
@@ -237,4 +249,45 @@ describe("the migration set as a whole", () => {
 
     expect(offenders).toEqual([]);
   });
+});
+
+/**
+ * Both dialects have to carry the data repairs, not just the schema.
+ *
+ * The Postgres files are applied for real by the driver fixture, so this is not
+ * about whether they parse - it is about divergence. The tests above run the
+ * SQLite corpus through bun:sqlite; nothing else notices if the Postgres twin of
+ * a data migration was never written, or was written against the wrong column.
+ */
+describe("the data repairs exist in both dialects", () => {
+  const corpus = (dialect: "sqlite" | "pg"): string =>
+    readdirSync(`drizzle/${dialect}`)
+      .filter((name) => name.endsWith(".sql"))
+      .sort()
+      .map((name) => readFileSync(`drizzle/${dialect}/${name}`, "utf8"))
+      .join("\n");
+
+  test.each(["sqlite", "pg"] as const)(
+    "%s clears the share code of public plans",
+    (dialect) => {
+      // Quoting differs between the two, so the shape is matched rather than
+      // the exact text: set the digest null, for public rows.
+      expect(corpus(dialect)).toMatch(
+        /update\s+["`]?plan["`]?\s+set\s+["`]?share_code_hash["`]?\s*=\s*null\s+where\s+["`]?visibility["`]?\s*=\s*'public'/i,
+      );
+    },
+  );
+
+  test.each(["sqlite", "pg"] as const)(
+    "%s drops the unlock counters keyed by a raw address",
+    (dialect) => {
+      // Those rows predate the switch to a keyed digest, so nothing can match
+      // them again. Ephemeral counters, so they are deleted rather than
+      // rewritten - and the sweep that would otherwise collect them only runs
+      // on a fraction of redemptions.
+      expect(corpus(dialect)).toMatch(
+        /delete\s+from\s+["`]?unlock_rate_limit["`]?/i,
+      );
+    },
+  );
 });

@@ -332,7 +332,9 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
   return {
     plans: createSqlitePlanRepo(db),
     rateLimits: createSqliteRateLimitRepo(db),
-    unlockRateLimits: createSqliteUnlockRateLimitRepo(db),
+    // Always sweeps: the pruning contract asserts a closed window is gone,
+    // and the default only sweeps on a fraction of attempts.
+    unlockRateLimits: createSqliteUnlockRateLimitRepo(db, () => true),
     accountClosing: createSqliteAccountClosingRepo(db),
 
     seedUser: async (handle) => {
@@ -470,7 +472,8 @@ export async function postgresDb(): Promise<DbFixture> {
   return {
     plans: createPgPlanRepo(db),
     rateLimits: createPgRateLimitRepo(db),
-    unlockRateLimits: createPgUnlockRateLimitRepo(db),
+    // Always sweeps, as above.
+    unlockRateLimits: createPgUnlockRateLimitRepo(db, () => true),
     accountClosing: createPgAccountClosingRepo(db),
 
     seedUser: async (handle) => {
