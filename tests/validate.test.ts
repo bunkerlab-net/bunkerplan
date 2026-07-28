@@ -1,10 +1,21 @@
 import { describe, expect, test } from "bun:test";
+import type { DefaultTreeAdapterTypes } from "parse5";
+import { parse } from "parse5";
 import { validateStandaloneHtml } from "../src/html/validate.ts";
 
 const encode = (html: string) => new TextEncoder().encode(html);
 
 function check(html: string) {
   return validateStandaloneHtml(encode(html));
+}
+
+/** A node's text content, descendants included, as a stylesheet is built from. */
+function textContent(node: DefaultTreeAdapterTypes.Node): string {
+  if (node.nodeName === "#text") {
+    return (node as DefaultTreeAdapterTypes.TextNode).value;
+  }
+  if (!("childNodes" in node)) return "";
+  return node.childNodes.map(textContent).join("");
 }
 
 const DOC = (body: string) =>
@@ -1111,13 +1122,132 @@ describe("validateStandaloneHtml - parser conformance", () => {
     });
   });
 
-  /** SVG restores camelCase element names, and the table is keyed lower case. */
-  test("matches an SVG element the parser respells", () => {
-    expect(
-      check(DOC(`<svg><filter><feimage xlink:href="${EXT}"/></filter></svg>`)),
-    ).toEqual({
+  /**
+   * SVG restores camelCase element names, so both spellings arrive as `feImage`
+   * and the refusal is built from the lower-cased name the table is keyed by.
+   */
+  test.each(["feImage", "feimage"])(
+    "matches an SVG element the parser respells: <%s>",
+    (spelling) => {
+      expect(
+        check(
+          DOC(`<svg><filter><${spelling} xlink:href="${EXT}"/></filter></svg>`),
+        ),
+      ).toEqual({
+        ok: false,
+        reasons: [`external reference: feimage[xlink:href] ${EXT}`],
+        truncated: false,
+      });
+    },
+  );
+
+  /**
+   * A browser applies the CSS in an SVG or MathML `<style>`, so it is scanned
+   * like any other. Bounding it is the work: it is not raw text, because the
+   * tokeniser switches to RAWTEXT only outside foreign content, so its text
+   * content runs through descendants and ends only where the element does.
+   *
+   * Each case below is a way that extent goes wrong. The refusals are CSS a
+   * browser applies; the acceptances are text a browser never treats as CSS, and
+   * reading them as CSS refused documents over a `url(` in an ordinary sentence.
+   */
+  const CSS_IN_STYLE = [
+    // The plain case, in both foreign namespaces.
+    `<svg><style>a{background:url("${EXT}")}</style></svg>`,
+    `<math><style>a{background:url("${EXT}")}</style></math>`,
+    // A CDATA section is character data, and the usual way to write this.
+    `<svg><style><![CDATA[a{background:url("${EXT}")}]]></style></svg>`,
+    // Child elements do not end the text content.
+    `<svg><style>a{}<g/>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<g></g>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<text>x</text>b{background:url("${EXT}")}</style></svg>`,
+    // One end tag closing two elements, which a child COUNT desynchronises on.
+    `<svg><style>a{}<g><path></g>b{background:url("${EXT}")}</style></svg>`,
+    // A nested `<style>` is an ordinary child element here.
+    `<svg><style>a{}<style></style>b{background:url("${EXT}")}</style></svg>`,
+    // Browsers ignore an unmatched end tag; so must the extent.
+    `<svg><style>a{}</bogus>b{background:url("${EXT}")}</style></svg>`,
+    // `<foreignObject>` PUSHES an HTML island rather than popping the subtree, so
+    // the outer element - and its text - is still open after it closes.
+    `<svg><style>a{}<foreignObject><div/></foreignObject>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<foreignObject><div><p>x</p></div></foreignObject>b{background:url("${EXT}")}</style></svg>`,
+    // Void elements in that island are never popped by name, so the stack has to
+    // recover by index when their ancestor closes.
+    `<svg><style>a{}<foreignObject><br><input></foreignObject>b{background:url("${EXT}")}</style></svg>`,
+    // An island `<style>` is raw text, and its text belongs to the outer element
+    // too, so it must not replace the block.
+    `<svg><style>a{}<foreignObject><style>x{}</style></foreignObject>b{background:url("${EXT}")}</style></svg>`,
+    // An integration point on its own is HTML, so its `<style>` is raw text.
+    `<svg><foreignObject><style>a{background:url("${EXT}")}</style></foreignObject></svg>`,
+  ];
+
+  const NOT_IN_STYLE = [
+    // `</svg>` closes the subtree and the `<style>` with it.
+    `<svg><style>a{}</svg><p>prose with url("${EXT}") in it</p>`,
+    // `<p>` forces an exit from foreign content, which pops it just the same.
+    `<svg><style>a{}<p>prose with url("${EXT}") in it</p>`,
+    // Properly closed, so nothing after it is CSS either.
+    `<svg><style>a{}</style></svg><p>prose with url("${EXT}") in it</p>`,
+    // An inner `</svg>` leaves `inForeignContent` true, because the flag is a
+    // namespace and not an element stack - `<svg><svg>` pushed twice.
+    `<svg><svg><style>a{}</svg><text>url("${EXT}")</text></svg>`,
+    `<svg><svg><g><style>a{}</g><text>url("${EXT}")</text></svg></svg>`,
+    // SVG honours the self-closing slash, so this `<style/>` holds nothing.
+    `<svg><style/>prose url("${EXT}")</svg>`,
+  ];
+
+  test.each(CSS_IN_STYLE)("scans the CSS a browser applies: %s", (body) => {
+    expect(check(DOC(body))).toEqual({
       ok: false,
-      reasons: [`external reference: feimage[xlink:href] ${EXT}`],
+      reasons: [`external reference: style ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  test.each(NOT_IN_STYLE)(
+    "does not read text outside a foreign <style> as CSS: %s",
+    (body) => {
+      expect(check(DOC(body))).toEqual({ ok: true });
+    },
+  );
+
+  /**
+   * The two lists above say what a browser does, so something other than this
+   * scanner has to decide which list a case belongs in - otherwise they only
+   * assert that the scanner agrees with itself.
+   *
+   * `parse5` builds the tree, and a stylesheet is built from its style element's
+   * text content, descendants included. Whether the reference appears in that
+   * text is the answer the streaming scanner has to reach without a tree. Cheap
+   * here on fixtures this size; a tree is what the gate cannot afford on a 2 MiB
+   * upload, which is why the scanner streams in the first place.
+   */
+  test.each([...CSS_IN_STYLE, ...NOT_IN_STYLE])(
+    "agrees with the parsed tree about what the stylesheet holds: %s",
+    (body) => {
+      const html = DOC(body);
+      const styles: string[] = [];
+      const walk = (node: DefaultTreeAdapterTypes.Node): void => {
+        if ("childNodes" in node) {
+          if (node.nodeName === "style") styles.push(textContent(node));
+          for (const child of node.childNodes) walk(child);
+        }
+      };
+      walk(parse(html));
+
+      const inStylesheet = styles.some((css) => css.includes(EXT));
+      expect(check(html).ok).toBe(!inStylesheet);
+    },
+  );
+
+  /**
+   * HTML ignores the slash on a non-void element and enters raw text regardless,
+   * so this is a stylesheet - the opposite of the SVG case above.
+   */
+  test("reads a self-closing HTML <style/> as a stylesheet", () => {
+    expect(check(DOC(`<style/>@import url("${EXT}");`))).toEqual({
+      ok: false,
+      reasons: [`external reference: style ${EXT}`],
       truncated: false,
     });
   });

@@ -33,9 +33,8 @@
  * stream nothing. Nothing here accumulates per element: the only buffer is one
  * `<style>` block's text, bounded by the upload itself.
  */
-import type { Token } from "parse5";
-import type { StartTag } from "parse5-sax-parser";
-import { SAXParser } from "parse5-sax-parser";
+import { foreignContent, type Token } from "parse5";
+import { SAXParser, type StartTag } from "parse5-sax-parser";
 
 type Attribute = Token.Attribute;
 
@@ -741,17 +740,158 @@ class DocumentScanner extends SAXParser {
   scan(text: string): void {
     this.tokenizer.write(text, true);
   }
+
+  /**
+   * True when the parser is inside SVG or MathML, where a `<style>` start tag
+   * does NOT switch the tokeniser to raw text - `_ensureTokenizerMode` is
+   * reached only on the non-foreign branch. Taken from the feedback simulator
+   * rather than tracked here, so integration points come out right: a `<style>`
+   * inside `<foreignObject>` is HTML again, and is raw text again with it.
+   */
+  get inForeignContent(): boolean {
+    return this.parserFeedbackSimulator.inForeignContent;
+  }
+
+  /**
+   * True when the `startTag` being delivered POPS the SVG or MathML subtree
+   * rather than descending into it.
+   *
+   * Both show up as `inForeignContent` going false, which is why the flag alone
+   * cannot bound a foreign `<style>`: `<p>` pops the subtree and takes the
+   * `<style>` with it, while `<foreignObject>` PUSHES an HTML island inside the
+   * element and leaves it open.
+   */
+  get exitsForeignContent(): boolean {
+    return this.exits;
+  }
+
+  private exits = false;
+  /** The namespace as of the previous token, which is what the exit rule tests. */
+  private wasForeign = false;
+
+  /**
+   * The simulator hands over the fully adjusted token - `tagID` set, attributes
+   * adjusted - so this is the same predicate it used, evaluated before the public
+   * event is emitted. Gated on the previous namespace because inside an HTML
+   * island the tag is ordinary HTML and pops nothing.
+   */
+  override onStartTag(token: Token.TagToken): void {
+    this.exits = this.wasForeign && foreignContent.causesExit(token);
+    super.onStartTag(token);
+    this.wasForeign = this.inForeignContent;
+  }
+
+  override onEndTag(token: Token.TagToken): void {
+    super.onEndTag(token);
+    this.wasForeign = this.inForeignContent;
+  }
+}
+
+/**
+ * The text content of the `<style>` element currently open, if any.
+ *
+ * Buffered whole rather than scanned per event, because a block arrives in as
+ * many pieces as the tokeniser cares to emit and `url(` can straddle any two of
+ * them. Bounded by the upload: one block, never the tree.
+ *
+ * An HTML `<style>` is raw text: only `</style>` can end it, because the
+ * tokeniser hides every other end tag from us, and nothing more is needed.
+ *
+ * An SVG or MathML one is an ordinary element whose text content continues
+ * through child elements, so bounding it needs the open-element stack. Nothing
+ * cheaper survives hostile input: `inForeignContent` is a namespace flag, not a
+ * stack - `<svg><svg>` pushes twice and one `</svg>` pops once - and a count of
+ * children desynchronises on both a stray `</bogus>`, which browsers ignore, and
+ * `<g><path></g>`, which closes two elements with one tag.
+ */
+class StyleBuffer {
+  /** Open elements inside SVG or MathML, outermost first. */
+  private elements: string[] = [];
+  /** Where the open `<style>` sits in `elements`; -1 when none does. */
+  private styleAt = -1;
+  /** An HTML `<style>` is open, and the stack plays no part in bounding it. */
+  private raw = false;
+  private text = "";
+
+  /**
+   * A start tag. True when it ended the open block.
+   *
+   * `exits` pops the whole SVG or MathML subtree, so a `<style>` inside it goes
+   * too. Everything else descends.
+   *
+   * Inside a foreign subtree EVERY element goes on the stack, including the HTML
+   * ones of an `<foreignObject>` island, so that their end tags pop themselves
+   * instead of matching an outer `<style>` of the same name. One block is enough
+   * even so: a style element's text content includes its descendants' text, so an
+   * island `<style>` nested in an SVG one contributes to it rather than starting
+   * a second block. Opening one there cleared the outer buffer and lost every
+   * declaration written after the island.
+   *
+   * The self-closing slash is where the namespaces part. HTML ignores it on a
+   * non-void element and the tokeniser enters raw text regardless, so `<style/>`
+   * there holds every byte up to `</style>`. SVG and MathML honour it, so
+   * `<svg><style/>` is empty and the text after it belongs to the SVG.
+   */
+  startTag(tag: StartTag, inForeignContent: boolean, exits: boolean): boolean {
+    if (exits) {
+      const ended = this.styleAt >= 0;
+      this.elements.length = 0;
+      this.styleAt = -1;
+      return ended;
+    }
+    if (this.elements.length === 0 && !inForeignContent) {
+      // Plain HTML, where `<style>` is raw text and no stack is needed.
+      if (tag.tagName === "style") {
+        this.raw = true;
+        this.text = "";
+      }
+      return false;
+    }
+    if (inForeignContent && tag.selfClosing) return false;
+    this.elements.push(tag.tagName);
+    if (tag.tagName === "style" && this.styleAt < 0) {
+      this.styleAt = this.elements.length - 1;
+      this.text = "";
+    }
+    return false;
+  }
+
+  append(chunk: string): void {
+    if (this.raw || this.styleAt >= 0) this.text += chunk;
+  }
+
+  /**
+   * An end tag. True when it ended the block.
+   *
+   * Matched against the stack the way a parser does: the innermost element of
+   * that name closes, and everything still open inside it closes with it. A name
+   * open nowhere is stray, and ignored as browsers ignore it. The block ends when
+   * the tag closes the `<style>` itself or anything containing it.
+   */
+  endTag(tagName: string): boolean {
+    if (this.raw) return true;
+    const at = this.elements.lastIndexOf(tagName);
+    if (at === -1) return false;
+    const closed = this.styleAt >= 0 && at <= this.styleAt;
+    this.elements.length = at;
+    if (closed) this.styleAt = -1;
+    return closed;
+  }
+
+  /** The buffered CSS, and the block closed. */
+  take(): string {
+    this.raw = false;
+    this.styleAt = -1;
+    const block = this.text;
+    this.text = "";
+    return block;
+  }
 }
 
 /** Records every refusable reference in the document. */
 function scanDocument(text: string, found: Map<string, string>): void {
   const parser = new DocumentScanner();
-
-  // A `<style>` block's text arrives in as many pieces as the tokeniser cares to
-  // emit, and `url(` can straddle any two of them, so the block is buffered
-  // whole and scanned once. Bounded by the upload: one block, never the tree.
-  let inStyle = false;
-  let css = "";
+  const style = new StyleBuffer();
 
   /** Past the cap the remaining bytes cannot change the verdict. */
   const capped = (): boolean => {
@@ -761,35 +901,29 @@ function scanDocument(text: string, found: Map<string, string>): void {
   };
 
   const flushStyle = (): void => {
-    if (!inStyle) return;
-    inStyle = false;
-    const block = css;
-    css = "";
-    for (const target of externalInCss(block)) {
+    for (const target of externalInCss(style.take())) {
       addExternal(found, "style", target);
       if (capped()) return;
     }
   };
 
   parser.on("startTag", (tag) => {
-    // Every `<style>` start tag opens a raw-text block, self-closing slash or
-    // not: HTML ignores the slash on a non-void element, and the tokeniser
-    // switches to RAWTEXT either way. Skipping `<style/>` here would read its
-    // CSS as ordinary text and miss every reference in it.
-    if (tag.tagName === "style") {
-      flushStyle();
-      inStyle = true;
-    }
+    const ended = style.startTag(
+      tag,
+      parser.inForeignContent,
+      parser.exitsForeignContent,
+    );
+    if (ended) flushStyle();
     collectStartTag(tag, found);
     capped();
   });
 
   parser.on("text", (token) => {
-    if (inStyle) css += token.text;
+    style.append(token.text);
   });
 
   parser.on("endTag", (tag) => {
-    if (tag.tagName === "style") flushStyle();
+    if (style.endTag(tag.tagName)) flushStyle();
   });
 
   parser.scan(text);
