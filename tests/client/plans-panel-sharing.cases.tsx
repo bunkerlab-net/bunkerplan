@@ -23,6 +23,29 @@ import {
  */
 
 /**
+ * The Share control on a given row, failing at the lookup rather than handing
+ * back an `undefined` for a caller to cast away.
+ *
+ * Re-queried per call on purpose: opening one editor re-renders the table, so
+ * a handle taken before the first click can be stale by the second.
+ *
+ * Exported because plans-panel.test.tsx drives the same control from the other
+ * half of this suite.
+ */
+export const shareButton = (view: Mounted, index: number): Element => {
+  const row = view.all("tbody tr")[index];
+  const button = row
+    ? [...row.querySelectorAll("button")].find(
+        (node) => node.textContent === "Share",
+      )
+    : undefined;
+  if (button === undefined) {
+    throw new Error(`no Share button on row ${index} in:\n${view.text()}`);
+  }
+  return button;
+};
+
+/**
  * Registered from plans-panel.test.tsx rather than collected as its own file.
  *
  * Both halves exercise one 1000-line component, and Bun instruments per worker:
@@ -59,20 +82,6 @@ export function registerSharingCases(): void {
         throw new Error(`no radio ${index} in:\n${view.text()}`);
       }
       return node;
-    };
-
-    /** The Share control on a given row, asserted the same way. */
-    const shareButton = (view: Mounted, index: number): Element => {
-      const row = view.all("tbody tr")[index];
-      const button = row
-        ? [...row.querySelectorAll("button")].find(
-            (node) => node.textContent === "Share",
-          )
-        : undefined;
-      if (button === undefined) {
-        throw new Error(`no Share button on row ${index} in:\n${view.text()}`);
-      }
-      return button;
     };
 
     /** Picks a radio the way the browser does: checked, then an input event. */

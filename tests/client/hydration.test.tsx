@@ -69,16 +69,20 @@ useAuthStub();
  * The bundle and stylesheet tags are removed first: happy-dom would try to
  * fetch them off a server that is not running, and what they point at is
  * already held to the build's own manifest by tests/assets.test.ts.
+ *
+ * Removed by querying the parsed tree rather than by rewriting the text. The
+ * regexes this replaced matched on attribute order, so reordering `rel` and
+ * `href` in the renderer would have left the tag in and started real fetches
+ * without failing anything here.
  */
 async function hydrate(document_: string): Promise<HTMLElement> {
   const page = document.createElement("div");
-  page.innerHTML = document_
-    .replace("<!doctype html>", "")
-    .replaceAll(/<script type="module"[^>]*><\/script>/g, "")
-    .replaceAll(
-      /<link rel="(?:stylesheet|icon|apple-touch-icon)"[^>]*\/?>/g,
-      "",
-    );
+  page.innerHTML = document_.replace("<!doctype html>", "");
+  for (const node of page.querySelectorAll(
+    'script[type="module"], link[rel="stylesheet"], link[rel="icon"], link[rel="apple-touch-icon"]',
+  )) {
+    node.remove();
+  }
   document.body.appendChild(page);
   hosts.push(page);
 

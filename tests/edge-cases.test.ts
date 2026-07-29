@@ -296,7 +296,11 @@ describe("the health probe", () => {
     // connection string.
     expect(body).not.toContain("hunter2");
     expect(JSON.stringify(lines)).toContain("hunter2");
-    expect(lines[0]).toMatchObject({ check: "db", msg: "probe failed" });
+    // Located by `check` rather than by position: only the db probe fails
+    // here, but a log gaining any other line would silently move this read
+    // onto it.
+    const failure = lines.find((line) => line["check"] === "db");
+    expect(failure).toMatchObject({ check: "db", msg: "probe failed" });
   });
 
   test("every failing backend is reported, not just the first", async () => {

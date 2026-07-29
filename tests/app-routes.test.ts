@@ -702,6 +702,9 @@ describe("the security headers the middleware pins", () => {
    * weakened source has to fail one of them.
    */
   const REQUIRED_DIRECTIVES = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "connect-src 'self'",
     "base-uri 'none'",
     "object-src 'none'",
     "form-action 'self'",

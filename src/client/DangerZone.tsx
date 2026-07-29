@@ -7,6 +7,33 @@ interface DangerZoneProps {
   handle: string;
 }
 
+/**
+ * Deletes the account, re-authenticating once if the session is too old.
+ *
+ * Deleting requires a FRESH session (Better Auth's default `freshAge` is 24h)
+ * and there is no password to re-enter, so a returning visitor routinely hits
+ * `SESSION_EXPIRED`. Re-running the WebAuthn ceremony mints a new session,
+ * after which the delete is retried exactly once.
+ *
+ * Returns the message to show, or `null` when the account is gone. Lifted out
+ * of the component because the handler around it is about latches and
+ * navigation, and this is about Better Auth's freshness rule.
+ */
+async function deleteAccount(): Promise<string | null> {
+  let result = await authClient().deleteUser();
+  if (result.error?.code === "SESSION_EXPIRED") {
+    const reauth = await authClient().signIn.passkey();
+    if (reauth?.error) {
+      return reauth.error.message ?? "re-authentication failed";
+    }
+    result = await authClient().deleteUser();
+  }
+  if (result.error) {
+    return result.error.message ?? "could not delete the account";
+  }
+  return null;
+}
+
 export function DangerZone({ handle }: DangerZoneProps) {
   const [typed, setTyped] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +50,8 @@ export function DangerZone({ handle }: DangerZoneProps) {
    * Released in the `finally` below rather than on individual paths: both
    * refusal returns leave the `try` without entering `catch`, and a latch they
    * skipped would ignore every retry afterwards while the button looked live.
+   * The one exception is a navigation that actually started, which keeps it -
+   * see `leaving`.
    */
   const inFlight = useRef(false);
 
@@ -30,33 +59,36 @@ export function DangerZone({ handle }: DangerZoneProps) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    /*
+     * Set only once the account is gone and the page is leaving. `assign()` is
+     * asynchronous, so without this the `finally` below would re-enable the
+     * button during the navigation - on an account that no longer exists.
+     */
+    let leaving = false;
     try {
-      let result = await authClient().deleteUser();
-      // Deleting an account requires a FRESH session (default freshAge 24h)
-      // and there is no password to re-enter, so a returning user routinely
-      // hits SESSION_EXPIRED. Re-run the WebAuthn ceremony - which mints a new
-      // session - and retry once.
-      if (result.error?.code === "SESSION_EXPIRED") {
-        const reauth = await authClient().signIn.passkey();
-        if (reauth?.error) {
-          setError(reauth.error.message ?? "re-authentication failed");
-          return;
-        }
-        result = await authClient().deleteUser();
-      }
-      if (result.error) {
-        setError(result.error.message ?? "could not delete the account");
+      const refusal = await deleteAccount();
+      if (refusal !== null) {
+        setError(refusal);
         return;
       }
       window.location.assign("/");
+      // After the call, not before: an `assign` that throws lands in the
+      // `catch` below, and a flag already set would wedge the button on a
+      // navigation that never started.
+      leaving = true;
     } catch (cause) {
       // A dropped call throws rather than returning `{ error }`. Without this
       // the rejection escapes `void onDelete()` unhandled and the button just
       // re-enables, leaving the visitor no idea the deletion did not happen.
       setError(messageOf(cause, "could not delete the account"));
     } finally {
-      inFlight.current = false;
-      setBusy(false);
+      // Every refusal returns out of the `try` without reaching the `catch`,
+      // so the release belongs here: a latch cleared only on the thrown path
+      // would ignore each retry afterwards while the button looked live.
+      if (!leaving) {
+        inFlight.current = false;
+        setBusy(false);
+      }
     }
   };
 

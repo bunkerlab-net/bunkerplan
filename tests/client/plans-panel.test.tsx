@@ -10,14 +10,16 @@ import {
   flush,
   htmlFile,
   keyboardClick,
-  type Mounted,
   mount,
   mountAsync,
   pickFiles,
   type,
   useHarness,
 } from "./harness.tsx";
-import { registerSharingCases } from "./plans-panel-sharing.cases.tsx";
+import {
+  registerSharingCases,
+  shareButton,
+} from "./plans-panel-sharing.cases.tsx";
 
 // Arms the module stubs for this file; unarmed, the real modules answer.
 useHarness();
@@ -752,26 +754,6 @@ describe("PlansPanel sharing expansion", () => {
     expect(view.maybe("#sharing-abc")).toBeNull();
     expect(document.activeElement).toBe(view.byText("button", "Share"));
   });
-
-  /**
-   * The Share control on a given row, failing at the lookup rather than
-   * handing back an `undefined` for a caller to cast away.
-   *
-   * Re-queried per call on purpose: opening one editor re-renders the table,
-   * so a handle taken before the first click can be stale by the second.
-   */
-  const shareButton = (view: Mounted, index: number): Element => {
-    const row = view.all("tbody tr")[index];
-    const button = row
-      ? [...row.querySelectorAll("button")].find(
-          (node) => node.textContent === "Share",
-        )
-      : undefined;
-    if (button === undefined) {
-      throw new Error(`no Share button on row ${index} in:\n${view.text()}`);
-    }
-    return button;
-  };
 
   test("only one editor is open at a time", async () => {
     api.listPlans = async () => [plan({ id: "aaa" }), plan({ id: "bbb" })];

@@ -56,6 +56,48 @@ describe("DangerZone", () => {
     expect(navigations).toEqual(["/"]);
   });
 
+  test("the button stays held while the page is leaving", async () => {
+    client.deleteUser = ok({ success: true });
+    const view = mount(<DangerZone handle={HANDLE} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+
+    // `assign()` is asynchronous: the document is still here and still
+    // interactive. Re-enabling now would offer a second delete of an account
+    // that is already gone.
+    expect(navigations).toEqual(["/"]);
+    expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
+  });
+
+  test("a navigation that throws releases the button instead of wedging it", async () => {
+    client.deleteUser = ok({ success: true });
+    const assign = window.location.assign;
+    Object.defineProperty(window.location, "assign", {
+      configurable: true,
+      writable: true,
+      value: () => {
+        throw new Error("navigation blocked");
+      },
+    });
+
+    try {
+      const view = mount(<DangerZone handle={HANDLE} />);
+      await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+      await click(view.find("button"));
+
+      // The page is not leaving after all, so the hold has to come off: the
+      // visitor is still sitting in front of a control that must answer.
+      expect(view.find(".error").textContent).toBe("navigation blocked");
+      expect(view.find<HTMLButtonElement>("button").disabled).toBe(false);
+    } finally {
+      Object.defineProperty(window.location, "assign", {
+        configurable: true,
+        writable: true,
+        value: assign,
+      });
+    }
+  });
+
   test("a refusal is shown and the visitor stays put", async () => {
     client.deleteUser = refuse("account has plans pending removal");
     const view = mount(<DangerZone handle={HANDLE} />);

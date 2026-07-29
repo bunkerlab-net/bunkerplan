@@ -133,9 +133,10 @@ describe.each(tables)("%s", (name, pg, sqlite) => {
 
   test("the two dialects have not drifted", () => {
     const [[, fromPg], [, fromSqlite]] = shapes;
-    expect(fromSqlite.columns.map((column) => column.name)).toEqual(
-      fromPg.columns.map((column) => column.name),
-    );
+    // Whole records, not just names: `notNull` and `primary` are the rule the
+    // database enforces, and a column required on one dialect and optional on
+    // the other is exactly the drift this file exists to catch.
+    expect(fromSqlite.columns).toEqual(fromPg.columns);
     expect(fromSqlite.primaryKey).toEqual(fromPg.primaryKey);
     expect(fromSqlite.foreignKeys).toEqual(fromPg.foreignKeys);
     expect(fromSqlite.indexes).toEqual(fromPg.indexes);
@@ -161,25 +162,27 @@ describe.each(tables)("%s", (name, pg, sqlite) => {
 
 describe("cascading from the account", () => {
   const cascading = [
-    ["plan", pgPlan.plan, sqlitePlan.plan, "user_id"],
-    ["plan_grant", pgPlan.planGrant, sqlitePlan.planGrant, "user_id"],
+    ["plan", "user_id", pgPlan.plan, sqlitePlan.plan],
+    ["plan_grant", "user_id", pgPlan.planGrant, sqlitePlan.planGrant],
     [
       "upload_rate_limit",
+      "key",
       pgRateLimit.uploadRateLimit,
       sqliteRateLimit.uploadRateLimit,
-      "key",
     ],
     [
       "account_closing",
+      "user_id",
       pgAccountClosing.accountClosing,
       sqliteAccountClosing.accountClosing,
-      "user_id",
     ],
   ] as const;
 
+  // The column is the second element so `%s.%s` names `table.column`; with the
+  // tables there the title interpolated a Drizzle object.
   test.each(cascading)(
     "%s.%s goes with the user",
-    (_name, pg, sqlite, column) => {
+    (_name, column, pg, sqlite) => {
       for (const [dialect, table] of [
         ["pg", pg],
         ["sqlite", sqlite],

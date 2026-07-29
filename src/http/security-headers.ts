@@ -61,15 +61,35 @@ export const PLAN_PATH_PREFIX = "/p/";
 /**
  * The app's own policy.
  *
- * It deliberately omits `script-src`: the rendered document carries an inline
- * `<script type="application/json">` with the page props the client hydrates
- * from, so a script policy needs per-request nonces.
+ * The premise that kept `script-src` off this list was wrong: the inline
+ * `<script type="application/json">` carrying the page props is a data block,
+ * not an executable one, so the HTML parser never prepares it as script and
+ * `script-src` never applies to it. The only executable script on the page is
+ * the module bundle at `assets.script`, which is same-origin - no nonce is
+ * needed to pin it, and without the directive any injected `<script src>`
+ * could name any host it liked.
  *
- * Exported beside `PLAN_CSP` so a test can assert the policy itself rather
- * than that some policy is present, which a weakened one would satisfy.
+ * `default-src 'self'` rather than `'none'` so a resource type nobody listed
+ * here degrades to same-origin instead of vanishing. `style-src` carries
+ * `'unsafe-inline'` because the components use `style={{ ... }}` attributes,
+ * which CSP counts as inline styles; removing them is a refactor, not a header
+ * change. Fonts are the system stack and src/styles.css loads nothing, so
+ * `default-src` covers the rest.
+ *
+ * Exported beside `PLAN_CSP` so the tests can name which of the two applies to
+ * a response.
  */
-export const APP_CSP =
-  "base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'";
+export const APP_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self'",
+  "connect-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
 
 const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",

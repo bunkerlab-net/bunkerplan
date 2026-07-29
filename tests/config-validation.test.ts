@@ -343,7 +343,14 @@ describe("the rest of the defaults", () => {
 
 describe("the refusal itself", () => {
   test("reports every problem at once, not just the first", () => {
+    /*
+     * Built on a complete environment so the four settings below are the only
+     * things wrong with it. Passing them alone also tripped the three
+     * required-but-absent checks, which made the count meaningless and is why
+     * this asserted `toBeGreaterThan(4)` before.
+     */
     const message = refusal({
+      ...SELF_HOSTED,
       BETTER_AUTH_SECRET: "short",
       PUBLIC_BASE_URL: "not a url",
       STORAGE_DRIVER: "gcs",
@@ -359,7 +366,9 @@ describe("the refusal itself", () => {
     ]) {
       expect(message).toContain(fragment);
     }
-    expect(message.split("\n  - ").length).toBeGreaterThan(4);
+    // Exactly four problems, so one header segment plus four. `toBeGreaterThan`
+    // also passed on a message that bundled extra complaints nobody asked for.
+    expect(message.split("\n  - ").length).toBe(5);
   });
 
   test("points at the document that describes the contract", () => {
