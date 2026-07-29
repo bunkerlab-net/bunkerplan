@@ -1,10 +1,29 @@
 import { describe, expect, test } from "bun:test";
+import type { DefaultTreeAdapterTypes } from "parse5";
+import { parse } from "parse5";
 import { validateStandaloneHtml } from "../src/html/validate.ts";
 
 const encode = (html: string) => new TextEncoder().encode(html);
 
 function check(html: string) {
   return validateStandaloneHtml(encode(html));
+}
+
+/**
+ * A node's CHILD text content: its direct text-node children only.
+ *
+ * This is what the HTML standard builds a stylesheet from - "the child text
+ * content of a style element must be that of a conformant style sheet" - and it
+ * is not `Element.textContent`, which descends. The difference decides real
+ * cases: `<style>a{background:u<g>rl("x")</g>}</style>` has child text content
+ * `a{background:u}`, holding no `url(` at all.
+ */
+function childTextContent(node: DefaultTreeAdapterTypes.Node): string {
+  if (!("childNodes" in node)) return "";
+  return node.childNodes
+    .filter((child) => child.nodeName === "#text")
+    .map((child) => (child as DefaultTreeAdapterTypes.TextNode).value)
+    .join("");
 }
 
 const DOC = (body: string) =>
@@ -950,20 +969,35 @@ describe("validateStandaloneHtml - resistance to hostile input", () => {
     },
   );
 
-  test("refuses a document too deeply nested to walk", () => {
+  /**
+   * A token stream has no depth, so nesting costs it nothing. The old refusal
+   * was a recursive parser overflowing its stack, not a rule, and the thing
+   * worth asserting is that depth cannot be used to smuggle a reference past
+   * the gate.
+   */
+  test("validates a document too deeply nested for a recursive parser", () => {
     const depth = 60_000;
     expect(check(DOC("<i>".repeat(depth) + "</i>".repeat(depth)))).toEqual({
-      ok: false,
-      reasons: ["could not parse document"],
-      truncated: false,
+      ok: true,
     });
   });
 
   /** Unclosed tags nest just as deeply, by another spelling. */
-  test("refuses a document of unclosed tags too deep to walk", () => {
-    expect(check(DOC("<i>".repeat(60_000)))).toEqual({
+  test("validates a document of unclosed tags nested just as deep", () => {
+    expect(check(DOC("<i>".repeat(60_000)))).toEqual({ ok: true });
+  });
+
+  test("still sees an external reference buried under 60,000 elements", () => {
+    const depth = 60_000;
+    expect(
+      check(
+        DOC(
+          `${"<i>".repeat(depth)}<img src="https://e.example/x.png">${"</i>".repeat(depth)}`,
+        ),
+      ),
+    ).toEqual({
       ok: false,
-      reasons: ["could not parse document"],
+      reasons: ["external reference: img[src] https://e.example/x.png"],
       truncated: false,
     });
   });
@@ -971,6 +1005,440 @@ describe("validateStandaloneHtml - resistance to hostile input", () => {
   test("still walks a normally nested document", () => {
     expect(check(DOC("<i>".repeat(500) + "</i>".repeat(500)))).toEqual({
       ok: true,
+    });
+  });
+});
+
+/**
+ * Every case here was decided wrongly by the previous parser, whose attribute
+ * scanner only understood QUOTED values and whose tag pattern ended a tag at the
+ * first `>` wherever it appeared. Both are upstream defects
+ * (natemoo-re/ultrahtml#82 for the first), and both are the same shape as the
+ * `image-set()` faults fixed earlier: a delimiter inside a value read as the
+ * delimiter around it.
+ *
+ * The gate is not the runtime control - `PLAN_CSP` is - so what these cost was
+ * an upload-time verdict that disagreed with the browser, in both directions.
+ */
+describe("validateStandaloneHtml - parser conformance", () => {
+  const EXT = "https://e.example/x.png";
+
+  test("sees an unquoted attribute value", () => {
+    expect(check(DOC(`<img src=${EXT}>`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /**
+   * The old scanner stayed in "value" state through an unquoted value, so the
+   * NEXT quoted value bound to the previous key: this parsed as `{rel: <url>}`
+   * with no `href` at all, and the document was accepted.
+   */
+  test("does not shift a quoted value onto the preceding unquoted attribute", () => {
+    expect(check(DOC(`<link rel=stylesheet href="${EXT}">`))).toEqual({
+      ok: false,
+      reasons: [
+        `external reference: link[href] ${EXT} - inline the stylesheet`,
+      ],
+      truncated: false,
+    });
+  });
+
+  test("ends a tag at the real delimiter, not at a '>' inside a value", () => {
+    expect(check(DOC(`<img alt="a>b" src="${EXT}">`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /** A backslash escapes nothing in HTML; the quote after it closes the value. */
+  test("does not treat a backslash as escaping a closing quote", () => {
+    expect(check(DOC(`<img alt="a\\" src="${EXT}">`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /**
+   * A browser keeps the FIRST of a repeated attribute. Keeping the last let an
+   * inert duplicate hide the reference actually fetched.
+   */
+  test("keeps the first of a repeated attribute", () => {
+    expect(check(DOC(`<img src="${EXT}" src="data:,">`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /** The same rule accepting: an inert value first is the one that counts. */
+  test("keeps the first of a repeated attribute when it is the inert one", () => {
+    expect(check(DOC(`<img src="data:," src="${EXT}">`))).toEqual({ ok: true });
+  });
+
+  /**
+   * HTML `<image>` is rewritten to `img`, so the reference has to be judged as
+   * `img[src]`. `URL_ATTRS.image` is the SVG entry and lists no `src`, so a
+   * parser that reported `image` here would find nothing to check.
+   */
+  test("judges <image src> as the img the parser builds", () => {
+    expect(check(DOC(`<image src="${EXT}">`))).toEqual({
+      ok: false,
+      reasons: [`external reference: img[src] ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  /** `rel` is inert, so this is an ordinary document however it is quoted. */
+  test.each([
+    `<link rel=canonical href="https://ex.example/p">`,
+    `<link href="https://ex.example/p" rel=canonical>`,
+    `<link href='https://ex.example/p' rel=next>`,
+  ])("accepts an inert rel written unquoted: %s", (tag) => {
+    expect(check(DOC(tag))).toEqual({ ok: true });
+  });
+
+  /** Text, not markup, so nothing inside them fetches. */
+  test.each(["title", "textarea"])(
+    "reads the contents of <%s> as text",
+    (tag) => {
+      expect(check(DOC(`<${tag}><img src="${EXT}"></${tag}>`))).toEqual({
+        ok: true,
+      });
+    },
+  );
+
+  /**
+   * SVG restores camelCase element names, so both spellings arrive as `feImage`
+   * and the refusal is built from the lower-cased name the table is keyed by.
+   */
+  test.each(["feImage", "feimage"])(
+    "matches an SVG element the parser respells: <%s>",
+    (spelling) => {
+      expect(
+        check(
+          DOC(`<svg><filter><${spelling} xlink:href="${EXT}"/></filter></svg>`),
+        ),
+      ).toEqual({
+        ok: false,
+        reasons: [`external reference: feimage[xlink:href] ${EXT}`],
+        truncated: false,
+      });
+    },
+  );
+
+  /**
+   * A browser applies the CSS in an SVG `<style>`, so it is scanned like any
+   * other, and bounding it is the work. It is not raw text - the tokeniser
+   * switches to RAWTEXT only outside foreign content - and a stylesheet is the
+   * element's CHILD text content, its direct text children and nothing deeper.
+   *
+   * Text-only styles are exact. A style holding an element is refused instead,
+   * because where its later direct text goes depends on HTML tree construction.
+   * The three lists below are those three outcomes.
+   */
+  const EXACT_CSS = [
+    // Plain, and the CDATA form that is the usual way to write it.
+    `<svg><style>a{background:url("${EXT}")}</style></svg>`,
+    `<svg><style><![CDATA[a{background:url("${EXT}")}]]></style></svg>`,
+    // An integration point is HTML, so this `<style>` is raw text.
+    `<svg><foreignObject><style>a{background:url("${EXT}")}</style></foreignObject></svg>`,
+    // Properly balanced foreign nesting leaves the parser back in HTML, so this
+    // `<style>` is an ordinary stylesheet.
+    `<svg><math></math></svg><style>@import url("${EXT}");</style>`,
+  ];
+
+  /**
+   * The simulator enters SVG or MathML on the start tag whether or not it closed
+   * itself, and leaves only when an end tag matches its innermost entry, where a
+   * browser pops until one matches. Past either point the parse stops describing
+   * the document - raw text is read as markup, `<image>` is not rewritten to
+   * `img`, SVG name and attribute adjustment is applied to HTML - so the check
+   * says so rather than giving a verdict it cannot stand behind.
+   */
+  const DIVERGED = [
+    `<svg/><style>@import url("${EXT}");</style>`,
+    `<math/><style>@import url("${EXT}");</style>`,
+    `<svg><math></svg><style>@import url("${EXT}");</style>`,
+    // `<image>` is rewritten to `img` in HTML and fetches its `src`, while the
+    // SVG entry in `URL_ATTRS` lists no `src` at all - so a stale namespace would
+    // have accepted this outright.
+    `<svg/><image src="${EXT}">`,
+    `<svg><math></svg><image src="${EXT}">`,
+    // Raw text read as markup: the `<g>` in this CSS would emit a start tag.
+    `<svg/><style>a{content:"<g>";background:url("${EXT}")}</style>`,
+    // And the same for a script, whose string would be read as an element.
+    `<svg/><script>const x='<img src="${EXT}">'</script>`,
+  ];
+
+  const NOT_CSS = [
+    // MathML has no stylesheet-bearing `style` - its styling element is
+    // `mstyle` - so this is ordinary foreign content and its text is not CSS.
+    `<math><style>a{background:url("${EXT}")}</style></math>`,
+    // `</svg>` closes the root the `<style>` sits in, so the child text stopped
+    // there and the prose after it is prose.
+    `<svg><style>a{}</svg><p>prose with url("${EXT}") in it</p>`,
+    `<svg><svg><style>a{}</svg><text>url("${EXT}")</text></svg>`,
+    // Properly closed, so nothing after it is CSS either.
+    `<svg><style>a{}</style></svg><p>prose with url("${EXT}") in it</p>`,
+    // SVG honours the self-closing slash, so this `<style/>` holds nothing.
+    `<svg><style/>prose url("${EXT}")</svg>`,
+  ];
+
+  /**
+   * Refused for what the markup is, not for a reference: an element inside an
+   * SVG `<style>`, or an end tag that could be closing an ancestor or could be
+   * stray. Either way the direct text after it cannot be accounted for without
+   * reproducing HTML tree construction, so the gate says so instead of guessing.
+   *
+   * Some of these hold a reference a browser would fetch and some do not. That
+   * is the point: telling them apart is the thing that cannot be done here.
+   */
+  const UNACCOUNTABLE = [
+    `<svg><style>a{}<g/>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<g></g>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<text>x</text>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<g><path></g>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<style></style>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<foreignObject><div/></foreignObject>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><style>a{}<foreignObject><br><input></foreignObject>b{background:url("${EXT}")}</style></svg>`,
+    // Text split across a child element, which aggregating descendants would
+    // rejoin into a `url(` that is in no stylesheet anywhere.
+    `<svg><style>a{background:u<g>rl("${EXT}")</g>}</style></svg>`,
+    `<svg><style>a{}<g>b{background:url("${EXT}")}</g></style></svg>`,
+    // Stray or ancestor close - indistinguishable without the element stack.
+    `<svg><style>a{}</bogus>b{background:url("${EXT}")}</style></svg>`,
+    `<svg><svg><g><style>a{}</g><text>url("${EXT}")</text></svg></svg>`,
+  ];
+
+  /**
+   * The four lists assert contradictory verdicts, so a fixture in two of them
+   * would claim a document is both refused and accepted. Named here rather than
+   * left to surface as whichever assertion happened to run second.
+   */
+  test("keeps the fixture lists disjoint", () => {
+    const lists = { EXACT_CSS, NOT_CSS, DIVERGED, UNACCOUNTABLE };
+    const seen = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const [name, list] of Object.entries(lists)) {
+      for (const body of list) {
+        const first = seen.get(body);
+        if (first !== undefined) clashes.push(`${first} + ${name}: ${body}`);
+        else seen.set(body, name);
+      }
+    }
+    expect(clashes).toEqual([]);
+  });
+
+  /**
+   * The false-positive edge of `DIVERGED`: it refuses on a self-closing `<svg/>`
+   * or `<math/>`, and a self-closing child INSIDE a balanced one is the shape an
+   * uploader actually writes. `<path/>` must not read as the root closing itself,
+   * so these are the documents the rule would break if it ever did.
+   */
+  test.each([
+    `<svg><path/></svg>`,
+    `<svg><g><path/></g></svg>`,
+    `<svg><path/></svg><p>after</p>`,
+    `<svg viewBox="0 0 1 1"><circle cx="1" cy="1" r="1"/></svg>`,
+    `<math><mi>x</mi></math>`,
+    `<math><mstyle><mi>x</mi></mstyle></math>`,
+    `<svg><foreignObject><div>html</div></foreignObject></svg>`,
+  ])("accepts ordinary inline graphics: %s", (body) => {
+    expect(check(DOC(body))).toEqual({ ok: true });
+  });
+  test.each(EXACT_CSS)("scans the CSS a browser applies: %s", (body) => {
+    expect(check(DOC(body))).toEqual({
+      ok: false,
+      reasons: [`external reference: style ${EXT}`],
+      truncated: false,
+    });
+  });
+
+  test.each(NOT_CSS)(
+    "does not read text outside a style as CSS: %s",
+    (body) => {
+      expect(check(DOC(body))).toEqual({ ok: true });
+    },
+  );
+
+  test.each(UNACCOUNTABLE)(
+    "refuses markup it cannot account for rather than guessing: %s",
+    (body) => {
+      const result = check(DOC(body));
+      expect(result.ok).toBe(false);
+      expect(result.ok ? [] : result.reasons).toContain(
+        "unsupported markup inside an svg style - keep the stylesheet to text only",
+      );
+    },
+  );
+
+  test.each(DIVERGED)(
+    "refuses a document whose parse it can no longer follow: %s",
+    (body) => {
+      const result = check(DOC(body));
+      expect(result.ok).toBe(false);
+      expect(result.ok ? [] : result.reasons).toContain(
+        "unsupported nesting: a self-closing <svg/> or <math/>, or crossed " +
+          "svg/math end tags - give each one its own end tag",
+      );
+    },
+  );
+
+  /** The plain spellings the refusal above points at are unaffected. */
+  test.each([
+    `<svg></svg><style>@import url("data:,");</style>`,
+    `<math></math><style>@import url("data:,");</style>`,
+    `<svg><math></math></svg><image src="data:,">`,
+  ])("accepts the balanced spelling of the same document: %s", (body) => {
+    expect(check(DOC(body))).toEqual({ ok: true });
+  });
+
+  /**
+   * `EXACT_CSS` and `NOT_CSS` claim to match a browser, so something other than
+   * this scanner has to decide which list a case belongs in - otherwise they only
+   * assert that the scanner agrees with itself.
+   *
+   * `parse5` builds the tree, and the answer is the CHILD text content of each
+   * style element it holds. Two lists are deliberately excluded. `UNACCOUNTABLE`
+   * is refused for its markup, so the gate makes no claim about the reference.
+   * `DIVERGED` is refused because the parse has stopped describing the document,
+   * so a tree built from the same bytes is exactly what the scanner can no longer
+   * follow, and the two would disagree there by design.
+   * Cheap on fixtures this size; a tree is what the gate cannot afford on a 2 MiB
+   * upload, which is why the scanner streams instead.
+   */
+  test.each([...EXACT_CSS, ...NOT_CSS])(
+    "agrees with the parsed tree about what the stylesheet holds: %s",
+    (body) => {
+      const html = DOC(body);
+      const styles: string[] = [];
+      let elements = 0;
+      const walk = (node: DefaultTreeAdapterTypes.Node): void => {
+        if (!("childNodes" in node)) return;
+        if (node.nodeName === "style") {
+          elements += 1;
+          // An SVG `<style>` bears a stylesheet and a MathML one does not, so
+          // the namespace decides whether its text counts.
+          const mathml =
+            "namespaceURI" in node &&
+            node.namespaceURI === "http://www.w3.org/1998/Math/MathML";
+          if (!mathml) styles.push(childTextContent(node));
+        }
+        for (const child of node.childNodes) walk(child);
+      };
+      walk(parse(html));
+
+      // Every fixture holds a `<style>`, so a walk that found none has stopped
+      // answering the question and the comparison below would pass on nothing.
+      // Counted as elements rather than sheets: a MathML one bears no sheet, and
+      // an SVG `<style/>` honours its slash and holds no text.
+      expect(elements).toBeGreaterThan(0);
+
+      const inStylesheet = styles.some((css) => css.includes(EXT));
+      expect(check(html).ok).toBe(!inStylesheet);
+    },
+  );
+
+  /**
+   * `DocumentScanner` reaches past the published surface of `parse5-sax-parser`:
+   * it subclasses to reach the `protected` tokenizer and feedback simulator, and
+   * it drives `tokenizer.write(text, true)` rather than the stream, because that
+   * is what delivers every token AND the EOF before it returns. None of that is
+   * guaranteed by semver, so the assumptions are asserted here rather than left
+   * to be discovered by a wrong verdict after an upgrade.
+   */
+  describe("assumptions about the parser", () => {
+    /**
+     * EOF has to arrive synchronously, or an unclosed block is lost - and a
+     * browser applies that CSS regardless, so it is a verdict either way.
+     */
+    test("delivers the last text before returning a verdict", () => {
+      expect(
+        check(`<!doctype html><html><head><style>@import url("${EXT}");`),
+      ).toEqual({
+        ok: false,
+        reasons: [`external reference: style ${EXT}`],
+        truncated: false,
+      });
+    });
+
+    /** Text has to be flushed before the tag that follows it is delivered. */
+    test("keeps a style block and the tag after it in order", () => {
+      expect(
+        check(
+          DOC(
+            `<style>a{background:url("${EXT}")}</style><img src="/after.png">`,
+          ),
+        ),
+      ).toEqual({
+        ok: false,
+        reasons: [
+          `external reference: style ${EXT}`,
+          "external reference: img[src] /after.png",
+        ],
+        truncated: false,
+      });
+    });
+
+    /**
+     * A comment is a token of its own, so it flushes the text pending before it
+     * and the CSS around it arrives as two events - while remaining ONE element's
+     * child text content. Scanning per event would see `a{background:u` and
+     * `rl("...")}` and no `url(` in either, so the block is buffered whole.
+     */
+    test("joins style text split across two events by a comment", () => {
+      expect(
+        check(
+          DOC(`<svg><style>a{background:u<!--x-->rl("${EXT}")}</style></svg>`),
+        ),
+      ).toEqual({
+        ok: false,
+        reasons: [`external reference: style ${EXT}`],
+        truncated: false,
+      });
+    });
+  });
+
+  /**
+   * A stray end tag must not cost a walk of the open foreign elements. Names that
+   * alternate never collapse into runs, so this shape holds one entry per element
+   * and then spends the rest of the upload on end tags that close none of them -
+   * which scanning made quadratic, at 61 seconds for a 2 MiB document.
+   *
+   * Asserted as a bound rather than a ratio: a timing test that compares two
+   * shapes is a flake on a shared runner, while whole seconds of headroom under a
+   * limit reached only by quadratic work is not.
+   */
+  test("classifies a stray end tag without scanning open roots", () => {
+    const opens = "<svg><math>".repeat(32_000);
+    const strays = "</g>".repeat(400_000);
+    const html = DOC(`${opens}${strays}`);
+    expect(html.length).toBeLessThanOrEqual(2_097_152);
+
+    const started = performance.now();
+    expect(check(html)).toEqual({ ok: true });
+    expect(performance.now() - started).toBeLessThan(5_000);
+  });
+
+  /**
+   * HTML ignores the slash on a non-void element and enters raw text regardless,
+   * so this is a stylesheet - the opposite of the SVG case above. Closed or not,
+   * and slashed or not, the CSS applies and has to be scanned.
+   */
+  test.each([
+    `<style/>@import url("${EXT}");</style>`,
+    `<style/>@import url("${EXT}");`,
+    `<style>@import url("${EXT}");`,
+  ])("reads an HTML <style> as a stylesheet however it ends: %s", (body) => {
+    expect(check(DOC(body))).toEqual({
+      ok: false,
+      reasons: [`external reference: style ${EXT}`],
+      truncated: false,
     });
   });
 });

@@ -7,10 +7,36 @@
  * access". The `Content-Security-Policy: sandbox` header on GET /{id} is the
  * runtime control, and it is what actually protects the uploader's session.
  *
- * `HTMLRewriter` is Workers-only and would behave differently under Bun, so
- * ultrahtml (zero dependencies, pure ESM) does the parsing on both runtimes.
+ * `HTMLRewriter` is Workers-only and would behave differently under Bun, so a
+ * JS parser does the work on both runtimes. It must be parser-equivalent to a
+ * browser, because every difference is a reference the browser acts on and this
+ * gate never mentioned. `parse5` is the spec reference implementation; the
+ * `SAXParser` wrapper owns the `ParserFeedbackSimulator`, which is the part that
+ * matters here - tokenising alone is not enough:
+ *
+ *   - `<image src=...>` is rewritten to `img`, so the reference has to be
+ *     judged as `img[src]`. A bare tokeniser reports `image`, whose entry in
+ *     `URL_ATTRS` is the SVG one and lists no `src` at all.
+ *   - `title` and `textarea` hold text, not markup, so a `<img>` written inside
+ *     one fetches nothing and must not be refused.
+ *   - SVG and MathML change how the tokeniser reads what follows.
+ *
+ * Driven through `tokenizer.write(text, true)` rather than the stream API: the
+ * whole document is already in memory, that call delivers every token AND the
+ * EOF synchronously, and it keeps this function synchronous for its callers.
+ *
+ * Streaming rather than building a tree, because the tree is not affordable.
+ * At the default 2 MiB `MAX_UPLOAD_BYTES`, a document of nothing but nested
+ * tags costs ~135 MB of heap as a `parse5` tree, over the 128 MB a Worker gets,
+ * and it is allocated inside `parse()` where no cap downstream can refuse it.
+ * The same document streams in ~5 MB, because nesting depth costs a token
+ * stream nothing. Nothing here accumulates per element: the only buffer is one
+ * `<style>` block's text, bounded by the upload itself.
  */
-import { ELEMENT_NODE, type Node, parse, TEXT_NODE, walkSync } from "ultrahtml";
+import type { Token } from "parse5";
+import { SAXParser, type StartTag } from "parse5-sax-parser";
+
+type Attribute = Token.Attribute;
 
 /**
  * A refusal carries up to ten distinct references the gate objected to, not
@@ -533,16 +559,35 @@ function addExternal(
   found.set(full, `external reference: ${location} ${shown}${hint}`);
 }
 
-function lowerAttributes(
-  attributes: Record<string, string>,
-): Record<string, string> {
-  // Null-prototype for the same reason as `URL_ATTRS`: the keys come from the
-  // document, so `__proto__` on a plain literal would not be an ordinary entry.
-  const lowered: Record<string, string> = Object.create(null);
-  for (const [key, value] of Object.entries(attributes)) {
-    lowered[key.toLowerCase()] = value;
+/**
+ * The tokeniser's attribute list as a lookup keyed by qualified name.
+ *
+ * Names are folded to lower case for the same reason the tag name is: the
+ * tokeniser lowercases them, but inside SVG the parser then restores camelCase
+ * spellings such as `viewBox`, and a `URL_ATTRS` entry that ever landed in that
+ * map would stop matching silently.
+ *
+ * `prefix` is rejoined because that is the name `URL_ATTRS` lists: inside SVG
+ * the parser splits `xlink:href` into a prefix and a name, and dropping the
+ * prefix would leave a bare `href` that matches the wrong entry.
+ *
+ * First occurrence wins, which is what a browser does with a repeated
+ * attribute. Taking the last would let `<img src="EXT" src="data:,">` hide the
+ * reference the browser actually fetches behind an inert one.
+ *
+ * Null-prototype for the same reason as `URL_ATTRS`: the keys come from the
+ * document, so `__proto__` on a plain literal would not be an ordinary entry.
+ */
+function attributeMap(attrs: readonly Attribute[]): Record<string, string> {
+  const map: Record<string, string> = Object.create(null);
+  for (const attr of attrs) {
+    const name = (
+      attr.prefix === undefined ? attr.name : `${attr.prefix}:${attr.name}`
+    ).toLowerCase();
+    if (name in map) continue;
+    map[name] = attr.value;
   }
-  return lowered;
+  return map;
 }
 
 /**
@@ -612,27 +657,34 @@ function collectAttributes(
   }
 }
 
-/** Records a refusal for every refusable reference on one element. */
-function collectElement(node: Node, found: Map<string, string>): void {
-  if (node.type !== ELEMENT_NODE) return;
-  const tag = String(node.name).toLowerCase();
-  const attributes = lowerAttributes(node.attributes);
+/** Records a refusal for every refusable reference on one start tag. */
+function collectStartTag(tag: StartTag, found: Map<string, string>): void {
+  const attributes = attributeMap(tag.attrs);
+  // Inside SVG the parser restores the camelCase spelling of the real element -
+  // `feimage` arrives as `feImage`, `textpath` as `textPath` - so the name is
+  // folded back to match how `URL_ATTRS` is keyed and how refusals have always
+  // read. ASCII-only in practice: the tokeniser has already lowered everything
+  // else, and these adjustments introduce ASCII capitals and nothing more.
+  const name = tag.tagName.toLowerCase();
 
   // From the declared `rel`, not inferred from the URL, so the stylesheet hint
   // states what the document says rather than what a path looks like.
-  const rel = tag === "link" ? attributes["rel"] : undefined;
+  const rel = name === "link" ? attributes["rel"] : undefined;
   const stylesheet =
     rel?.toLowerCase().split(/\s+/).includes("stylesheet") === true;
 
   // An inert `link` reaches the network through no attribute, so the whole
   // element is skipped rather than just its `href`: `imagesrcset` only fetches
   // under `rel=preload as=image`, which is not inert.
-  if (tag !== "link" || !inertLink(rel)) {
-    collectAttributes(tag, attributes, stylesheet, found);
+  if (name !== "link" || !inertLink(rel)) {
+    collectAttributes(name, attributes, stylesheet, found);
     if (found.size > MAX_FINDINGS) return;
   }
 
-  if (tag === "meta" && attributes["http-equiv"]?.toLowerCase() === "refresh") {
+  if (
+    name === "meta" &&
+    attributes["http-equiv"]?.toLowerCase() === "refresh"
+  ) {
     const target = attributes["content"];
     if (target !== undefined) {
       const url = refreshTarget(target);
@@ -644,11 +696,11 @@ function collectElement(node: Node, found: Map<string, string>): void {
   }
 
   // `srcdoc` carries a whole nested document whose own subresources would load
-  // automatically. Its value is HTML-entity encoded, and ultrahtml does not
-  // decode attribute entities - validating it recursively would mean writing an
-  // entity decoder and trusting it as a security boundary. A standalone
-  // document gains nothing from `srcdoc`, so it is rejected outright.
-  if (tag === "iframe" && (attributes["srcdoc"] ?? "").trim() !== "") {
+  // automatically. Its value arrives HTML-entity DECODED here, but validating
+  // it would mean re-entering the parser on uploader-controlled markup and
+  // trusting that recursion as a security boundary. A standalone document gains
+  // nothing from `srcdoc`, so it is rejected outright.
+  if (name === "iframe" && (attributes["srcdoc"] ?? "").trim() !== "") {
     const refusal = "nested document: iframe[srcdoc]";
     found.set(refusal, refusal);
     if (found.size > MAX_FINDINGS) return;
@@ -657,18 +709,8 @@ function collectElement(node: Node, found: Map<string, string>): void {
   const inlineStyle = attributes["style"];
   if (inlineStyle !== undefined) {
     for (const target of externalInCss(inlineStyle)) {
-      addExternal(found, `${tag}[style]`, target);
+      addExternal(found, `${name}[style]`, target);
       if (found.size > MAX_FINDINGS) return;
-    }
-  }
-
-  if (tag === "style") {
-    for (const child of node.children ?? []) {
-      if (child.type !== TEXT_NODE) continue;
-      for (const target of externalInCss(String(child.value))) {
-        addExternal(found, "style", target);
-        if (found.size > MAX_FINDINGS) return;
-      }
     }
   }
 }
@@ -685,6 +727,305 @@ function stripPreamble(text: string): string {
   }
 }
 
+/**
+ * `SAXParser` keeps its tokenizer `protected`, and a subclass is how that access
+ * is meant to be had. Everything the gate needs is already in memory, so the
+ * stream API buys nothing and costs the one thing that matters: `end()` defers
+ * `_final`, and `_final` is where EOF - and with it the last pending text - is
+ * delivered. A document ending inside an unclosed `<style>` would have its CSS
+ * arrive after the verdict had been returned.
+ */
+class DocumentScanner extends SAXParser {
+  /** Every token, and the EOF, delivered before this returns. */
+  scan(text: string): void {
+    this.tokenizer.write(text, true);
+  }
+
+  /**
+   * Whether the simulator believes it is inside SVG or MathML. Everything about
+   * how the rest of the document is read follows from it: raw-text elements,
+   * the `<image>` to `img` rewrite, SVG name and attribute adjustment, and
+   * whether a `<style>` bears a stylesheet.
+   */
+  get inForeignContent(): boolean {
+    return this.parserFeedbackSimulator.inForeignContent;
+  }
+}
+
+/**
+ * The simulator's namespace no longer matches the document's.
+ *
+ * It enters SVG on `<svg>` whether or not the tag closed itself, and it leaves
+ * only when an end tag matches its innermost entry, where a browser pops until
+ * one matches. So `<svg/>` leaves it in SVG for the rest of the document, and
+ * `<svg><math></svg>` leaves it in MathML, and from there EVERYTHING downstream
+ * is read wrong: raw-text elements are read as markup, `<image>` is not rewritten
+ * to `img` so its `src` is never checked, SVG name and attribute adjustment is
+ * applied to HTML.
+ *
+ * Each of those could be corrected one at a time; the list is the reason not to.
+ * Where the parse has stopped describing the document, a verdict about the
+ * document is not worth giving, so this says so instead. It costs nothing real:
+ * the trigger is a self-closed `<svg/>` or `<math/>`, or foreign end tags that
+ * cross, and both have a plain spelling that is not affected.
+ */
+const DIVERGED_NAMESPACE =
+  "unsupported nesting: a self-closing <svg/> or <math/>, or crossed svg/math " +
+  "end tags - give each one its own end tag";
+
+/**
+ * An SVG `<style>` holding anything this cannot account for.
+ *
+ * Refused rather than half-scanned: see `StyleText`. Deliberately vague about
+ * WHAT the markup is, because the two triggers differ - a child element, or an
+ * end tag that may be closing an ancestor or may be stray - and naming one of
+ * them would misdescribe the other. The instruction is the useful part, and it
+ * is the same either way.
+ */
+const UNACCOUNTABLE_STYLE =
+  "unsupported markup inside an svg style - keep the stylesheet to text only";
+
+/**
+ * The CSS of the `<style>` element currently open.
+ *
+ * A stylesheet is the element's CHILD text content - "the child text content of
+ * a style element must be that of a conformant style sheet" - its direct
+ * text-node children and nothing deeper. Aggregating descendant text instead
+ * lets markup fabricate a reference no browser parses, because
+ * `<style>a{background:u<g>rl("...")</g>}</style>` has child text content
+ * `a{background:u}`, with no `url(` in it anywhere.
+ *
+ * Text-only styles are therefore exact, and that is every style anyone writes.
+ * An element opening inside an SVG one is refused instead, because the direct
+ * text AFTER it cannot be accounted for without knowing where the element ends,
+ * and inside an `<foreignObject>` island that is HTML tree construction: special
+ * elements blocking an unmatched end tag, implied end tags, the adoption agency.
+ * Matching end tags by name looks close and is not - in
+ * `<svg><style>a{}<foreignObject><div/></foreignObject>b{url(...)}</style>`
+ * HTML ignores the slash on `<div>`, so `</foreignObject>` is blocked by it and
+ * `b{...}` lands inside the `<div>`, outside the stylesheet entirely. Refusing
+ * says so; guessing either invented a reference or hid one.
+ *
+ * An end tag needs none of that. Whatever closes the element - `</style>`,
+ * `</svg>`, anything - the child text is already complete, because collection
+ * would have stopped at a child element.
+ *
+ * Buffered whole rather than scanned per event, because text arrives in as many
+ * pieces as the tokeniser cares to emit and `url(` can straddle any two.
+ */
+class StyleText {
+  /** The open element's CSS so far, or null when none is collecting. */
+  private css: string | null = null;
+  /**
+   * Innermost SVG or MathML root, which decides whether a foreign `<style>`
+   * bears a stylesheet at all. SVG has one; MathML does not - its styling
+   * element is `mstyle`, so an element merely named `style` there is ordinary
+   * foreign content and its text is not CSS.
+   *
+   * Kept as runs rather than one entry per element, because only the innermost
+   * name is ever read and `<svg>` nests to whatever depth an uploader likes: a
+   * 2 MiB document of nothing else held 400,000 entries and 31 MB.
+   */
+  private roots: { name: string; depth: number }[] = [];
+  /**
+   * Elements open per tracked name, so an end tag is classified in constant time.
+   * Scanning `roots` instead was quadratic: alternating names never collapse into
+   * runs, so every stray end tag walked one entry per open element.
+   */
+  private svgOpen = 0;
+  private mathOpen = 0;
+
+  /**
+   * True when no SVG or MathML root is open, so the document is in HTML content
+   * and its raw-text elements are raw text - whatever the simulator's namespace
+   * flag has been left saying.
+   */
+  get inHtmlContent(): boolean {
+    return this.roots.length === 0;
+  }
+
+  private get root(): string | undefined {
+    return this.roots.at(-1)?.name;
+  }
+
+  constructor(
+    /** Called with the child text content of each `<style>`, once it ends. */
+    private readonly onBlock: (css: string) => void,
+    /** Called when an element inside an SVG `<style>` makes it unaccountable. */
+    private readonly onUnaccountable: () => void,
+  ) {}
+
+  /**
+   * A start tag. Any tag ends the text this can vouch for, and a `<style>` then
+   * begins the next block.
+   *
+   * The self-closing slash is where the namespaces part. HTML ignores it on a
+   * non-void element and the tokeniser enters raw text regardless, so `<style/>`
+   * there holds every byte up to `</style>`. SVG honours it, so `<svg><style/>`
+   * is empty and the text after it belongs to the SVG.
+   */
+  startTag(tag: StartTag, inForeignContent: boolean): void {
+    // A tag arriving while a block is open proves the block was never raw text:
+    // raw text hides every tag from the tokeniser, which is the point of it. So
+    // this covers the SVG `<style>` that is ordinary markup AND the one the
+    // simulator left in the wrong namespace, where `<style>` is HTML but never
+    // switched to RAWTEXT and a `<` in the CSS emits a start tag of its own.
+    const unaccountable = this.css !== null;
+    this.end();
+    if (unaccountable) this.onUnaccountable();
+
+    if (tag.tagName === "svg" || tag.tagName === "math") {
+      if (!tag.selfClosing) this.pushRoot(tag.tagName);
+      return;
+    }
+    if (tag.tagName !== "style") return;
+    if (!inForeignContent) {
+      // Raw text, at the top level or inside an integration point.
+      this.css = "";
+      return;
+    }
+    if (tag.selfClosing) return;
+    if (this.root === "svg") this.css = "";
+  }
+
+  append(chunk: string): void {
+    if (this.css !== null) this.css += chunk;
+  }
+
+  /**
+   * An end tag.
+   *
+   * `</style>` completes the block, and so does the end tag of any SVG or MathML
+   * root the element sits inside - both say exactly where the child text stopped.
+   * Any other end tag does not: `</g>` may close an ancestor of the `<style>`, or
+   * may be stray and ignored, in which case the CSS carries on past it. Only the
+   * foreign roots are tracked, so the two cannot be told apart, and the document
+   * is refused rather than half-scanned.
+   */
+  endTag(tagName: string): void {
+    const closesRoot = this.opened(tagName);
+    const ambiguous = this.css !== null && tagName !== "style" && !closesRoot;
+    this.end();
+    if (ambiguous) this.onUnaccountable();
+    if (closesRoot) this.closeRoot(tagName);
+  }
+
+  /** Whether an element of this name is open. False for every untracked name. */
+  private opened(name: string): boolean {
+    if (name === "svg") return this.svgOpen > 0;
+    if (name === "math") return this.mathOpen > 0;
+    return false;
+  }
+
+  /** Only ever called with a tracked name, from `pushRoot` and `closeRoot`. */
+  private count(name: string, by: number): void {
+    if (name === "svg") this.svgOpen += by;
+    else this.mathOpen += by;
+  }
+
+  private pushRoot(name: string): void {
+    this.count(name, 1);
+    const innermost = this.roots.at(-1);
+    if (innermost?.name === name) innermost.depth += 1;
+    else this.roots.push({ name, depth: 1 });
+  }
+
+  /**
+   * Closes the innermost root of this name AND everything opened inside it, the
+   * way a parser pops until the name matches: `<svg><math></svg>` leaves neither
+   * open.
+   *
+   * Entered only when `opened` says the name is there, so the search always
+   * finds it and every entry it passes is one it drops. Each element is pushed
+   * once and dropped once, so the whole document costs a walk of its elements.
+   */
+  private closeRoot(name: string): void {
+    for (let index = this.roots.length - 1; index >= 0; index -= 1) {
+      const run = this.roots[index];
+      if (run === undefined || run.name !== name) continue;
+      for (let above = index; above < this.roots.length; above += 1) {
+        const dropped = this.roots[above];
+        if (dropped !== undefined) this.count(dropped.name, -dropped.depth);
+      }
+      this.roots.length = index;
+      if (run.depth > 1) {
+        this.roots.push({ name, depth: run.depth - 1 });
+        this.count(name, run.depth - 1);
+      }
+      return;
+    }
+  }
+
+  /** Reports the block still open, if any. Also the end of input. */
+  end(): void {
+    if (this.css === null) return;
+    const css = this.css;
+    this.css = null;
+    this.onBlock(css);
+  }
+}
+
+/** Records every refusable reference in the document. */
+function scanDocument(text: string, found: Map<string, string>): void {
+  const parser = new DocumentScanner();
+
+  /** Past the cap the remaining bytes cannot change the verdict. */
+  const capped = (): boolean => {
+    if (found.size <= MAX_FINDINGS) return false;
+    parser.stop();
+    return true;
+  };
+
+  const style = new StyleText(
+    (css) => {
+      for (const target of externalInCss(css)) {
+        addExternal(found, "style", target);
+        if (capped()) return;
+      }
+    },
+    () => {
+      found.set(UNACCOUNTABLE_STYLE, UNACCOUNTABLE_STYLE);
+      capped();
+    },
+  );
+
+  /**
+   * One-way on purpose. `roots` empty while the simulator still says foreign
+   * means it never left, and nothing after that point is read as the document
+   * says. The reverse - roots open while the simulator says HTML - is ordinary
+   * and correct: that is an integration point such as `<foreignObject>`, whose
+   * content IS HTML inside a subtree that is still open.
+   */
+  const diverged = (): boolean => {
+    if (!style.inHtmlContent || !parser.inForeignContent) return false;
+    found.set(DIVERGED_NAMESPACE, DIVERGED_NAMESPACE);
+    // Nothing further can be trusted, so nothing further is read.
+    parser.stop();
+    return true;
+  };
+
+  parser.on("startTag", (tag) => {
+    style.startTag(tag, parser.inForeignContent);
+    if (diverged()) return;
+    collectStartTag(tag, found);
+    capped();
+  });
+
+  parser.on("text", (token) => {
+    style.append(token.text);
+  });
+
+  parser.on("endTag", (tag) => {
+    style.endTag(tag.tagName);
+    diverged();
+  });
+
+  parser.scan(text);
+  // A `<style>` left unclosed never sees an end tag, and a browser applies its
+  // CSS regardless, so whatever is still open is reported at EOF.
+  style.end();
+}
+
 export function validateStandaloneHtml(bytes: Uint8Array): ValidationResult {
   let text: string;
   try {
@@ -698,27 +1039,17 @@ export function validateStandaloneHtml(bytes: Uint8Array): ValidationResult {
     return { ok: false, reasons: ["not an HTML document"], truncated: false };
   }
 
+  // Deliberately not wrapped in a catch that refuses the upload. There is no
+  // exception left for one to handle: the tokeniser is error-tolerant by spec and
+  // reports malformed input as tokens rather than throwing, the scan is iterative
+  // so no depth overflows a stack, and the collectors do string work on values
+  // already in hand. What a blanket catch WOULD cover is a defect in this file,
+  // reported to the uploader as a fault in their document - which is worse than a
+  // 500, because a 500 is a signal and a false refusal sends them looking for
+  // something that is not there. The recursive parser that could overflow, and
+  // the `could not parse document` refusal that admitted it, are both gone.
   const found = new Map<string, string>();
-  try {
-    // `walkSync` cannot be stopped from its callback, so the tree is traversed
-    // either way; past the cap this stops validating rather than stops walking.
-    walkSync(parse(text), (node) => {
-      if (found.size > MAX_FINDINGS) return;
-      collectElement(node, found);
-    });
-  } catch (cause) {
-    // ultrahtml parses and walks recursively, so a document too deeply nested
-    // overflows the stack rather than returning. What the parser cannot see
-    // through, this check cannot vouch for, so that is an upload error rather
-    // than a 500. Only that: every other exception is a defect in the collector
-    // and is rethrown, because a bug reported as a refusal blames the document.
-    if (!(cause instanceof RangeError)) throw cause;
-    return {
-      ok: false,
-      reasons: ["could not parse document"],
-      truncated: false,
-    };
-  }
+  scanDocument(text, found);
 
   if (found.size === 0) return { ok: true };
   // Collecting one past the cap is what makes the flag precise: it reports
