@@ -144,11 +144,19 @@ describe("the landing page", () => {
 });
 
 describe("the dashboard", () => {
-  test("hydrates, and the disclosure keeps its state on the way", async () => {
+  test("hydrates onto the signed-out placeholder the server rendered", async () => {
     const root = await hydrate(renderDashboard(ASSETS, "/dashboard", ORIGIN));
 
     // Signed out on both sides, so the guard's placeholder is what survives.
     expect(root.textContent).toContain("Loading");
+    /*
+     * And the same negative the server render is held to: the client's first
+     * paint carries no account data either, so hydration cannot be what
+     * reveals a handle. The old name here claimed to check the dashboard's
+     * disclosure, which this cannot reach - the server only ever renders the
+     * signed-out tree, so there is no disclosure in the markup to hydrate.
+     */
+    expect(root.querySelector(".nav-handle")).toBeNull();
   });
 });
 

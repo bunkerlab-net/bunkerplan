@@ -215,17 +215,23 @@ describe.each(generated)("the %s relational graph", (dialect) => {
     ["passkeyRelations", "user_id"],
     ["apikeyRelations", "reference_id"],
   ])("%s joins on %s", (name, column) => {
-    const relation = configOf(name)["user"] as {
-      config?: {
-        fields: Array<{ name: string }>;
-        references: Array<{ name: string }>;
-      };
-    };
+    const relation = configOf(name)["user"] as
+      | {
+          config: {
+            fields: Array<{ name: string }>;
+            references: Array<{ name: string }>;
+          };
+        }
+      | undefined;
 
-    expect(relation.config?.fields.map((field) => field.name)).toEqual([
+    // Asserted first: a renamed or removed declaration otherwise throws a bare
+    // TypeError on the next line, which does not say which one went missing.
+    expect(relation, `${name} declares no "user" relation`).toBeDefined();
+
+    expect(relation?.config.fields.map((field) => field.name)).toEqual([
       column,
     ]);
-    expect(relation.config?.references.map((field) => field.name)).toEqual([
+    expect(relation?.config.references.map((field) => field.name)).toEqual([
       "id",
     ]);
   });

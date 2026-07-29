@@ -585,9 +585,12 @@ describe("redeeming a code", () => {
       });
     }
 
+    // Without the count this passes on an empty list: two undefined reads are
+    // equal, and the handler producing no keys at all is the failure mode.
+    expect(keys).toHaveLength(2);
     // Per-plan would let anyone holding a share link spend the allowance and
     // lock the real readers out of a plan they do not own.
-    expect(keys[0]).toBe(keys[1] as string);
+    expect(keys[0]).toBe(keys[1]);
     // And the address itself is not what is stored.
     expect(keys[0]).not.toContain(CLIENT_IP);
   });

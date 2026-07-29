@@ -192,7 +192,7 @@ describe("deleting an account", () => {
       },
     });
 
-    expect(
+    await expect(
       withHook.user.deleteUser.beforeDelete?.({ id: "user-a" }),
     ).rejects.toThrow("storage is unreachable");
   });

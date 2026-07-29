@@ -253,9 +253,14 @@ export function memoryPlans(
   };
 }
 
+/** The in-memory storage, which also hands back the objects it is holding. */
+export type MemoryStorage = PlanStorage & {
+  objects: Map<string, Uint8Array<ArrayBufferLike>>;
+};
+
 export function memoryStorage(
   seed: Record<string, string> = {},
-): PlanStorage & { objects: Map<string, Uint8Array<ArrayBufferLike>> } {
+): MemoryStorage {
   const objects = new Map<string, Uint8Array<ArrayBufferLike>>(
     Object.entries(seed).map(([id, body]) => [
       id,
@@ -314,13 +319,13 @@ export const openAccounts: AccountClosingRepo = {
   isOpen: async () => false,
 };
 
-export interface HarnessOptions {
+export interface HarnessOptions<S extends PlanStorage = MemoryStorage> {
   runtime?: RuntimeTarget;
   sessionUser?: string | null;
   keyUser?: string | null;
   authHandler?: (request: Request) => Promise<Response>;
   plans?: PlanRepo;
-  storage?: PlanStorage;
+  storage?: S;
   kv?: KvStore;
   uploadRateLimits?: RateLimitRepo;
   unlockRateLimits?: RateLimitRepo;
@@ -331,16 +336,29 @@ export interface HarnessOptions {
   onServices?: () => void;
 }
 
-export interface AppHarness {
+export interface AppHarness<S extends PlanStorage = MemoryStorage> {
   fetch: (path: string, init?: RequestInit) => Promise<Response>;
   services: Services;
   plans: PlanRepo;
-  storage: PlanStorage & { objects: Map<string, Uint8Array<ArrayBufferLike>> };
+  /**
+   * Whatever storage the app was built on, at its own type.
+   *
+   * Generic rather than always the memory one: a caller passing its own
+   * `PlanStorage` has no `objects` map, and claiming otherwise handed those
+   * suites a typed field that is `undefined` at runtime.
+   */
+  storage: S;
   auth: AuthCalls;
   deps: AppDeps;
 }
 
-export function buildApp(options: HarnessOptions = {}): AppHarness {
+export function buildApp<S extends PlanStorage>(
+  options: HarnessOptions<S> & { storage: S },
+): AppHarness<S>;
+export function buildApp(options?: HarnessOptions): AppHarness<MemoryStorage>;
+export function buildApp(
+  options: HarnessOptions<PlanStorage> = {},
+): AppHarness<PlanStorage> {
   const { auth, calls } = fakeAuth({
     sessionUser: options.sessionUser ?? null,
     keyUser: options.keyUser ?? null,
@@ -384,9 +402,7 @@ export function buildApp(options: HarnessOptions = {}): AppHarness {
       await app.request(new Request(new URL(path, PUBLIC_BASE_URL), init)),
     services,
     plans,
-    storage: storage as PlanStorage & {
-      objects: Map<string, Uint8Array<ArrayBufferLike>>;
-    },
+    storage,
     auth: calls,
     deps,
   };

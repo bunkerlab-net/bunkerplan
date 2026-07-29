@@ -1,5 +1,5 @@
 import "./dom-env.ts";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ApiKeysPanel } from "../../src/client/ApiKeysPanel.tsx";
 import { client, explode, ok, refuse, useAuthStub } from "./auth-stub.ts";
 import {
@@ -208,6 +208,20 @@ describe("ApiKeysPanel creating", () => {
     await click(view.byText("button", "Dismiss"));
 
     expect(view.maybe(".notice")).toBeNull();
+  });
+
+  /*
+   * Put back afterwards: `navigator.clipboard` is one object for the whole
+   * process, so a stub left in place is still answering for every test that
+   * runs after this one.
+   */
+  const realClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  afterEach(() => {
+    if (realClipboard === undefined) {
+      Reflect.deleteProperty(navigator, "clipboard");
+    } else {
+      Object.defineProperty(navigator, "clipboard", realClipboard);
+    }
   });
 
   test("the reveal copies the key to the clipboard", async () => {

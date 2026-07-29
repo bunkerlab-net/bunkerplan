@@ -127,6 +127,7 @@ describe.each(tables)("%s", (name, pg, sqlite) => {
     expect(fromSqlite.primaryKey).toEqual(fromPg.primaryKey);
     expect(fromSqlite.foreignKeys).toEqual(fromPg.foreignKeys);
     expect(fromSqlite.indexes).toEqual(fromPg.indexes);
+    expect(fromSqlite.checks).toEqual(fromPg.checks);
   });
 
   test.each(shapes)(

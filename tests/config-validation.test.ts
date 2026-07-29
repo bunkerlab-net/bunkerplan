@@ -207,13 +207,19 @@ describe("integer settings", () => {
     );
   });
 
+  test("a negative value is an integer, so the floor is what refuses it", () => {
+    expect(refusal({ ...SELF_HOSTED, MAX_UPLOAD_BYTES: "-1" })).toContain(
+      'MAX_UPLOAD_BYTES must be an integer >= 1, got "-1"',
+    );
+  });
+
   test("a bounded setting names both ends", () => {
     expect(refusal({ ...SELF_HOSTED, PLAN_ID_LENGTH: "999" })).toContain(
       "PLAN_ID_LENGTH must be an integer between",
     );
   });
 
-  test.each(["1.5", "abc", "Infinity", "-1"])(
+  test.each(["1.5", "abc", "Infinity"])(
     "%p is not an integer and is refused",
     (raw) => {
       expect(refusal({ ...SELF_HOSTED, MAX_UPLOAD_BYTES: raw })).toContain(

@@ -119,7 +119,12 @@ describe("DangerZone", () => {
     client.deleteUser = explode("network down");
     const view = mount(<DangerZone handle={HANDLE} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
 
+    // Both halves matter: without the click the button is enabled merely
+    // because the handle matched, which is what this used to assert.
+    expect(view.find(".error").textContent).toBe("network down");
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(false);
+    expect(navigations).toEqual([]);
   });
 });

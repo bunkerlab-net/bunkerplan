@@ -1,5 +1,5 @@
 import "./dom-env.ts";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PlansPanel } from "../../src/client/PlansPanel.tsx";
 import { api, calls, countOf, grantResult, plan, sharing } from "./api-stub.ts";
 import type { Mounted } from "./harness.tsx";
@@ -55,6 +55,23 @@ export function registerSharingCases(): void {
       node.dispatchEvent(new Event("input", { bubbles: true }));
       await flush();
     }
+
+    /*
+     * Put back after every test: `navigator.clipboard` is one object for the
+     * whole process, so a stub left in place keeps answering for the tests
+     * that run after it.
+     */
+    const realClipboard = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
+    afterEach(() => {
+      if (realClipboard === undefined) {
+        Reflect.deleteProperty(navigator, "clipboard");
+      } else {
+        Object.defineProperty(navigator, "clipboard", realClipboard);
+      }
+    });
 
     /** Installs a clipboard that either records or refuses. */
     function clipboard(mode: { allow: boolean }): string[] {

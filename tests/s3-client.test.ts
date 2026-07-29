@@ -104,6 +104,21 @@ armWhileFileRuns(arm, () => {
   answer = async () => ({});
 });
 
+/**
+ * The options one construction handed the SDK.
+ *
+ * Throws rather than defaulting to `{}`: every assertion below is an absence
+ * check, and `"credentials" in {}` is false, so a fallback would let the whole
+ * block pass while recording nothing at all.
+ */
+const optionsAt = (index: number): Record<string, unknown> => {
+  const options = constructed[index];
+  if (options === undefined) {
+    throw new Error(`no client was constructed at index ${index}`);
+  }
+  return options;
+};
+
 describe("construction", () => {
   test("refuses without a bucket, naming the setting", () => {
     expect(() => storage({ s3Bucket: undefined })).toThrow(
@@ -123,7 +138,7 @@ describe("construction", () => {
     storage();
     storage({ s3Endpoint: "https://minio.internal:9000" });
 
-    expect("forcePathStyle" in (constructed[0] ?? {})).toBe(false);
+    expect("forcePathStyle" in optionsAt(0)).toBe(false);
     expect(constructed[1]).toMatchObject({ forcePathStyle: true });
   });
 
@@ -132,7 +147,7 @@ describe("construction", () => {
 
     // Present-but-undefined is not the same thing: the SDK branches on the key
     // existing, and omitting it is what lets the provider chain run.
-    expect("credentials" in (constructed[0] ?? {})).toBe(false);
+    expect("credentials" in optionsAt(0)).toBe(false);
   });
 
   test("omits them when only one key is configured", () => {
@@ -141,6 +156,7 @@ describe("construction", () => {
     storage({ s3AccessKeyId: "AKIA0000" });
     storage({ s3SecretAccessKey: "secret" });
 
+    expect(constructed).toHaveLength(2);
     expect(constructed.every((options) => !("credentials" in options))).toBe(
       true,
     );
@@ -200,7 +216,7 @@ describe("the requests it composes", () => {
       throw new Error("bucket is unreachable");
     };
 
-    expect(storage().probe()).rejects.toThrow("bucket is unreachable");
+    await expect(storage().probe()).rejects.toThrow("bucket is unreachable");
   });
 });
 
@@ -262,7 +278,7 @@ describe("reading an object", () => {
       });
     };
 
-    expect(storage().get("abc123")).rejects.toThrow("Forbidden");
+    await expect(storage().get("abc123")).rejects.toThrow("Forbidden");
   });
 
   test("a plain network error surfaces", async () => {
@@ -270,7 +286,7 @@ describe("reading an object", () => {
       throw new Error("socket hang up");
     };
 
-    expect(storage().get("abc123")).rejects.toThrow("socket hang up");
+    await expect(storage().get("abc123")).rejects.toThrow("socket hang up");
   });
 
   test("a thrown non-object surfaces rather than reading as absent", async () => {
@@ -278,7 +294,7 @@ describe("reading an object", () => {
       throw "unexpected";
     };
 
-    expect(storage().get("abc123")).rejects.toBe("unexpected");
+    await expect(storage().get("abc123")).rejects.toBe("unexpected");
   });
 
   test("an error carrying a non-object $metadata surfaces", async () => {
@@ -286,11 +302,14 @@ describe("reading an object", () => {
       throw Object.assign(new Error("odd"), { $metadata: null });
     };
 
-    expect(storage().get("abc123")).rejects.toThrow("odd");
+    await expect(storage().get("abc123")).rejects.toThrow("odd");
   });
 
   test("an id the key mapping refuses never reaches the network", async () => {
-    expect(storage().get("../../etc/passwd")).rejects.toThrow();
+    await expect(storage().get("../../etc/passwd")).rejects.toThrow();
+
+    // Only meaningful once the rejection has settled: an un-awaited assertion
+    // would read `sent` before the driver had the chance to reach the network.
     expect(sent).toEqual([]);
   });
 });
