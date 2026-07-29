@@ -1,4 +1,4 @@
-import { useState } from "hono/jsx";
+import { useRef, useState } from "hono/jsx";
 import { unlockPlan } from "./api.ts";
 import { useSession } from "./auth.ts";
 import { SiteFrame } from "./Chrome.tsx";
@@ -9,11 +9,34 @@ import { usePasskeyAction } from "./passkey.ts";
 /** One gate per page, so a constant id is unambiguous. */
 const ERROR_ID = "share-code-error";
 
+/**
+ * `spellcheck="false"`, spread rather than written as a prop.
+ *
+ * It is an enumerated attribute, not a boolean one, but the JSX types declare
+ * it `boolean` - and `hono/jsx/dom` drops a false attribute entirely, so
+ * `spellcheck={false}` renders nothing and hydration then *deletes* the
+ * server's `spellcheck="false"`. The field would inherit the document's
+ * setting and hand a share code to the spell checker, which on several
+ * platforms means sending it to a remote service.
+ */
+const NO_SPELLCHECK: Record<string, string> = { spellcheck: "false" };
+
 /** The code box, and the unlock it performs. */
 function useUnlock(planId: string) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * The same guard as `busy`, but readable in the turn it is set.
+   *
+   * `busy` is state: the handler closes over the value from the render it was
+   * created in, so three Enter presses in one tick all see `false` and all
+   * three reach the network. This route is rate-limited per client address and
+   * a wrong code is the expected outcome here, so that turns an impatient
+   * reader into someone who has locked themselves out. Not cleared on success:
+   * the page is navigating away.
+   */
+  const inFlight = useRef(false);
 
   // Codes get copied out of chat clients and mail, which is where a stray
   // space either side comes from. The server compares a digest, so it cannot
@@ -22,7 +45,8 @@ function useUnlock(planId: string) {
 
   const submit = (event: Event) => {
     event.preventDefault();
-    if (busy || trimmed === "") return;
+    if (inFlight.current || busy || trimmed === "") return;
+    inFlight.current = true;
     setBusy(true);
     // The previous attempt's message must go now, or a second try appears to
     // have failed the moment it starts.
@@ -46,6 +70,7 @@ function useUnlock(planId: string) {
         );
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
+        inFlight.current = false;
         setBusy(false);
       }
     })();
@@ -134,7 +159,7 @@ function CodeForm(props: {
         <input
           type="text"
           autoComplete="off"
-          spellcheck={false}
+          {...NO_SPELLCHECK}
           placeholder="Share code"
           aria-label="Share code"
           aria-describedby={props.error === null ? undefined : ERROR_ID}

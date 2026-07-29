@@ -1,0 +1,397 @@
+import { describe, expect, test } from "bun:test";
+import { PLAN_CSP } from "../src/http/security-headers.ts";
+import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
+import {
+  buildApp,
+  CLIENT_IP,
+  CLIENT_IP_HEADER,
+  GRANTEE,
+  memoryPlans,
+  memoryStorage,
+  OWNER,
+  PLAN_ID,
+  STRANGER,
+  storedPlan,
+} from "./app-harness.ts";
+
+/**
+ * `GET /p/:id` - the route the whole product exists to serve, and the one
+ * where a mistake is a disclosure rather than a bug.
+ *
+ * Three things are load-bearing and each is pinned below. The plan sandbox has
+ * to be on the 304 as well as the 200, because a cache told to update a stored
+ * response with a 304's headers would otherwise hold the document under the
+ * *app* policy, which lets it script the real origin. A private plan must
+ * never enter a shared cache. And a plan that is missing must be
+ * indistinguishable from one that was never issued.
+ */
+
+const DOCUMENT = "<!doctype html><html><body><p>plan</p></body></html>";
+const CODE = "sHaReCoDe1234567";
+
+const serve = async (
+  over: {
+    plan?: Parameters<typeof storedPlan>[0];
+    sessionUser?: string | null;
+    keyUser?: string | null;
+    stored?: boolean;
+  } = {},
+) =>
+  buildApp({
+    sessionUser: over.sessionUser ?? null,
+    keyUser: over.keyUser ?? null,
+    plans: memoryPlans([storedPlan(over.plan)]),
+    storage:
+      over.stored === false
+        ? memoryStorage()
+        : memoryStorage({ [PLAN_ID]: DOCUMENT }),
+  });
+
+describe("a public plan", () => {
+  test("is served to anyone, with the plan sandbox pinned on", async () => {
+    const app = await serve({ plan: { visibility: "public" } });
+
+    const response = await app.fetch(`/p/${PLAN_ID}`);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(DOCUMENT);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(response.headers.get("content-security-policy")).toBe(PLAN_CSP);
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
+  test("may be cached, but must be revalidated before every use", async () => {
+    const app = await serve({ plan: { visibility: "public" } });
+
+    const response = await app.fetch(`/p/${PLAN_ID}`);
+
+    // A freshness window would let a shared cache keep handing out a plan
+    // after its owner made it private, which is a hole in the one control this
+    // feature exists to provide.
+    expect(response.headers.get("cache-control")).toBe("public, no-cache");
+    expect(response.headers.get("vary")).toBeNull();
+    expect(response.headers.get("etag")).not.toBeNull();
+  });
+
+  test("a matching ETag gets a 304 that still carries the sandbox", async () => {
+    const app = await serve({ plan: { visibility: "public" } });
+    const first = await app.fetch(`/p/${PLAN_ID}`);
+    const etag = first.headers.get("etag") ?? "";
+
+    const second = await app.fetch(`/p/${PLAN_ID}`, {
+      headers: { "if-none-match": etag },
+    });
+
+    expect(second.status).toBe(304);
+    expect(await second.text()).toBe("");
+    // Omit these and the entry middleware fills in the app policy instead,
+    // which has no sandbox - and a cache may merge that onto the stored body.
+    expect(second.headers.get("content-security-policy")).toBe(PLAN_CSP);
+    expect(second.headers.get("etag")).toBe(etag);
+    expect(second.headers.get("cache-control")).toBe("public, no-cache");
+  });
+
+  test("a stale ETag gets the document again", async () => {
+    const app = await serve({ plan: { visibility: "public" } });
+
+    const response = await app.fetch(`/p/${PLAN_ID}`, {
+      headers: { "if-none-match": '"not-the-current-one"' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(DOCUMENT);
+  });
+});
+
+describe("a private plan", () => {
+  test("is served to its owner and kept out of shared caches", async () => {
+    const app = await serve({ sessionUser: OWNER });
+
+    const response = await app.fetch(`/p/${PLAN_ID}`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    // It varies by every credential that can open the gate.
+    expect(response.headers.get("vary")).toBe("cookie, x-api-key");
+    expect(response.headers.get("content-security-policy")).toBe(PLAN_CSP);
+  });
+
+  test("is served to a granted account", async () => {
+    const app = await serve({
+      sessionUser: GRANTEE,
+      plan: { grants: [GRANTEE] },
+    });
+
+    expect((await app.fetch(`/p/${PLAN_ID}`)).status).toBe(200);
+  });
+
+  test("is served to the owner's API key", async () => {
+    const app = await serve({ keyUser: OWNER });
+
+    const response = await app.fetch(`/p/${PLAN_ID}`, {
+      headers: { "x-api-key": "bkp_test" },
+    });
+
+    expect(response.status).toBe(200);
+  });
+
+  test("gates a stranger at 401 rather than 200", async () => {
+    const app = await serve({ sessionUser: STRANGER });
+
+    const response = await app.fetch(`/p/${PLAN_ID}`);
+
+    // 401 is load-bearing: the plan sandbox is pinned onto `/p/*` at 200 and
+    // 304 only, and under it this page could neither sign in nor post a code.
+    expect(response.status).toBe(401);
+    const body = await response.text();
+    expect(body).toContain("This plan is private.");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-security-policy")).not.toBe(PLAN_CSP);
+    // And it says nothing about the document.
+    expect(body).not.toContain("plan</p>");
+  });
+
+  test("gates an anonymous visitor the same way", async () => {
+    const app = await serve();
+
+    expect((await app.fetch(`/p/${PLAN_ID}`)).status).toBe(401);
+  });
+
+  test("a 304 for the owner keeps the private caching rules too", async () => {
+    const app = await serve({ sessionUser: OWNER });
+    const first = await app.fetch(`/p/${PLAN_ID}`);
+
+    const second = await app.fetch(`/p/${PLAN_ID}`, {
+      headers: { "if-none-match": first.headers.get("etag") ?? "" },
+    });
+
+    expect(second.status).toBe(304);
+    expect(second.headers.get("cache-control")).toBe("private, no-store");
+    expect(second.headers.get("vary")).toBe("cookie, x-api-key");
+  });
+
+  test("the gate offers a code box only when there is a code to enter", async () => {
+    const withCode = await serve({
+      plan: { shareCodeHash: await hashShareCode(CODE) },
+    });
+    const without = await serve();
+
+    expect(await (await withCode.fetch(`/p/${PLAN_ID}`)).text()).toContain(
+      "Have a code?",
+    );
+    expect(await (await without.fetch(`/p/${PLAN_ID}`)).text()).not.toContain(
+      "Have a code?",
+    );
+  });
+});
+
+describe("a code-shared plan", () => {
+  const gated = async () =>
+    buildApp({
+      plans: memoryPlans([
+        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
+      ]),
+      storage: memoryStorage({ [PLAN_ID]: DOCUMENT }),
+    });
+
+  test("opens with ?code= and hands back the cookie in the same response", async () => {
+    const app = await gated();
+
+    const response = await app.fetch(`/p/${PLAN_ID}?code=${CODE}`);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(DOCUMENT);
+    // Without this the parameter would be needed on every later request.
+    expect(response.headers.get("set-cookie")).toContain(
+      shareCookieName(PLAN_ID),
+    );
+  });
+
+  test("a conditional request carrying ?code= still leaves the cookie", async () => {
+    const app = await gated();
+    const first = await app.fetch(`/p/${PLAN_ID}?code=${CODE}`);
+
+    const second = await app.fetch(`/p/${PLAN_ID}?code=${CODE}`, {
+      headers: { "if-none-match": first.headers.get("etag") ?? "" },
+    });
+
+    expect(second.status).toBe(304);
+    expect(second.headers.get("set-cookie")).toContain(
+      shareCookieName(PLAN_ID),
+    );
+  });
+
+  test("the cookie alone opens it next time", async () => {
+    const app = await gated();
+    const opened = await app.fetch(`/p/${PLAN_ID}?code=${CODE}`);
+    const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+
+    const response = await app.fetch(`/p/${PLAN_ID}`, { headers: { cookie } });
+
+    expect(response.status).toBe(200);
+  });
+
+  test("a wrong code gates rather than opening", async () => {
+    const app = await gated();
+
+    expect((await app.fetch(`/p/${PLAN_ID}?code=wrong`)).status).toBe(401);
+  });
+
+  test("a cookie minted for another plan does not open this one", async () => {
+    const other = "zzzzzzzzzzzzzzzz";
+    const app = buildApp({
+      plans: memoryPlans([
+        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
+        storedPlan({ id: other, shareCodeHash: await hashShareCode(CODE) }),
+      ]),
+      storage: memoryStorage({ [PLAN_ID]: DOCUMENT, [other]: DOCUMENT }),
+    });
+    const opened = await app.fetch(`/p/${other}?code=${CODE}`);
+    const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+
+    const response = await app.fetch(`/p/${PLAN_ID}`, { headers: { cookie } });
+
+    expect(response.status).toBe(401);
+  });
+
+  /**
+   * Two apps over one repository: the owner, who changes the code, and the
+   * reader holding the cookie. Asking the owner's own session whether the
+   * cookie still works would answer yes for a reason that has nothing to do
+   * with the cookie.
+   */
+  const ownerAndReader = async () => {
+    const plans = memoryPlans([
+      storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
+    ]);
+    const storage = memoryStorage({ [PLAN_ID]: DOCUMENT });
+    const owner = buildApp({ sessionUser: OWNER, plans, storage });
+    const reader = buildApp({ plans, storage });
+    const opened = await reader.fetch(`/p/${PLAN_ID}?code=${CODE}`);
+    const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    return { owner, reader, cookie };
+  };
+
+  test("rotating the code retires the cookie bound to the old one", async () => {
+    const { owner, reader, cookie } = await ownerAndReader();
+    expect(
+      (await reader.fetch(`/p/${PLAN_ID}`, { headers: { cookie } })).status,
+    ).toBe(200);
+
+    await owner.fetch(`/api/plans/${PLAN_ID}/share-code`, { method: "POST" });
+
+    // Cookies are bound to the digest, so they die with it.
+    expect(
+      (await reader.fetch(`/p/${PLAN_ID}`, { headers: { cookie } })).status,
+    ).toBe(401);
+  });
+
+  test("clearing the code closes the plan to a held cookie", async () => {
+    const { owner, reader, cookie } = await ownerAndReader();
+
+    await owner.fetch(`/api/plans/${PLAN_ID}/share-code`, { method: "DELETE" });
+
+    expect(
+      (await reader.fetch(`/p/${PLAN_ID}`, { headers: { cookie } })).status,
+    ).toBe(401);
+  });
+
+  test("a code redeemed through the API opens the plan on the next plain request", async () => {
+    const app = await gated();
+    const unlocked = await app.fetch(`/api/plans/${PLAN_ID}/unlock`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [CLIENT_IP_HEADER]: CLIENT_IP,
+      },
+      body: JSON.stringify({ code: CODE }),
+    });
+    const cookie =
+      (unlocked.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+
+    const response = await app.fetch(`/p/${PLAN_ID}`, { headers: { cookie } });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(DOCUMENT);
+  });
+});
+
+describe("a plan that is not there", () => {
+  test("an unknown id renders the site's own 404", async () => {
+    const app = buildApp();
+
+    const response = await app.fetch("/p/doesnotexist1234");
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain("Nothing lives at this URL.");
+    // Trusted HTML, so it takes the app policy rather than the plan sandbox.
+    expect(response.headers.get("content-security-policy")).not.toBe(PLAN_CSP);
+  });
+
+  test("a row with no object 404s rather than serving an empty document", async () => {
+    // The window between a deleted object and its row, or a storage write that
+    // never landed. Either way there is nothing to serve.
+    const app = await serve({ sessionUser: OWNER, stored: false });
+
+    const response = await app.fetch(`/p/${PLAN_ID}`);
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain("Nothing lives at this URL.");
+  });
+
+  test("a deleted plan is indistinguishable from an id never issued", async () => {
+    const app = await serve({ sessionUser: OWNER });
+    await app.fetch(`/api/plans/${PLAN_ID}`, { method: "DELETE" });
+
+    const gone = await app.fetch(`/p/${PLAN_ID}`);
+    const never = await app.fetch("/p/neverissued1234");
+
+    expect(gone.status).toBe(never.status);
+    expect(await gone.text()).toBe(await never.text());
+  });
+
+  test("access is resolved before storage is touched", async () => {
+    let reads = 0;
+    const storage = memoryStorage({ [PLAN_ID]: DOCUMENT });
+    const app = buildApp({
+      sessionUser: STRANGER,
+      plans: memoryPlans([storedPlan()]),
+      storage: {
+        ...storage,
+        get: async (id) => {
+          reads += 1;
+          return await storage.get(id);
+        },
+      },
+    });
+
+    await app.fetch(`/p/${PLAN_ID}`);
+
+    // An unauthorised visitor costs one row read and never an object read.
+    expect(reads).toBe(0);
+  });
+});
+
+describe("making a plan private again", () => {
+  test("takes effect on the very next read", async () => {
+    const app = buildApp({
+      sessionUser: OWNER,
+      plans: memoryPlans([storedPlan({ visibility: "public" })]),
+      storage: memoryStorage({ [PLAN_ID]: DOCUMENT }),
+    });
+    const anonymous = buildApp({
+      plans: app.plans,
+      storage: app.storage,
+    });
+    expect((await anonymous.fetch(`/p/${PLAN_ID}`)).status).toBe(200);
+
+    await app.fetch(`/api/plans/${PLAN_ID}/sharing`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "private" }),
+    });
+
+    expect((await anonymous.fetch(`/p/${PLAN_ID}`)).status).toBe(401);
+  });
+});

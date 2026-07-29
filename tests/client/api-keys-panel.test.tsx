@@ -1,0 +1,396 @@
+import "./dom-env.ts";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { ApiKeysPanel } from "../../src/client/ApiKeysPanel.tsx";
+import { client, explode, ok, refuse, useAuthStub } from "./auth-stub.ts";
+import {
+  choose,
+  click,
+  flush,
+  mountAsync,
+  type,
+  useHarness,
+} from "./harness.tsx";
+
+// Arms the module stubs for this file; unarmed, the real modules answer.
+useHarness();
+useAuthStub();
+
+/**
+ * The panel that shows a secret exactly once.
+ *
+ * Two things carry the weight here. The plaintext key is returned by the
+ * create call and never again, so the reveal has to appear on success and
+ * survive until it is dismissed. And every mutation is fired as
+ * `void create(...)` from a click handler, so a call that throws rather than
+ * returning `{ error }` has to land on the error line - an unhandled rejection
+ * would leave the panel looking like nothing happened.
+ */
+
+const DAY = 86_400;
+
+const key = (over: Partial<Record<string, unknown>> = {}) => ({
+  id: "k1",
+  name: "CI",
+  start: "bkp_abc",
+  expiresAt: null,
+  createdAt: new Date("2026-01-01T00:00:00Z"),
+  ...over,
+});
+
+/** The list call every mount makes, staged with `rows`. */
+function listing(rows: unknown[]): void {
+  client.apiKey.list = ok({ apiKeys: rows });
+}
+
+beforeEach(() => {
+  listing([]);
+});
+
+describe("ApiKeysPanel listing", () => {
+  test("lists on mount and says so when there is nothing", async () => {
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    expect(view.find(".empty").textContent).toBe("No API keys.");
+    expect(view.maybe("table")).toBeNull();
+  });
+
+  test("renders a row per key", async () => {
+    listing([key(), key({ id: "k2", name: "laptop", start: "bkp_xyz" })]);
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    const rows = view.all("tbody tr");
+    expect(rows.length).toBe(2);
+    expect(rows[0]?.textContent).toContain("CI");
+    // `start` already carries the prefix and must not have it prepended again.
+    expect(rows[0]?.textContent).toContain("bkp_abc…");
+    expect(rows[0]?.textContent).toContain("Never");
+  });
+
+  test("a key with no name and no prefix renders placeholders, not blanks", async () => {
+    listing([key({ name: null, start: null })]);
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    const cells = view.all("tbody td");
+    expect(cells[0]?.textContent).toBe("-");
+    expect(cells[1]?.textContent).toBe("-…");
+  });
+
+  test("an expiry is rendered as a date rather than as a timestamp", async () => {
+    const expiresAt = new Date("2026-06-01T12:00:00Z");
+    listing([key({ expiresAt })]);
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    expect(view.all("tbody td")[2]?.textContent).toBe(
+      expiresAt.toLocaleString(),
+    );
+  });
+
+  test("a refused list shows the reason and no table", async () => {
+    client.apiKey.list = refuse("authentication required");
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    expect(view.find(".error").textContent).toBe("authentication required");
+    expect(view.maybe("table")).toBeNull();
+  });
+
+  test("a list that throws is caught rather than left unhandled", async () => {
+    client.apiKey.list = explode("network is down");
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    expect(view.find(".error").textContent).toBe("network is down");
+  });
+
+  test("a refusal with no message falls back to a readable line", async () => {
+    client.apiKey.list = async () => ({ data: null, error: {} });
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    expect(view.find(".error").textContent).toBe("could not list API keys");
+  });
+
+  test("a list answering with no apiKeys field is treated as empty", async () => {
+    client.apiKey.list = ok({});
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    expect(view.find(".empty").textContent).toBe("No API keys.");
+  });
+});
+
+describe("ApiKeysPanel creating", () => {
+  test("an unnamed key gets a default name rather than an empty one", async () => {
+    let created: unknown;
+    client.apiKey.create = async (options: unknown) => {
+      created = options;
+      return { data: { key: "bkp_secret" }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+
+    expect(created).toEqual({ name: "API key" });
+  });
+
+  test("a name is trimmed before it is sent", async () => {
+    let created: unknown;
+    client.apiKey.create = async (options: unknown) => {
+      created = options;
+      return { data: { key: "bkp_secret" }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await type(view.find<HTMLInputElement>("input[type=text]"), "  CI  ");
+    await click(view.byText("button", "Create key"));
+
+    expect(created).toEqual({ name: "CI" });
+  });
+
+  test("a whitespace-only name is the same as no name", async () => {
+    let created: unknown;
+    client.apiKey.create = async (options: unknown) => {
+      created = options;
+      return { data: { key: "bkp_secret" }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await type(view.find<HTMLInputElement>("input[type=text]"), "   ");
+    await click(view.byText("button", "Create key"));
+
+    expect(created).toEqual({ name: "API key" });
+  });
+
+  test("the default expiry sends no expiresIn at all", async () => {
+    let created: Record<string, unknown> = {};
+    client.apiKey.create = async (options: Record<string, unknown>) => {
+      created = options;
+      return { data: { key: "bkp_secret" }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+
+    expect("expiresIn" in created).toBe(false);
+  });
+
+  test.each([
+    ["1", 30 * DAY],
+    ["2", 90 * DAY],
+    ["3", 365 * DAY],
+  ])("expiry choice %s sends %i seconds", async (index, seconds) => {
+    let created: Record<string, unknown> = {};
+    client.apiKey.create = async (options: Record<string, unknown>) => {
+      created = options;
+      return { data: { key: "bkp_secret" }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await choose(view.find<HTMLSelectElement>("select"), index);
+    await click(view.byText("button", "Create key"));
+
+    expect(created["expiresIn"]).toBe(seconds);
+  });
+
+  test("the plaintext is revealed once and the name field is cleared", async () => {
+    client.apiKey.create = ok({ key: "bkp_the_only_time" });
+    const view = await mountAsync(<ApiKeysPanel />);
+    const name = view.find<HTMLInputElement>("input[type=text]");
+
+    await type(name, "CI");
+    await click(view.byText("button", "Create key"));
+
+    expect(view.find(".notice code").textContent).toBe("bkp_the_only_time");
+    expect(name.value).toBe("");
+  });
+
+  test("the reveal can be dismissed, and it does not come back", async () => {
+    client.apiKey.create = ok({ key: "bkp_the_only_time" });
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+    await click(view.byText("button", "Dismiss"));
+
+    expect(view.maybe(".notice")).toBeNull();
+  });
+
+  test("the reveal copies the key to the clipboard", async () => {
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          copied.push(value);
+        },
+      },
+    });
+    client.apiKey.create = ok({ key: "bkp_the_only_time" });
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+    await click(view.byText("button", "Copy"));
+
+    expect(copied).toEqual(["bkp_the_only_time"]);
+  });
+
+  test("a create that returns no key does not render an empty reveal", async () => {
+    client.apiKey.create = ok({});
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+
+    expect(view.maybe(".notice")).toBeNull();
+  });
+
+  test("a successful create refreshes the list", async () => {
+    let listed = 0;
+    client.apiKey.list = async () => {
+      listed += 1;
+      return { data: { apiKeys: listed > 1 ? [key()] : [] }, error: null };
+    };
+    client.apiKey.create = ok({ key: "bkp_secret" });
+    const view = await mountAsync(<ApiKeysPanel />);
+    expect(listed).toBe(1);
+
+    await click(view.byText("button", "Create key"));
+
+    expect(listed).toBe(2);
+    expect(view.all("tbody tr").length).toBe(1);
+  });
+
+  test("a refused create keeps the typed name so it can be retried", async () => {
+    client.apiKey.create = refuse("key limit reached");
+    const view = await mountAsync(<ApiKeysPanel />);
+    const name = view.find<HTMLInputElement>("input[type=text]");
+
+    await type(name, "CI");
+    await click(view.byText("button", "Create key"));
+
+    expect(view.find(".error").textContent).toBe("key limit reached");
+    expect(name.value).toBe("CI");
+    expect(view.maybe(".notice")).toBeNull();
+  });
+
+  test("a create that throws lands on the error line", async () => {
+    client.apiKey.create = explode("network is down");
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+
+    expect(view.find(".error").textContent).toBe("network is down");
+  });
+
+  test("a refusal with no message falls back", async () => {
+    client.apiKey.create = async () => ({ data: null, error: {} });
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+
+    expect(view.find(".error").textContent).toBe("could not create API key");
+  });
+
+  test("the create button is held while the call is in flight", async () => {
+    let release: (() => void) | undefined;
+    client.apiKey.create = async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { data: { key: "bkp_secret" }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+    const button = view.byText<HTMLButtonElement>("button", "Create key");
+
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    await flush();
+    expect(button.disabled).toBe(true);
+
+    release?.();
+    await flush();
+    expect(
+      view.byText<HTMLButtonElement>("button", "Create key").disabled,
+    ).toBe(false);
+  });
+});
+
+describe("ApiKeysPanel revoking", () => {
+  test("revoking sends the key id and refreshes", async () => {
+    let revoked: unknown;
+    let listed = 0;
+    client.apiKey.list = async () => {
+      listed += 1;
+      return { data: { apiKeys: listed > 1 ? [] : [key()] }, error: null };
+    };
+    client.apiKey.delete = async (options: unknown) => {
+      revoked = options;
+      return { data: { success: true }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Revoke"));
+
+    expect(revoked).toEqual({ keyId: "k1" });
+    expect(view.find(".empty").textContent).toBe("No API keys.");
+  });
+
+  test("a refused revoke leaves the row in place", async () => {
+    listing([key()]);
+    client.apiKey.delete = refuse("no such key");
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Revoke"));
+
+    expect(view.find(".error").textContent).toBe("no such key");
+    expect(view.all("tbody tr").length).toBe(1);
+  });
+
+  test("a revoke that throws lands on the error line", async () => {
+    listing([key()]);
+    client.apiKey.delete = explode("network is down");
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Revoke"));
+
+    expect(view.find(".error").textContent).toBe("network is down");
+  });
+
+  test("a refusal with no message falls back", async () => {
+    listing([key()]);
+    client.apiKey.delete = async () => ({ data: null, error: {} });
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Revoke"));
+
+    expect(view.find(".error").textContent).toBe("could not revoke API key");
+  });
+
+  test("a successful revoke clears a previous error", async () => {
+    listing([key()]);
+    client.apiKey.delete = refuse("try again");
+    const view = await mountAsync(<ApiKeysPanel />);
+    await click(view.byText("button", "Revoke"));
+    expect(view.maybe(".error")).not.toBeNull();
+
+    client.apiKey.delete = ok({ success: true });
+    await click(view.byText("button", "Revoke"));
+
+    expect(view.maybe(".error")).toBeNull();
+  });
+});
+
+describe("ApiKeysPanel accessibility", () => {
+  test("both controls are labelled, because a placeholder is not a name", async () => {
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    expect(view.find("input[type=text]").getAttribute("aria-label")).toBe(
+      "Key name",
+    );
+    expect(view.find("select").getAttribute("aria-label")).toBe(
+      "How long the key lasts",
+    );
+  });
+
+  test("the scrolling table is reachable by keyboard", async () => {
+    listing([key()]);
+    const view = await mountAsync(<ApiKeysPanel />);
+    const region = view.find(".table-scroll");
+
+    expect(region.getAttribute("tabindex")).toBe("0");
+    expect(region.getAttribute("aria-label")).toBe("API keys");
+  });
+});

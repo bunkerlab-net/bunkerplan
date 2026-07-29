@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { BetterAuthPluginDBSchema } from "@better-auth/core/db";
-import { getTableName } from "drizzle-orm";
+import { createTableRelationsHelpers, getTableName } from "drizzle-orm";
 import { getTableConfig as pgTableConfig } from "drizzle-orm/pg-core";
 import { getTableConfig as sqliteTableConfig } from "drizzle-orm/sqlite-core";
 import { buildAuthOptions } from "../src/auth/options.ts";
@@ -90,3 +90,143 @@ describe.each(dialects)(
     });
   },
 );
+
+/**
+ * Every generated table that names an account, and the cascade that removes
+ * its rows with one.
+ *
+ * Better Auth writes these files, so they are not reviewed line by line on
+ * regeneration - and account deletion is the operation that depends on them:
+ * `deleteUser` removes the `user` row and lets the database take the rest. A
+ * cascade the generator dropped would leave sessions, credentials, and keys
+ * belonging to an account that no longer exists, all still verifiable.
+ */
+const OWNED_BY_USER: ReadonlyArray<[table: string, column: string]> = [
+  ["session", "user_id"],
+  ["account", "user_id"],
+  ["passkey", "user_id"],
+  ["apikey", "reference_id"],
+];
+
+type Dialect = "pg" | "sqlite";
+
+const generated = [["pg"], ["sqlite"]] as const satisfies ReadonlyArray<
+  [Dialect]
+>;
+
+/**
+ * The foreign keys drizzle-kit would emit for one table.
+ *
+ * The dialect is resolved here rather than threaded through `describe.each`:
+ * the two `getTableConfig` functions take different table types, so a tuple
+ * carrying both has no common signature to call.
+ */
+function foreignKeysOf(dialect: Dialect, name: string) {
+  const schema = dialect === "pg" ? pgSchema : sqliteSchema;
+  const table = schema[name as "session"];
+  const config =
+    dialect === "pg"
+      ? pgTableConfig(table as never)
+      : sqliteTableConfig(table as never);
+  return config.foreignKeys.map((key) => {
+    const reference = key.reference();
+    return {
+      columns: reference.columns.map((column) => column.name),
+      references: reference.foreignColumns.map(
+        (target) => `${getTableName(target.table)}.${target.name}`,
+      ),
+      onDelete: key.onDelete,
+    };
+  });
+}
+
+describe.each(generated)("every %s auth table", (dialect) => {
+  const keysOf = (name: string) => foreignKeysOf(dialect, name);
+
+  test.each(OWNED_BY_USER)(
+    "%s.%s cascades from the account",
+    (table, column) => {
+      expect(keysOf(table)).toContainEqual({
+        columns: [column],
+        references: ["user.id"],
+        onDelete: "cascade",
+      });
+    },
+  );
+
+  test("user and verification hang from nothing", () => {
+    // The root of the graph, and a table of short-lived tokens that names no
+    // account at all.
+    expect(keysOf("user")).toEqual([]);
+    expect(keysOf("verification")).toEqual([]);
+  });
+
+  test("rate_limit is Better Auth's own and stays unattached", () => {
+    // Deliberately not the upload counter - see src/db/schema/rate-limit.*.ts.
+    // It is keyed by path and address, so there is no account to cascade from.
+    expect(keysOf("rateLimit")).toEqual([]);
+  });
+
+  test("a session is found by its token, which is what every request does", () => {
+    const schema = dialect === "pg" ? pgSchema : sqliteSchema;
+    const columns =
+      dialect === "pg"
+        ? pgTableConfig(schema.session as never).columns
+        : sqliteTableConfig(schema.session as never).columns;
+
+    expect(columns.find((column) => column.name === "token")?.isUnique).toBe(
+      true,
+    );
+  });
+});
+
+/**
+ * The relational graph, which is not decoration here.
+ *
+ * `buildAuthOptions` turns on `experimental.joins`, so Better Auth issues
+ * relational queries rather than separate lookups - and drizzle resolves those
+ * through exactly these declarations. A `fields`/`references` pair pointing at
+ * the wrong column is a join that silently returns the wrong rows, which no
+ * foreign key catches.
+ */
+describe.each(generated)("the %s relational graph", (dialect) => {
+  const schema = dialect === "pg" ? pgSchema : sqliteSchema;
+
+  /** Invokes a `relations()` declaration the way drizzle does. */
+  const configOf = (name: string): Record<string, unknown> => {
+    const declared = schema[name as "sessionRelations"];
+    return declared.config(
+      createTableRelationsHelpers(declared.table),
+    ) as Record<string, unknown>;
+  };
+
+  test("a user has many of each thing it owns", () => {
+    expect(Object.keys(configOf("userRelations")).sort()).toEqual([
+      "accounts",
+      "apikeys",
+      "passkeys",
+      "sessions",
+    ]);
+  });
+
+  test.each([
+    ["sessionRelations", "user_id"],
+    ["accountRelations", "user_id"],
+    ["passkeyRelations", "user_id"],
+    ["apikeyRelations", "reference_id"],
+  ])("%s joins on %s", (name, column) => {
+    const relation = configOf(name)["user"] as {
+      config?: {
+        fields: Array<{ name: string }>;
+        references: Array<{ name: string }>;
+      };
+    };
+
+    expect(relation.config?.fields.map((field) => field.name)).toEqual([
+      column,
+    ]);
+    expect(relation.config?.references.map((field) => field.name)).toEqual([
+      "id",
+    ]);
+  });
+});

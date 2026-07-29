@@ -2,7 +2,7 @@ import type { Health } from "../api/schemas.ts";
 import type { RuntimeTarget, Services } from "../services/types.ts";
 
 /** The probe reads no configuration, so it takes only what it exercises. */
-type Probed = Pick<Services, "storage" | "db" | "kv" | "logger">;
+export type Probed = Pick<Services, "storage" | "db" | "kv" | "logger">;
 
 const CHECKS = ["storage", "db", "kv"] as const;
 

@@ -580,7 +580,11 @@ function RowActions({
         className="btn-text"
         disabled={busy}
         onClick={onToggleSharing}
-        aria-expanded={expanded}
+        // A string, not the boolean: the server renderer writes
+        // `aria-expanded="false"`, but `hono/jsx/dom` drops a false attribute
+        // and writes `""` for true - so hydrating this row would strip the
+        // state a disclosure control is announced by.
+        aria-expanded={expanded ? "true" : "false"}
         aria-controls={sharingRegionId(plan.id)}
       >
         Share
