@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import * as cookieModule from "better-auth/cookies";
 import { handleEmail } from "../src/ids.ts";
 import { type Arm, armWhileFileRuns } from "./armed-mock.ts";
+import { BASE } from "./auth-fixture.ts";
 
 /**
  * The two hooks that carry passkey signup.
@@ -54,15 +55,6 @@ armWhileFileRuns(arm, () => {
  * so the real serialiser would be the one the hook closed over.
  */
 const { buildAuthOptions } = await import("../src/auth/options.ts");
-
-const BASE = {
-  database: undefined,
-  baseURL: "https://plans.example.test",
-  secret: "x".repeat(32),
-  rpId: "plans.example.test",
-  rpName: "BunkerPlan",
-  clientIpHeader: "cf-connecting-ip",
-};
 
 interface Registration {
   rpID: string;

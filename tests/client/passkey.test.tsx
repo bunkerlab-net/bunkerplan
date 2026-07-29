@@ -176,6 +176,11 @@ describe("usePasskeyAction", () => {
 
     expect(view.find(".error").textContent).toBe("The operation was aborted.");
     expect(navigations).toEqual([]);
+    // The catch path has to release the buttons too. A ceremony the browser
+    // aborts is the common case, and a visitor left facing two dead controls
+    // has no way to try again.
+    expect(view.find<HTMLButtonElement>("#signin").disabled).toBe(false);
+    expect(view.find<HTMLButtonElement>("#register").disabled).toBe(false);
   });
 
   test("a failure with no message reads as the shared fallback", async () => {

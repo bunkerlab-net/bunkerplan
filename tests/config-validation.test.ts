@@ -231,10 +231,13 @@ describe("integer settings", () => {
   test.each(["", " "])(
     "%p is treated as unset and takes the default",
     (raw) => {
+      // The documented default, spelled out rather than imported from
+      // src/config.ts: docs/self-hosting.md and .env.example both publish
+      // 2 MiB, so a change to the constant has to fail somewhere.
       expect(
         loadConfig({ ...SELF_HOSTED, MAX_UPLOAD_BYTES: raw } as never, {})
           .maxUploadBytes,
-      ).toBeGreaterThan(0);
+      ).toBe(2_097_152);
     },
   );
 

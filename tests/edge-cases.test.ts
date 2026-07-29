@@ -358,29 +358,31 @@ describe("the health probe", () => {
     expect(probes).toBe(2);
   });
 
+  test("the probe deadline is short enough to be worth having", () => {
+    /*
+     * Pinned rather than measured. The test below proves a deadline exists -
+     * without one it never returns and times out - but says nothing about its
+     * length, and a deadline of nine seconds would satisfy it while holding
+     * the sockets this exists to release. Wall-clock bounds said that once and
+     * were load-sensitive; this says it deterministically.
+     */
+    expect(PROBE_TIMEOUT_MS).toBe(2_000);
+  });
+
   test("a probe that never answers fails rather than pinning a socket", async () => {
     const { services } = probed({
       storage: backend(() => new Promise<void>(() => {})),
     });
 
-    const started = Date.now();
     const response = await healthz("node", async () => services);
-    const elapsed = Date.now() - started;
 
     // The S3 client ships no request timeout, so a blackholed endpoint would
-    // hold a socket and a pool client per call until both ran out.
+    // hold a socket and a pool client per call until both ran out. With no
+    // deadline this call never returns and the test times out.
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
       checks: { storage: "error" },
     });
-    /*
-     * Derived from `PROBE_TIMEOUT_MS` rather than hard-coded, so the bounds
-     * follow the deadline if it is ever retuned. The floor says the deadline is
-     * what ended this rather than the probe answering after all; the ceiling
-     * says a deadline exists at all, with room for scheduling.
-     */
-    expect(elapsed).toBeGreaterThanOrEqual(PROBE_TIMEOUT_MS * 0.75);
-    expect(elapsed).toBeLessThan(PROBE_TIMEOUT_MS * 2.5);
   }, 10_000);
 });
 

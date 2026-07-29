@@ -16,14 +16,7 @@ import type { Logger } from "../src/log.ts";
  * The two schema constraints are covered by auth-schema-constraints.test.ts.
  */
 
-const BASE = {
-  database: undefined,
-  baseURL: "https://plans.example.test",
-  secret: "x".repeat(32),
-  rpId: "plans.example.test",
-  rpName: "BunkerPlan",
-  clientIpHeader: "cf-connecting-ip",
-};
+import { BASE } from "./auth-fixture.ts";
 
 const options = buildAuthOptions(BASE);
 
