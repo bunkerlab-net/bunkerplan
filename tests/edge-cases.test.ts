@@ -358,7 +358,7 @@ describe("the health probe", () => {
     // The S3 client ships no request timeout, so a blackholed endpoint would
     // hold a socket and a pool client per call until both ran out.
     expect(response.status).toBe(503);
-    expect(await response.json<unknown>()).toMatchObject({
+    expect(await response.json()).toMatchObject({
       checks: { storage: "error" },
     });
     /*
