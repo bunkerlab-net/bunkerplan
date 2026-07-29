@@ -1113,18 +1113,6 @@ describe("validateStandaloneHtml - parser conformance", () => {
   );
 
   /**
-   * The slash on a non-void element is ignored, and the tokeniser enters raw
-   * text regardless, so this CSS applies and must be scanned.
-   */
-  test("scans the CSS of a self-closing <style/>", () => {
-    expect(check(DOC(`<style/>@import url("${EXT}");</style>`))).toEqual({
-      ok: false,
-      reasons: [`external reference: style ${EXT}`],
-      truncated: false,
-    });
-  });
-
-  /**
    * SVG restores camelCase element names, so both spellings arrive as `feImage`
    * and the refusal is built from the lower-cased name the table is keyed by.
    */
@@ -1293,19 +1281,27 @@ describe("validateStandaloneHtml - parser conformance", () => {
     (body) => {
       const html = DOC(body);
       const styles: string[] = [];
+      let elements = 0;
       const walk = (node: DefaultTreeAdapterTypes.Node): void => {
         if (!("childNodes" in node)) return;
-        // An SVG `<style>` bears a stylesheet and a MathML one does not, so the
-        // namespace decides whether its text counts.
-        const mathml =
-          "namespaceURI" in node &&
-          node.namespaceURI === "http://www.w3.org/1998/Math/MathML";
-        if (node.nodeName === "style" && !mathml) {
-          styles.push(childTextContent(node));
+        if (node.nodeName === "style") {
+          elements += 1;
+          // An SVG `<style>` bears a stylesheet and a MathML one does not, so
+          // the namespace decides whether its text counts.
+          const mathml =
+            "namespaceURI" in node &&
+            node.namespaceURI === "http://www.w3.org/1998/Math/MathML";
+          if (!mathml) styles.push(childTextContent(node));
         }
         for (const child of node.childNodes) walk(child);
       };
       walk(parse(html));
+
+      // Every fixture holds a `<style>`, so a walk that found none has stopped
+      // answering the question and the comparison below would pass on nothing.
+      // Counted as elements rather than sheets: a MathML one bears no sheet, and
+      // an SVG `<style/>` honours its slash and holds no text.
+      expect(elements).toBeGreaterThan(0);
 
       const inStylesheet = styles.some((css) => css.includes(EXT));
       expect(check(html).ok).toBe(!inStylesheet);
@@ -1395,9 +1391,11 @@ describe("validateStandaloneHtml - parser conformance", () => {
 
   /**
    * HTML ignores the slash on a non-void element and enters raw text regardless,
-   * so this is a stylesheet - the opposite of the SVG case above.
+   * so this is a stylesheet - the opposite of the SVG case above. Closed or not,
+   * and slashed or not, the CSS applies and has to be scanned.
    */
   test.each([
+    `<style/>@import url("${EXT}");</style>`,
     `<style/>@import url("${EXT}");`,
     `<style>@import url("${EXT}");`,
   ])("reads an HTML <style> as a stylesheet however it ends: %s", (body) => {

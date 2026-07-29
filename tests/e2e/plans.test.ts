@@ -245,6 +245,7 @@ describe("plan lifecycle over HTTP", () => {
 
     const served = await app.fetch(`/p/${created.id}`);
     expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toStartWith("text/html");
     expect(await served.text()).toBe(body);
   });
 
