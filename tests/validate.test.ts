@@ -1215,6 +1215,42 @@ describe("validateStandaloneHtml - parser conformance", () => {
     `<svg><svg><g><style>a{}</g><text>url("${EXT}")</text></svg></svg>`,
   ];
 
+  /**
+   * The four lists assert contradictory verdicts, so a fixture in two of them
+   * would claim a document is both refused and accepted. Named here rather than
+   * left to surface as whichever assertion happened to run second.
+   */
+  test("keeps the fixture lists disjoint", () => {
+    const lists = { EXACT_CSS, NOT_CSS, DIVERGED, UNACCOUNTABLE };
+    const seen = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const [name, list] of Object.entries(lists)) {
+      for (const body of list) {
+        const first = seen.get(body);
+        if (first !== undefined) clashes.push(`${first} + ${name}: ${body}`);
+        else seen.set(body, name);
+      }
+    }
+    expect(clashes).toEqual([]);
+  });
+
+  /**
+   * The false-positive edge of `DIVERGED`: it refuses on a self-closing `<svg/>`
+   * or `<math/>`, and a self-closing child INSIDE a balanced one is the shape an
+   * uploader actually writes. `<path/>` must not read as the root closing itself,
+   * so these are the documents the rule would break if it ever did.
+   */
+  test.each([
+    `<svg><path/></svg>`,
+    `<svg><g><path/></g></svg>`,
+    `<svg><path/></svg><p>after</p>`,
+    `<svg viewBox="0 0 1 1"><circle cx="1" cy="1" r="1"/></svg>`,
+    `<math><mi>x</mi></math>`,
+    `<math><mstyle><mi>x</mi></mstyle></math>`,
+    `<svg><foreignObject><div>html</div></foreignObject></svg>`,
+  ])("accepts ordinary inline graphics: %s", (body) => {
+    expect(check(DOC(body))).toEqual({ ok: true });
+  });
   test.each(EXACT_CSS)("scans the CSS a browser applies: %s", (body) => {
     expect(check(DOC(body))).toEqual({
       ok: false,
