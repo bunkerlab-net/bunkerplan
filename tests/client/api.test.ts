@@ -177,9 +177,14 @@ describe("uploadPlan", () => {
   test("non-string entries in errors are dropped rather than rendered", async () => {
     queued = [json({ errors: [null, "remote script", 7] }, 422)];
 
-    await expect(
-      uploadPlan(new File(["x"], "a.html"), "private"),
-    ).rejects.toThrow("remote script");
+    // Exact, not `toThrow`'s substring: "null\nremote script\n7" contains
+    // "remote script" too, so a substring match would pass on precisely the
+    // rendering this test is named for preventing.
+    const failure = await uploadPlan(
+      new File(["x"], "a.html"),
+      "private",
+    ).catch((cause: unknown) => cause);
+    expect((failure as Error).message).toBe("remote script");
   });
 
   test("a body that is not JSON falls back to the status line", async () => {

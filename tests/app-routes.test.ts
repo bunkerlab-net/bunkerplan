@@ -446,10 +446,19 @@ describe("sharing", () => {
   });
 
   test("a stranger cannot read or change sharing", async () => {
-    const app = buildApp({
-      sessionUser: STRANGER,
-      plans: memoryPlans([storedPlan()]),
-    });
+    /*
+     * Seeded with a share code and an existing grant, and with both handles
+     * resolvable. Against a bare plan half the loop below would be a no-op
+     * whatever the route did - clearing an absent code, revoking an absent
+     * grant, naming an account nothing answers to - so the state assertion
+     * afterwards would hold even if every refusal were removed.
+     */
+    const hash = await hashShareCode("sHaReCoDe1234567");
+    const plans = memoryPlans(
+      [storedPlan({ shareCodeHash: hash, grants: [GRANTEE] })],
+      { "brisk-heron": GRANTEE, stranger: STRANGER },
+    );
+    const app = buildApp({ sessionUser: STRANGER, plans });
 
     const asJson = (body: unknown) => ({
       method: "PUT" as const,
@@ -473,6 +482,19 @@ describe("sharing", () => {
       const response = await app.fetch(path, init);
       expect(response.status).toBe(404);
     }
+
+    /*
+     * Read off the row rather than the owner's sharing view: that view reports
+     * `hasShareCode` as a boolean, so a rotation replacing one hash with
+     * another would leave it `true` and go unseen. The hash itself is the only
+     * thing that shows the POST above changed nothing.
+     */
+    const row = plans.rows.get(PLAN_ID);
+    expect(row).toMatchObject({
+      visibility: "private",
+      shareCodeHash: hash,
+      grants: [GRANTEE],
+    });
   });
 });
 

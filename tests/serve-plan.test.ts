@@ -385,15 +385,15 @@ describe("a plan that is not there", () => {
 
 describe("making a plan private again", () => {
   test("takes effect on the very next read", async () => {
-    const app = buildApp({
-      sessionUser: OWNER,
-      plans: memoryPlans([storedPlan({ visibility: "public" })]),
-      storage: memoryStorage({ [PLAN_ID]: DOCUMENT }),
-    });
-    const anonymous = buildApp({
-      plans: app.plans,
-      storage: app.storage,
-    });
+    /*
+     * One repository and one bucket, handed to both apps. Reading them back
+     * off the first app would make the sharing implicit, and the whole point
+     * is that the second app sees the first one's write.
+     */
+    const plans = memoryPlans([storedPlan({ visibility: "public" })]);
+    const storage = memoryStorage({ [PLAN_ID]: DOCUMENT });
+    const app = buildApp({ sessionUser: OWNER, plans, storage });
+    const anonymous = buildApp({ plans, storage });
     expect((await anonymous.fetch(`/p/${PLAN_ID}`)).status).toBe(200);
 
     await app.fetch(`/api/plans/${PLAN_ID}/sharing`, {

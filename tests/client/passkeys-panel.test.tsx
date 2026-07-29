@@ -3,7 +3,14 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { PasskeysPanel } from "../../src/client/PasskeysPanel.tsx";
 import { client, explode, ok, refuse, useAuthStub } from "./auth-stub.ts";
 import type { Mounted } from "./harness.tsx";
-import { click, flush, mount, mountAsync, useHarness } from "./harness.tsx";
+import {
+  click,
+  deferred,
+  flush,
+  mount,
+  mountAsync,
+  useHarness,
+} from "./harness.tsx";
 
 // Arms the module stubs for this file; unarmed, the real modules answer.
 useHarness();
@@ -44,11 +51,9 @@ beforeEach(() => {
 
 describe("PasskeysPanel listing", () => {
   test("claims nothing while the first list is in flight", async () => {
-    let release: ((rows: unknown[]) => void) | undefined;
+    const pending = deferred<unknown[]>();
     client.passkey.listUserPasskeys = async () => ({
-      data: await new Promise<unknown[]>((resolve) => {
-        release = resolve;
-      }),
+      data: await pending.answer(),
       error: null,
     });
 
@@ -56,7 +61,7 @@ describe("PasskeysPanel listing", () => {
     await flush();
     expect(view.find(".empty").textContent).toBe("Loading…");
 
-    release?.([passkey()]);
+    pending.release([passkey()]);
     await flush();
     expect(view.maybe(".empty")).toBeNull();
     expect(view.all("tbody tr").length).toBe(1);
@@ -204,11 +209,9 @@ describe("PasskeysPanel adding", () => {
   });
 
   test("the button is held while the ceremony runs and released after", async () => {
-    let release: (() => void) | undefined;
+    const ceremony = deferred<void>();
     client.passkey.addPasskey = async () => {
-      await new Promise<void>((resolve) => {
-        release = resolve;
-      });
+      await ceremony.answer();
       return { data: { id: "pk1" }, error: null };
     };
     const view = await mountAsync(<PasskeysPanel />);
@@ -218,7 +221,7 @@ describe("PasskeysPanel adding", () => {
     await flush();
     expect(button.disabled).toBe(true);
 
-    release?.();
+    ceremony.release(undefined);
     await flush();
     expect(
       view.byText<HTMLButtonElement>("button", "Add a passkey").disabled,

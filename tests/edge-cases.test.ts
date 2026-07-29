@@ -118,8 +118,8 @@ describe("claiming a plan id", () => {
 });
 
 describe("uploading to an account being deleted", () => {
-  test("is refused before the body is read", async () => {
-    let read = 0;
+  test("is refused before anything is stored", async () => {
+    let writes = 0;
     const storage = memoryStorage();
     const app = buildApp({
       sessionUser: OWNER,
@@ -127,7 +127,7 @@ describe("uploading to an account being deleted", () => {
       storage: {
         ...storage,
         put: async (id, body) => {
-          read += 1;
+          writes += 1;
           await storage.put(id, body);
         },
       },
@@ -141,7 +141,7 @@ describe("uploading to an account being deleted", () => {
     expect(await response.json<unknown>()).toMatchObject({
       error: "account is being deleted",
     });
-    expect(read).toBe(0);
+    expect(writes).toBe(0);
   });
 });
 
@@ -174,7 +174,9 @@ describe("replacing a plan whose row vanishes underneath", () => {
       deleteOwned: async () => false,
     };
     const sink = pino(
-      { level: "error" },
+      // `trace`, so the capture never depends on the level production picks:
+      // a warn demoted from error would empty these assertions silently.
+      { level: "trace" },
       {
         write: (line: string) => {
           logged.push(JSON.parse(line) as Record<string, unknown>);
@@ -254,7 +256,8 @@ describe("the health probe", () => {
   const probed = (over: Partial<Probed> = {}) => {
     const lines: Array<Record<string, unknown>> = [];
     const sink = pino(
-      { level: "error" },
+      // Captured at `trace` for the reason above.
+      { level: "trace" },
       {
         write: (line: string) => {
           lines.push(JSON.parse(line) as Record<string, unknown>);
