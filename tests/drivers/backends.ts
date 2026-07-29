@@ -156,6 +156,13 @@ export interface DbFixture {
   addPasskey(userId: string, credentialId: string): Promise<void>;
   countPasskeys(userId: string): Promise<number>;
   /**
+   * Inserts an api key owned by the user; rejects when no such user exists.
+   * The api-key plugin declares no foreign key on the column, so the one the
+   * schema carries is ours - see the note in src/auth/options.ts.
+   */
+  addApiKey(userId: string): Promise<void>;
+  countApiKeys(userId: string): Promise<number>;
+  /**
    * Inserts a plan row with `visibility` set to whatever is asked, bypassing
    * `PlanRepo` and its `PlanVisibility` type. The CHECK constraint is only
    * worth having against a writer the type does not cover, so the test needs
@@ -401,6 +408,19 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
         db,
         sql`select count(*) as v from passkey where user_id = ${userId}`,
       ),
+    addApiKey: async (userId) => {
+      const now = Date.now();
+      await db.run(
+        sql`insert into apikey (id, reference_id, key, created_at, updated_at)
+            values (${`ak-${crypto.randomUUID()}`}, ${userId},
+                    ${`key-${crypto.randomUUID()}`}, ${now}, ${now})`,
+      );
+    },
+    countApiKeys: (userId) =>
+      sqliteCount(
+        db,
+        sql`select count(*) as v from apikey where reference_id = ${userId}`,
+      ),
     insertPlanWithVisibility: async (id, userId, visibility) => {
       await db.run(
         sql`insert into plan (id, user_id, size, visibility)
@@ -534,6 +554,17 @@ export async function postgresDb(): Promise<DbFixture> {
     },
     countPasskeys: (userId) =>
       count(sql`select count(*) as v from passkey where user_id = ${userId}`),
+    addApiKey: async (userId) => {
+      await db.execute(
+        sql`insert into apikey (id, reference_id, key, created_at, updated_at)
+            values (${`ak-${crypto.randomUUID()}`}, ${userId},
+                    ${`key-${crypto.randomUUID()}`}, now(), now())`,
+      );
+    },
+    countApiKeys: (userId) =>
+      count(
+        sql`select count(*) as v from apikey where reference_id = ${userId}`,
+      ),
     insertPlanWithVisibility: async (id, userId, visibility) => {
       await db.execute(
         sql`insert into plan (id, user_id, size, visibility)

@@ -32,7 +32,7 @@ bun run dev
 | `bun run build`                        | Bundles the browser entry, the asset manifest, and the self-hosted server into `dist/`                  |
 | `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
-| `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - **re-apply the hand patch noted at the top of each generated file** |
+| `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it   |
 | `bun run test`                         | Builds, then the whole suite. Skips the container-backed backends unless they are up - see Tests        |
 | `bun run test:backends`                | Postgres, Valkey, and MinIO on localhost, so nothing skips                                              |
 | `bun run check`                        | Biome lint and format                                                                                   |

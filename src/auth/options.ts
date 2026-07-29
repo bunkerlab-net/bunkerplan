@@ -47,7 +47,7 @@ export interface AuthOptionsInput {
  * we synthesise both and create the user ourselves inside the plugin's hooks.
  */
 function passkeyPlugin(input: AuthOptionsInput) {
-  return passkey({
+  const plugin = passkey({
     rpID: input.rpId,
     rpName: input.rpName,
     origin: input.baseURL,
@@ -85,10 +85,22 @@ function passkeyPlugin(input: AuthOptionsInput) {
       },
     },
   });
+  // Sign-in resolves a credential with a single lookup by this value, so two
+  // rows sharing one id make it non-deterministic - and a passkey is the only
+  // credential here, with no email recovery behind it. The plugin declares the
+  // column indexed, not unique.
+  //
+  // Declaring it as a field attribute is what carries it into the generated
+  // Drizzle schema, and so into every migration generated from it; it used to
+  // be patched into that file by hand and lost on regeneration. The property
+  // path is checked against the plugin's types, so an upstream rename fails to
+  // compile instead of quietly dropping the constraint.
+  Object.assign(plugin.schema.passkey.fields.credentialID, { unique: true });
+  return plugin;
 }
 
 function apiKeyPlugin() {
-  return apiKey({
+  const plugin = apiKey({
     defaultPrefix: "bkp_",
     // Off because it is the wrong boundary, not because it is unconfigurable
     // - `timeWindow`/`maxRequests` would take our upload numbers happily. It
@@ -109,6 +121,13 @@ function apiKeyPlugin() {
     // Left at its `false` default: src/http/require-user.ts calls verifyApiKey
     // explicitly, so there is exactly one code path per credential type.
   });
+  // Same gap, same reason as above: the plugin omits this foreign key while
+  // running at its `references: "user"` default, so the column always holds a
+  // user id and its rows would otherwise outlive the account they name.
+  Object.assign(plugin.schema.apikey.fields.referenceId, {
+    references: { model: "user", field: "id", onDelete: "cascade" },
+  });
+  return plugin;
 }
 
 /**

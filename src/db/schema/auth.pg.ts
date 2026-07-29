@@ -1,13 +1,3 @@
-// HAND-APPLIED PATCH - RE-APPLY AFTER EVERY `bun run auth:generate:pg`.
-//
-// `apikey.referenceId` is declared by the api-key plugin with no `references`
-// at all, so its rows would be silently orphaned by account deletion and could
-// still verify against a deleted user's id. The plugin runs with its default
-// `references: "user"`, so the column always holds a user id and this FK is
-// correct. The account-deletion cascade test is what catches a lost patch.
-//
-// (`passkey.userId` already carries `onDelete: "cascade"` as generated in
-// better-auth 1.6.25 - verify it is still there after regenerating.)
 import { relations } from "drizzle-orm";
 import {
   bigint,
@@ -17,7 +7,6 @@ import {
   pgTable,
   text,
   timestamp,
-  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -101,7 +90,7 @@ export const passkey = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    credentialID: text("credential_id").notNull(),
+    credentialID: text("credential_id").notNull().unique(),
     counter: integer("counter").notNull(),
     deviceType: text("device_type").notNull(),
     backedUp: boolean("backed_up").notNull(),
@@ -109,13 +98,7 @@ export const passkey = pgTable(
     createdAt: timestamp("created_at"),
     aaguid: text("aaguid"),
   },
-  (table) => [
-    index("passkey_userId_idx").on(table.userId),
-    // Unique, not a plain index - see the note on the SQLite schema. A shared
-    // credential id makes the sign-in lookup non-deterministic, and the id is
-    // attacker-chosen because registration takes no attestation.
-    uniqueIndex("passkey_credentialID_idx").on(table.credentialID),
-  ],
+  (table) => [index("passkey_userId_idx").on(table.userId)],
 );
 
 export const apikey = pgTable(
@@ -164,6 +147,7 @@ export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
   passkeys: many(passkey),
+  apikeys: many(apikey),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -183,6 +167,13 @@ export const accountRelations = relations(account, ({ one }) => ({
 export const passkeyRelations = relations(passkey, ({ one }) => ({
   user: one(user, {
     fields: [passkey.userId],
+    references: [user.id],
+  }),
+}));
+
+export const apikeyRelations = relations(apikey, ({ one }) => ({
+  user: one(user, {
+    fields: [apikey.referenceId],
     references: [user.id],
   }),
 }));
