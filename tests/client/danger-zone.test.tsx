@@ -163,6 +163,39 @@ describe("DangerZone", () => {
     expect(navigations).toEqual([]);
   });
 
+  test("a whitespace-only refusal reads as the fallback, not a blank line", async () => {
+    client.deleteUser = async () => ({
+      data: null,
+      error: { message: "   " },
+    });
+    const view = mount(<DangerZone handle={HANDLE} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+
+    // `?? fallback` only catches an absent message; a blank one rendered an
+    // error line with nothing in it, which reads as no error at all.
+    expect(view.find(".error").textContent).toBe(
+      "could not delete the account",
+    );
+  });
+
+  test("a blank re-authentication refusal falls back the same way", async () => {
+    client.deleteUser = async () => ({
+      data: null,
+      error: { message: "stale", code: "SESSION_EXPIRED" },
+    });
+    client.signIn.passkey = async () => ({
+      data: null,
+      error: { message: "" },
+    });
+
+    const view = mount(<DangerZone handle={HANDLE} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+
+    expect(view.find(".error").textContent).toBe("re-authentication failed");
+  });
+
   test("the button is released again after a refusal, so it can be retried", async () => {
     client.deleteUser = refuse("try again");
     const view = mount(<DangerZone handle={HANDLE} />);

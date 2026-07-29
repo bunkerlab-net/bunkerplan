@@ -187,9 +187,14 @@ export function ApiKeysPanel() {
       )}
       {error !== null && <p className="error">{error}</p>}
       {keys.length === 0 ? (
-        <p className="empty" style={{ marginTop: "24px" }}>
-          {loaded ? "No API keys." : "Loading…"}
-        </p>
+        // Nothing is claimed while the first list is in flight, and nothing
+        // at all when it failed: the error line above is the whole story
+        // then, and "No API keys." beside it would be a second, wrong one.
+        error === null && (
+          <p className="empty" style={{ marginTop: "24px" }}>
+            {loaded ? "No API keys." : "Loading…"}
+          </p>
+        )
       ) : (
         <KeysTable keys={keys} busy={busy} onRevoke={revoke} />
       )}

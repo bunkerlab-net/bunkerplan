@@ -24,12 +24,15 @@ async function deleteAccount(): Promise<string | null> {
   if (result.error?.code === "SESSION_EXPIRED") {
     const reauth = await authClient().signIn.passkey();
     if (reauth?.error) {
-      return reauth.error.message ?? "re-authentication failed";
+      // `messageOf`, not `?? fallback`: Better Auth can hand back an empty or
+      // whitespace-only message, and `??` only catches the absent one - the
+      // rest render as a blank error line.
+      return messageOf(reauth.error, "re-authentication failed");
     }
     result = await authClient().deleteUser();
   }
   if (result.error) {
-    return result.error.message ?? "could not delete the account";
+    return messageOf(result.error, "could not delete the account");
   }
   return null;
 }

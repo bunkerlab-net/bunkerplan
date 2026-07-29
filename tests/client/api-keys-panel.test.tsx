@@ -111,6 +111,9 @@ describe("ApiKeysPanel listing", () => {
 
     expect(view.find(".error").textContent).toBe("authentication required");
     expect(view.maybe("table")).toBeNull();
+    // "No API keys." beside the error would be a second claim, and a wrong
+    // one: the list never answered, so the panel does not know.
+    expect(view.maybe(".empty")).toBeNull();
   });
 
   test("a list that throws is caught rather than left unhandled", async () => {
@@ -118,6 +121,7 @@ describe("ApiKeysPanel listing", () => {
     const view = await mountAsync(<ApiKeysPanel />);
 
     expect(view.find(".error").textContent).toBe("network is down");
+    expect(view.maybe(".empty")).toBeNull();
   });
 
   test("a refusal with no message falls back to a readable line", async () => {
