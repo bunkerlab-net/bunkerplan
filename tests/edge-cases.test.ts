@@ -3,7 +3,7 @@ import { pino } from "pino";
 import { z } from "zod";
 import { ref } from "../src/api/schemas.ts";
 import { retryAfterSeconds, sometimes } from "../src/db/rate-limit-window.ts";
-import { healthz, type Probed } from "../src/http/healthz.ts";
+import { healthz, PROBE_TIMEOUT_MS, type Probed } from "../src/http/healthz.ts";
 import { replacePlan } from "../src/http/replace-plan.ts";
 import type {
   PlanObject,
@@ -362,13 +362,13 @@ describe("the health probe", () => {
       checks: { storage: "error" },
     });
     /*
-     * Bounded on both sides against `PROBE_TIMEOUT_MS` in src/http/healthz.ts,
-     * which is 2s. The floor says the deadline is what ended this rather than
-     * the probe answering after all - a hang that resolved instantly would mean
-     * the test was not testing a hang. The ceiling says a deadline exists.
+     * Derived from `PROBE_TIMEOUT_MS` rather than hard-coded, so the bounds
+     * follow the deadline if it is ever retuned. The floor says the deadline is
+     * what ended this rather than the probe answering after all; the ceiling
+     * says a deadline exists at all, with room for scheduling.
      */
-    expect(elapsed).toBeGreaterThanOrEqual(1_500);
-    expect(elapsed).toBeLessThan(5_000);
+    expect(elapsed).toBeGreaterThanOrEqual(PROBE_TIMEOUT_MS * 0.75);
+    expect(elapsed).toBeLessThan(PROBE_TIMEOUT_MS * 2.5);
   }, 10_000);
 });
 

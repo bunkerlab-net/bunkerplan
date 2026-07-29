@@ -9,7 +9,7 @@ import {
   refuse,
   useAuthStub,
 } from "./auth-stub.ts";
-import { click, mount, type, useHarness } from "./harness.tsx";
+import { click, flush, mount, type, useHarness } from "./harness.tsx";
 
 // Arms the module stubs for this file; unarmed, the real modules answer.
 useHarness();
@@ -113,6 +113,44 @@ describe("DangerZone", () => {
     await click(view.find("button"));
 
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(false);
+  });
+
+  test("two clicks in one tick delete once, not twice", async () => {
+    let attempts = 0;
+    client.deleteUser = async () => {
+      attempts += 1;
+      return { data: null, error: null };
+    };
+    const view = mount(<DangerZone handle={HANDLE} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+
+    // Both dispatched before any re-render, which is the whole window: `busy`
+    // is state, so the second handler would still read the value the first one
+    // closed over. This is the one action in the app that cannot be undone.
+    const button = view.find("button");
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    await flush();
+
+    expect(attempts).toBe(1);
+  });
+
+  test("a returned refusal still allows a retry", async () => {
+    let attempts = 0;
+    client.deleteUser = async () => {
+      attempts += 1;
+      return { data: null, error: { message: "not fresh enough" } };
+    };
+    const view = mount(<DangerZone handle={HANDLE} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+
+    // A refusal returns out of the `try` without reaching the `catch`, so a
+    // latch released only there would ignore every attempt after the first
+    // while the button sat enabled, inviting exactly this retry.
+    await click(view.find("button"));
+    await click(view.find("button"));
+
+    expect(attempts).toBe(2);
   });
 
   test("a thrown failure is not swallowed into a stuck button", async () => {

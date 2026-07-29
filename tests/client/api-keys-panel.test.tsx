@@ -135,16 +135,24 @@ describe("ApiKeysPanel creating", () => {
   /**
    * Installs a `create` that records the options it is handed.
    *
-   * Returns the record rather than the options, because the call happens on the
-   * click below: reading a value out here would only ever see the seed.
+   * `options` throws until the stub has actually been called. Seeding it with
+   * `{}` would make the absence checks below pass on a create that never
+   * happened, because `"expiresIn" in {}` is false either way.
    */
-  const recordCreate = (): { options: Record<string, unknown> } => {
-    const record: { options: Record<string, unknown> } = { options: {} };
+  const recordCreate = (): { readonly options: Record<string, unknown> } => {
+    let recorded: Record<string, unknown> | undefined;
     client.apiKey.create = async (options: Record<string, unknown>) => {
-      record.options = options;
+      recorded = options;
       return { data: { key: "bkp_secret" }, error: null };
     };
-    return record;
+    return {
+      get options() {
+        if (recorded === undefined) {
+          throw new Error("apiKey.create was never called");
+        }
+        return recorded;
+      },
+    };
   };
 
   test("an unnamed key gets a default name rather than an empty one", async () => {

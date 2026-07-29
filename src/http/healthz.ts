@@ -11,7 +11,7 @@ const CHECKS = ["storage", "db", "kv"] as const;
  * unauthenticated, and the S3 client ships no request timeout, so a blackholed
  * endpoint would pin a socket and a pool client per call until both ran out.
  */
-const PROBE_TIMEOUT_MS = 2_000;
+export const PROBE_TIMEOUT_MS = 2_000;
 
 /**
  * Docker polls every 30s, so a short cache changes nothing an operator sees

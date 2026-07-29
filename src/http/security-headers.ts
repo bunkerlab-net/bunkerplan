@@ -64,15 +64,20 @@ export const PLAN_PATH_PREFIX = "/p/";
  * It deliberately omits `script-src`: the rendered document carries an inline
  * `<script type="application/json">` with the page props the client hydrates
  * from, so a script policy needs per-request nonces.
+ *
+ * Exported beside `PLAN_CSP` so a test can assert the policy itself rather
+ * than that some policy is present, which a weakened one would satisfy.
  */
+export const APP_CSP =
+  "base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'";
+
 const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   // Framing the dashboard is a route to phishing a passkey ceremony or a
   // freshly minted API key.
   "x-frame-options": "DENY",
-  "content-security-policy":
-    "base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'",
+  "content-security-policy": APP_CSP,
 };
 
 const HSTS = "max-age=31536000; includeSubDomains";

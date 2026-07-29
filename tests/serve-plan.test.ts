@@ -49,7 +49,7 @@ const serve = (
 
 describe("a public plan", () => {
   test("is served to anyone, with the plan sandbox pinned on", async () => {
-    const app = await serve({ plan: { visibility: "public" } });
+    const app = serve({ plan: { visibility: "public" } });
 
     const response = await app.fetch(`/p/${PLAN_ID}`);
 
@@ -62,7 +62,7 @@ describe("a public plan", () => {
   });
 
   test("may be cached, but must be revalidated before every use", async () => {
-    const app = await serve({ plan: { visibility: "public" } });
+    const app = serve({ plan: { visibility: "public" } });
 
     const response = await app.fetch(`/p/${PLAN_ID}`);
 
@@ -75,7 +75,7 @@ describe("a public plan", () => {
   });
 
   test("a matching ETag gets a 304 that still carries the sandbox", async () => {
-    const app = await serve({ plan: { visibility: "public" } });
+    const app = serve({ plan: { visibility: "public" } });
     const first = await app.fetch(`/p/${PLAN_ID}`);
     const etag = first.headers.get("etag") ?? "";
 
@@ -93,7 +93,7 @@ describe("a public plan", () => {
   });
 
   test("a stale ETag gets the document again", async () => {
-    const app = await serve({ plan: { visibility: "public" } });
+    const app = serve({ plan: { visibility: "public" } });
 
     const response = await app.fetch(`/p/${PLAN_ID}`, {
       headers: { "if-none-match": '"not-the-current-one"' },
@@ -106,7 +106,7 @@ describe("a public plan", () => {
 
 describe("a private plan", () => {
   test("is served to its owner and kept out of shared caches", async () => {
-    const app = await serve({ sessionUser: OWNER });
+    const app = serve({ sessionUser: OWNER });
 
     const response = await app.fetch(`/p/${PLAN_ID}`);
 
@@ -118,7 +118,7 @@ describe("a private plan", () => {
   });
 
   test("is served to a granted account", async () => {
-    const app = await serve({
+    const app = serve({
       sessionUser: GRANTEE,
       plan: { grants: [GRANTEE] },
     });
@@ -127,7 +127,7 @@ describe("a private plan", () => {
   });
 
   test("is served to the owner's API key", async () => {
-    const app = await serve({ keyUser: OWNER });
+    const app = serve({ keyUser: OWNER });
 
     const response = await app.fetch(`/p/${PLAN_ID}`, {
       headers: { "x-api-key": "bkp_test" },
@@ -137,7 +137,7 @@ describe("a private plan", () => {
   });
 
   test("gates a stranger at 401 rather than 200", async () => {
-    const app = await serve({ sessionUser: STRANGER });
+    const app = serve({ sessionUser: STRANGER });
 
     const response = await app.fetch(`/p/${PLAN_ID}`);
 
@@ -153,13 +153,13 @@ describe("a private plan", () => {
   });
 
   test("gates an anonymous visitor the same way", async () => {
-    const app = await serve();
+    const app = serve();
 
     expect((await app.fetch(`/p/${PLAN_ID}`)).status).toBe(401);
   });
 
   test("a 304 for the owner keeps the private caching rules too", async () => {
-    const app = await serve({ sessionUser: OWNER });
+    const app = serve({ sessionUser: OWNER });
     const first = await app.fetch(`/p/${PLAN_ID}`);
 
     const second = await app.fetch(`/p/${PLAN_ID}`, {
@@ -172,10 +172,10 @@ describe("a private plan", () => {
   });
 
   test("the gate offers a code box only when there is a code to enter", async () => {
-    const withCode = await serve({
+    const withCode = serve({
       plan: { shareCodeHash: await hashShareCode(CODE) },
     });
-    const without = await serve();
+    const without = serve();
 
     expect(await (await withCode.fetch(`/p/${PLAN_ID}`)).text()).toContain(
       "Have a code?",
@@ -337,7 +337,7 @@ describe("a plan that is not there", () => {
   test("a row with no object 404s rather than serving an empty document", async () => {
     // The window between a deleted object and its row, or a storage write that
     // never landed. Either way there is nothing to serve.
-    const app = await serve({ sessionUser: OWNER, stored: false });
+    const app = serve({ sessionUser: OWNER, stored: false });
 
     const response = await app.fetch(`/p/${PLAN_ID}`);
 
@@ -346,7 +346,7 @@ describe("a plan that is not there", () => {
   });
 
   test("a deleted plan is indistinguishable from an id never issued", async () => {
-    const app = await serve({ sessionUser: OWNER });
+    const app = serve({ sessionUser: OWNER });
     await app.fetch(`/api/plans/${PLAN_ID}`, { method: "DELETE" });
 
     const gone = await app.fetch(`/p/${PLAN_ID}`);

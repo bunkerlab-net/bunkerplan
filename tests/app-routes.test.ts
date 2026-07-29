@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { APP_CSP } from "../src/http/security-headers.ts";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
 import { PLAN_PAGE_SIZE } from "../src/services/types.ts";
 import {
@@ -700,7 +701,9 @@ describe("the security headers the middleware pins", () => {
     for (const path of ["/", "/api/plans", "/nope"]) {
       const response = await app.fetch(path);
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-      expect(response.headers.get("content-security-policy")).not.toBeNull();
+      // The policy itself, not merely that one is set: a weakened header would
+      // satisfy a presence check while granting exactly what it forbids.
+      expect(response.headers.get("content-security-policy")).toBe(APP_CSP);
     }
   });
 });

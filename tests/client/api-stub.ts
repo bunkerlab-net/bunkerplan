@@ -85,15 +85,23 @@ export const api: Api = blank();
 
 const arm: Arm = { on: false };
 
+/** Empty while `NAMES` is complete, and the export's own name once it is not. */
+type Unmocked = Exclude<keyof typeof real, (typeof NAMES)[number]>;
+
 /**
  * Captured before the registration below, and deliberately a copy: the live
  * namespace object is what `mock.module` replaces, so reading through it
  * afterwards would route the fallback straight back into this stub.
+ *
+ * The `satisfies` is the other half of `NAMES`, matching auth-stub.ts. That
+ * list rejects a name that has gone; `Record<Unmocked, never>` is satisfiable
+ * only while nothing has arrived, so an export added to src/client/api.ts fails
+ * this file and names itself rather than going unstubbed.
  */
-const passthrough = { ...real } as unknown as Record<
-  string,
-  (...args: unknown[]) => unknown
->;
+const passthrough = { ...real } satisfies Record<
+  Unmocked,
+  never
+> as unknown as Record<string, (...args: unknown[]) => unknown>;
 
 mock.module("../../src/client/api.ts", () =>
   Object.fromEntries(
