@@ -63,6 +63,12 @@ function useKeyList() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * False until the first list call has answered. Without it the panel says
+   * "No API keys." for the length of that request, to an account that may
+   * well have several - the same gap the passkeys and plans panels close.
+   */
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -75,6 +81,8 @@ function useKeyList() {
       setKeys(result.data?.apiKeys ?? []);
     } catch (cause) {
       setError(messageOf(cause, "could not list API keys"));
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -82,12 +90,13 @@ function useKeyList() {
     void refresh();
   }, [refresh]);
 
-  return { keys, error, setError, busy, setBusy, refresh };
+  return { keys, error, setError, busy, setBusy, loaded, refresh };
 }
 
 /** Keys, and the three calls that change them. */
 function useApiKeys() {
-  const { keys, error, setError, busy, setBusy, refresh } = useKeyList();
+  const { keys, error, setError, busy, setBusy, loaded, refresh } =
+    useKeyList();
   const [plaintext, setPlaintext] = useState<string | null>(null);
 
   // Both of these are called as `void create(...)` / `void revoke(...)` from
@@ -135,11 +144,20 @@ function useApiKeys() {
     }
   };
 
-  return { keys, plaintext, setPlaintext, error, busy, create, revoke };
+  return {
+    keys,
+    plaintext,
+    setPlaintext,
+    error,
+    busy,
+    loaded,
+    create,
+    revoke,
+  };
 }
 
 export function ApiKeysPanel() {
-  const { keys, plaintext, setPlaintext, error, busy, create, revoke } =
+  const { keys, plaintext, setPlaintext, error, busy, loaded, create, revoke } =
     useApiKeys();
   const [name, setName] = useState("");
   const [expiryIndex, setExpiryIndex] = useState(0);
@@ -170,7 +188,7 @@ export function ApiKeysPanel() {
       {error !== null && <p className="error">{error}</p>}
       {keys.length === 0 ? (
         <p className="empty" style={{ marginTop: "24px" }}>
-          No API keys.
+          {loaded ? "No API keys." : "Loading…"}
         </p>
       ) : (
         <KeysTable keys={keys} busy={busy} onRevoke={revoke} />

@@ -136,6 +136,11 @@ const generated = [["pg"], ["sqlite"]] as const satisfies ReadonlyArray<
 function foreignKeysOf(dialect: Dialect, name: string) {
   const schema = dialect === "pg" ? pgSchema : sqliteSchema;
   const table = schema[name as "session"];
+  if (table === undefined) {
+    // A table renamed by `auth generate` would otherwise reach the dialect
+    // config as `undefined` and fail somewhere inside Drizzle, naming nothing.
+    throw new Error(`no ${dialect} auth table named "${name}"`);
+  }
   const config =
     dialect === "pg"
       ? pgTableConfig(table as never)
@@ -204,9 +209,21 @@ describe.each(generated)("every %s auth table", (dialect) => {
 describe.each(generated)("the %s relational graph", (dialect) => {
   const schema = dialect === "pg" ? pgSchema : sqliteSchema;
 
-  /** Invokes a `relations()` declaration the way drizzle does. */
+  /**
+   * Invokes a `relations()` declaration the way drizzle does.
+   *
+   * `declared.config` and `declared.table` are Relations v1 internals. Drizzle
+   * exposes no public way to read a declaration back, and the alternative -
+   * not testing the graph - leaves `experimental.joins` resolving against
+   * whatever the generator last emitted. The exposure is bounded rather than
+   * removed: `drizzle-orm` is `^0.45.2`, which for a `0.x` version admits
+   * patches only, so a v2 adapter cannot arrive without a deliberate bump.
+   */
   const configOf = (name: string): Record<string, unknown> => {
     const declared = schema[name as "sessionRelations"];
+    if (declared === undefined) {
+      throw new Error(`no ${dialect} relations declared as "${name}"`);
+    }
     return declared.config(
       createTableRelationsHelpers(declared.table),
     ) as Record<string, unknown>;

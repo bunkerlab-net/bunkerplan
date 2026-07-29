@@ -230,6 +230,9 @@ describe("replacing a plan whose row vanishes underneath", () => {
     const orphan = logged.find(
       (line) => line["msg"] === "orphaned plan object",
     );
+    // Named separately so a missing line reads as "no such log entry" rather
+    // than as a shape mismatch against `undefined`.
+    expect(orphan).toBeDefined();
     expect(orphan).toMatchObject({ planId: PLAN_ID });
   });
 });
@@ -300,6 +303,7 @@ describe("the health probe", () => {
     // here, but a log gaining any other line would silently move this read
     // onto it.
     const failure = lines.find((line) => line["check"] === "db");
+    expect(failure).toBeDefined();
     expect(failure).toMatchObject({ check: "db", msg: "probe failed" });
   });
 

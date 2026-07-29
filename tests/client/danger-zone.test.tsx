@@ -69,8 +69,12 @@ describe("DangerZone", () => {
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
   });
 
-  test("a navigation that throws releases the button instead of wedging it", async () => {
-    client.deleteUser = ok({ success: true });
+  test("a navigation that throws still never offers a second delete", async () => {
+    let attempts = 0;
+    client.deleteUser = async () => {
+      attempts += 1;
+      return { data: { success: true }, error: null };
+    };
     const assign = window.location.assign;
     Object.defineProperty(window.location, "assign", {
       configurable: true,
@@ -85,10 +89,21 @@ describe("DangerZone", () => {
       await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
       await click(view.find("button"));
 
-      // The page is not leaving after all, so the hold has to come off: the
-      // visitor is still sitting in front of a control that must answer.
-      expect(view.find(".error").textContent).toBe("navigation blocked");
-      expect(view.find<HTMLButtonElement>("button").disabled).toBe(false);
+      /*
+       * The redirect failed but the account is gone, so there is nothing left
+       * to retry. Re-enabling would invite a ceremony against an account that
+       * no longer exists, and reporting the navigation error would read as a
+       * deletion that did not happen.
+       */
+      expect(view.find(".error").textContent).toBe(
+        "Your account is deleted. Reload the page to continue.",
+      );
+      expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
+
+      // And the control genuinely does not answer a second press.
+      view.find("button").dispatchEvent(new Event("click", { bubbles: true }));
+      await flush();
+      expect(attempts).toBe(1);
     } finally {
       Object.defineProperty(window.location, "assign", {
         configurable: true,
@@ -155,6 +170,24 @@ describe("DangerZone", () => {
     await click(view.find("button"));
 
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(false);
+  });
+
+  test("a retry clears the previous refusal rather than leaving it up", async () => {
+    client.deleteUser = refuse("account has plans pending removal");
+    const view = mount(<DangerZone handle={HANDLE} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+    expect(view.find(".error").textContent).toBe(
+      "account has plans pending removal",
+    );
+
+    // The second attempt succeeds. A message left over from the first would
+    // report a failure that is not happening, on a page that is leaving.
+    client.deleteUser = ok({ success: true });
+    await click(view.find("button"));
+
+    expect(view.maybe(".error")).toBeNull();
+    expect(navigations).toEqual(["/"]);
   });
 
   test("two clicks in one tick delete once, not twice", async () => {

@@ -6,6 +6,7 @@ import {
   choose,
   click,
   flush,
+  mount,
   mountAsync,
   type,
   useHarness,
@@ -47,6 +48,24 @@ beforeEach(() => {
 });
 
 describe("ApiKeysPanel listing", () => {
+  test("claims nothing while the first list is in flight", async () => {
+    let release: ((rows: unknown[]) => void) | undefined;
+    client.apiKey.list = async () => ({
+      data: { apiKeys: await new Promise<unknown[]>((r) => (release = r)) },
+      error: null,
+    });
+
+    const view = mount(<ApiKeysPanel />);
+    await flush();
+    // "No API keys." here would tell an account with several that it has none,
+    // for as long as the request takes.
+    expect(view.find(".empty").textContent).toBe("Loading…");
+
+    release?.([key()]);
+    await flush();
+    expect(view.all("tbody tr").length).toBe(1);
+  });
+
   test("lists on mount and says so when there is nothing", async () => {
     const view = await mountAsync(<ApiKeysPanel />);
 

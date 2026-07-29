@@ -34,8 +34,19 @@ async function deleteAccount(): Promise<string | null> {
   return null;
 }
 
-export function DangerZone({ handle }: DangerZoneProps) {
-  const [typed, setTyped] = useState("");
+/**
+ * The deletion half of this panel: one irreversible call, and the latches that
+ * keep it to one.
+ *
+ * Separate from the component because the two have nothing to say to each
+ * other - the panel renders a typed confirmation, and this owns whether the
+ * account still exists.
+ */
+function useAccountDeletion(): {
+  error: string | null;
+  busy: boolean;
+  onDelete: () => Promise<void>;
+} {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /**
@@ -50,48 +61,61 @@ export function DangerZone({ handle }: DangerZoneProps) {
    * Released in the `finally` below rather than on individual paths: both
    * refusal returns leave the `try` without entering `catch`, and a latch they
    * skipped would ignore every retry afterwards while the button looked live.
-   * The one exception is a navigation that actually started, which keeps it -
-   * see `leaving`.
+   * The one thing that keeps it closed is a delete that succeeded - see
+   * `deleted`.
    */
   const inFlight = useRef(false);
 
   const onDelete = async () => {
     if (inFlight.current) return;
     inFlight.current = true;
+    // The previous attempt's refusal is not about this one. Leaving it up
+    // makes a retry look like it failed again before the call even lands.
+    setError(null);
     setBusy(true);
     /*
-     * Set only once the account is gone and the page is leaving. `assign()` is
-     * asynchronous, so without this the `finally` below would re-enable the
-     * button during the navigation - on an account that no longer exists.
+     * Whether the account is gone, which is the thing that must hold the
+     * latch - not whether the page moved. Once this is set there is nothing
+     * left to delete, so no path below may re-enable the control: a second
+     * press would run the ceremony against an account that no longer exists.
      */
-    let leaving = false;
+    let deleted = false;
     try {
       const refusal = await deleteAccount();
       if (refusal !== null) {
         setError(refusal);
         return;
       }
+      deleted = true;
       window.location.assign("/");
-      // After the call, not before: an `assign` that throws lands in the
-      // `catch` below, and a flag already set would wedge the button on a
-      // navigation that never started.
-      leaving = true;
     } catch (cause) {
       // A dropped call throws rather than returning `{ error }`. Without this
       // the rejection escapes `void onDelete()` unhandled and the button just
       // re-enables, leaving the visitor no idea the deletion did not happen.
-      setError(messageOf(cause, "could not delete the account"));
+      setError(
+        deleted
+          ? // `assign` threw. Reporting the navigation error would read as a
+            // failed deletion, and the account is already gone.
+            "Your account is deleted. Reload the page to continue."
+          : messageOf(cause, "could not delete the account"),
+      );
     } finally {
       // Every refusal returns out of the `try` without reaching the `catch`,
       // so the release belongs here: a latch cleared only on the thrown path
       // would ignore each retry afterwards while the button looked live.
-      if (!leaving) {
+      if (!deleted) {
         inFlight.current = false;
         setBusy(false);
       }
     }
   };
 
+  return { error, busy, onDelete };
+}
+
+export function DangerZone({ handle }: DangerZoneProps) {
+  const [typed, setTyped] = useState("");
+  const { error, busy, onDelete } = useAccountDeletion();
   return (
     /*
      * The palette has no danger colour and forbids inventing one, so gravity
