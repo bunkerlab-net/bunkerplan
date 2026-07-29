@@ -5,6 +5,7 @@ import { client, explode, ok, refuse, useAuthStub } from "./auth-stub.ts";
 import {
   choose,
   click,
+  deferred,
   flush,
   mount,
   mountAsync,
@@ -49,9 +50,9 @@ beforeEach(() => {
 
 describe("ApiKeysPanel listing", () => {
   test("claims nothing while the first list is in flight", async () => {
-    let release: ((rows: unknown[]) => void) | undefined;
+    const pending = deferred<unknown[]>();
     client.apiKey.list = async () => ({
-      data: { apiKeys: await new Promise<unknown[]>((r) => (release = r)) },
+      data: { apiKeys: await pending.answer() },
       error: null,
     });
 
@@ -61,7 +62,7 @@ describe("ApiKeysPanel listing", () => {
     // for as long as the request takes.
     expect(view.find(".empty").textContent).toBe("Loading…");
 
-    release?.([key()]);
+    pending.release([key()]);
     await flush();
     expect(view.all("tbody tr").length).toBe(1);
   });
