@@ -5,13 +5,13 @@
   "type": "module",
   "module": "src/node.ts",
   "scripts": {
-    "auth:generate:pg": "bun auth generate --config src/db/gen/auth.pg.ts --output src/db/schema/auth.pg.ts --yes",
-    "auth:generate:sqlite": "bun auth generate --config src/db/gen/auth.sqlite.ts --output src/db/schema/auth.sqlite.ts --yes",
+    "auth:generate:pg": "bun run auth generate --config src/db/gen/auth.pg.ts --output src/db/schema/auth.pg.ts --yes && biome check --write src/db/schema/auth.pg.ts",
+    "auth:generate:sqlite": "bun run auth generate --config src/db/gen/auth.sqlite.ts --output src/db/schema/auth.sqlite.ts --yes && biome check --write src/db/schema/auth.sqlite.ts",
     "build": "bun run scripts/build.ts",
     "cf-typegen": "wrangler types",
     "check": "biome check",
     "clean": "rm -rf .wrangler dist node_modules src/server/manifest.generated.ts",
-    "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts",
+    "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts && biome check --write drizzle",
     "db:migrate:local": "wrangler d1 migrations apply bunkerplan --local",
     "db:migrate:pg": "drizzle-kit migrate --config drizzle.pg.config.ts",
     "db:migrate:sqlite": "drizzle-kit migrate --config drizzle.sqlite.config.ts",
@@ -26,7 +26,7 @@
     "typecheck": "bun run build && tsc --noEmit"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1095.0",
+    "@aws-sdk/client-s3": "^3.1096.0",
     "@better-auth/api-key": "^1.6.25",
     "@better-auth/drizzle-adapter": "^1.6.25",
     "@better-auth/passkey": "^1.6.25",
@@ -45,7 +45,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
-    "@cloudflare/workers-types": "^5.20260724.1",
+    "@cloudflare/workers-types": "^5.20260728.1",
     "@scalar/api-reference": "^1.63.0",
     "@scalar/openapi-parser": "^0.28.10",
     "@types/bun": "latest",

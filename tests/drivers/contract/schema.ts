@@ -95,6 +95,37 @@ export function describeSchema(
     });
 
     /**
+     * `resolveUserId` returns the key row's `referenceId` without reading the
+     * `user` row behind it, so a key that outlives its owner still authenticates
+     * as that id. The api-key plugin declares the column with no reference at
+     * all, which makes this cascade ours to keep - see src/auth/options.ts.
+     */
+    test("deleting the account takes its api keys with it", async () => {
+      const owner = await fixture.seedUser();
+      const bystander = await fixture.seedUser();
+      await fixture.addApiKey(owner);
+      await fixture.addApiKey(owner);
+      await fixture.addApiKey(bystander);
+
+      // Otherwise `toBe(0)` below is vacuous: a fixture inserting nothing would
+      // pass it just as well as a cascade that works.
+      expect(await fixture.countApiKeys(owner)).toBe(2);
+      expect(await fixture.countApiKeys(bystander)).toBe(1);
+
+      await fixture.deleteUser(owner);
+      expect(await fixture.countApiKeys(owner)).toBe(0);
+      // Scoped to the owner: a cascade wired to the wrong column, or a delete
+      // with no predicate, would empty the table and still pass the line above.
+      expect(await fixture.countApiKeys(bystander)).toBe(1);
+    });
+
+    test("an api key cannot be issued to an account that does not exist", async () => {
+      await expect(
+        fixture.addApiKey(`ghost-${crypto.randomUUID()}`),
+      ).rejects.toThrow();
+    });
+
+    /**
      * `visibility` decides who may read a plan, and `PlanVisibility` is only a
      * compile-time claim: a migration, a repair script, or a console session
      * writes past it. The read gate treats every value that is not `public` as

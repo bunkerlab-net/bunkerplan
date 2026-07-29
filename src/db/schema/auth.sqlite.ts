@@ -1,21 +1,5 @@
-// HAND-APPLIED PATCH - RE-APPLY AFTER EVERY `bun run auth:generate:sqlite`.
-//
-// `apikey.referenceId` is declared by the api-key plugin with no `references`
-// at all, so its rows would be silently orphaned by account deletion and could
-// still verify against a deleted user's id. The plugin runs with its default
-// `references: "user"`, so the column always holds a user id and this FK is
-// correct. The account-deletion cascade test is what catches a lost patch.
-//
-// (`passkey.userId` already carries `onDelete: "cascade"` as generated in
-// better-auth 1.6.25 - verify it is still there after regenerating.)
 import { relations, sql } from "drizzle-orm";
-import {
-  index,
-  integer,
-  sqliteTable,
-  text,
-  uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
@@ -112,7 +96,7 @@ export const passkey = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    credentialID: text("credential_id").notNull(),
+    credentialID: text("credential_id").notNull().unique(),
     counter: integer("counter").notNull(),
     deviceType: text("device_type").notNull(),
     backedUp: integer("backed_up", { mode: "boolean" }).notNull(),
@@ -120,17 +104,7 @@ export const passkey = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }),
     aaguid: text("aaguid"),
   },
-  (table) => [
-    index("passkey_userId_idx").on(table.userId),
-    // Unique, not a plain index. Sign-in looks a credential up by this value
-    // and verifies the assertion against whichever row comes back, so two
-    // rows sharing one id make that lookup non-deterministic. Registration
-    // takes no attestation, so the id is chosen by whoever registers: a second
-    // account can claim a victim's, and the genuine credential then fails
-    // verification whenever the lookup returns the other row. Passkeys are the
-    // only way in, so that is a permanent lockout rather than an annoyance.
-    uniqueIndex("passkey_credentialID_idx").on(table.credentialID),
-  ],
+  (table) => [index("passkey_userId_idx").on(table.userId)],
 );
 
 export const apikey = sqliteTable(
@@ -181,6 +155,7 @@ export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
   passkeys: many(passkey),
+  apikeys: many(apikey),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -200,6 +175,13 @@ export const accountRelations = relations(account, ({ one }) => ({
 export const passkeyRelations = relations(passkey, ({ one }) => ({
   user: one(user, {
     fields: [passkey.userId],
+    references: [user.id],
+  }),
+}));
+
+export const apikeyRelations = relations(apikey, ({ one }) => ({
+  user: one(user, {
+    fields: [apikey.referenceId],
     references: [user.id],
   }),
 }));
