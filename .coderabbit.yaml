@@ -3,5 +3,5 @@ language: en-ZA
 reviews:
   auto_review:
     enabled: true
-  path_filters: ["!worker-configuration.d.ts", "!drizzle"]
+  path_filters: ["!worker-configuration.d.ts", "!drizzle/**"]
   profile: assertive

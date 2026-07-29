@@ -40,6 +40,12 @@ interface Shape {
     onDelete: string | undefined;
   }>;
   checks: string[];
+  /**
+   * Empty in every table today. Compared anyway: a unique constraint added to
+   * one dialect and not the other is a rule the database enforces on Postgres
+   * and not on SQLite, which is exactly the drift this file exists to catch.
+   */
+  uniqueConstraints: Array<{ name: string | undefined; columns: string[] }>;
 }
 
 /** One comparable description per table, from either dialect's config. */
@@ -86,6 +92,12 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
       })
       .sort((a, b) => a.columns.join().localeCompare(b.columns.join())),
     checks: config.checks.map((check) => check.name).sort(),
+    uniqueConstraints: config.uniqueConstraints
+      .map((unique) => ({
+        name: unique.name,
+        columns: unique.columns.map((column) => column.name),
+      }))
+      .sort((a, b) => a.columns.join().localeCompare(b.columns.join())),
   };
 }
 
@@ -128,6 +140,7 @@ describe.each(tables)("%s", (name, pg, sqlite) => {
     expect(fromSqlite.foreignKeys).toEqual(fromPg.foreignKeys);
     expect(fromSqlite.indexes).toEqual(fromPg.indexes);
     expect(fromSqlite.checks).toEqual(fromPg.checks);
+    expect(fromSqlite.uniqueConstraints).toEqual(fromPg.uniqueConstraints);
   });
 
   test.each(shapes)(

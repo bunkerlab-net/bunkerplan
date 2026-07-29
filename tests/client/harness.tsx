@@ -1,5 +1,5 @@
 import "./dom-env.ts";
-import { afterEach } from "bun:test";
+import { afterEach, beforeEach } from "bun:test";
 import { type Child, jsx, useState } from "hono/jsx";
 import { render } from "hono/jsx/dom";
 
@@ -21,6 +21,22 @@ interface Entry {
 const mounted: Entry[] = [];
 
 /**
+ * Whether the file whose test is running registered the teardown.
+ *
+ * `mounted` is module state shared by every suite in the process, so a file
+ * that mounts without calling `useHarness()` leaves its trees in the list until
+ * some other file's hook happens to sweep them - which is a panel from another
+ * suite still answering `window` events, and a teardown running against stubs
+ * that have already stood down.
+ *
+ * Set per test rather than once at module evaluation: a flag latched on import
+ * would stay true for the rest of the process, so the first file to call
+ * `useHarness()` would vouch for every file after it - which is the exact
+ * cross-file leak this is meant to catch.
+ */
+let registered = false;
+
+/**
  * Unmounts every tree this file mounted. Call it once, at the top of a suite
  * that mounts anything.
  *
@@ -35,14 +51,21 @@ const mounted: Entry[] = [];
  * are still standing in.
  */
 export function useHarness(): void {
+  beforeEach(() => {
+    registered = true;
+  });
   afterEach(async () => {
-    const entries = mounted.splice(0);
-    // `hono/jsx/dom` has no imperative unmount and dropping the host element
-    // runs no effect teardown, so each tree is rendered away through its own
-    // parent's state - which is what runs the cleanups.
-    for (const entry of entries) entry.hide();
-    if (entries.length > 0) await flush();
-    for (const entry of entries) entry.host.remove();
+    try {
+      const entries = mounted.splice(0);
+      // `hono/jsx/dom` has no imperative unmount and dropping the host element
+      // runs no effect teardown, so each tree is rendered away through its own
+      // parent's state - which is what runs the cleanups.
+      for (const entry of entries) entry.hide();
+      if (entries.length > 0) await flush();
+      for (const entry of entries) entry.host.remove();
+    } finally {
+      registered = false;
+    }
   });
 }
 
@@ -86,6 +109,11 @@ export interface Mounted {
 }
 
 export function mount(node: Child): Mounted {
+  if (!registered) {
+    throw new Error(
+      "this file mounts but never called useHarness(), so nothing will unmount it",
+    );
+  }
   const host = document.createElement("div");
   document.body.appendChild(host);
 

@@ -33,7 +33,8 @@ const subscribers = new Set<Subscriber>();
 let unsubscribed = 0;
 /** Every `baseURL` a client was constructed with, so laziness is observable. */
 const constructedWith: string[] = [];
-const pluginNames: string[] = [];
+/** One entry per construction, so a second one cannot append to the first. */
+const pluginNames: string[][] = [];
 
 function push(next: SessionValue): void {
   value = next;
@@ -55,7 +56,7 @@ mock.module("better-auth/client", () => ({
   }) => {
     if (!arm.on) return passthrough.client.createAuthClient(options as never);
     constructedWith.push(options.baseURL);
-    pluginNames.push(...options.plugins.map((plugin) => plugin.id));
+    pluginNames.push(options.plugins.map((plugin) => plugin.id));
     return {
       useSession: {
         get: () => value,
@@ -143,7 +144,10 @@ describe("authClient", () => {
     authClient();
 
     expect(constructedWith.length).toBeGreaterThan(0);
-    expect(pluginNames).toEqual(["passkey", "api-key"]);
+    // The newest construction's own list, not every id ever recorded: a flat
+    // array would read as ["passkey", "api-key", "passkey", ...] the moment
+    // anything constructed a second client.
+    expect(pluginNames.at(-1)).toEqual(["passkey", "api-key"]);
   });
 });
 

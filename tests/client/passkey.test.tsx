@@ -9,7 +9,7 @@ import {
   refuse,
   useAuthStub,
 } from "./auth-stub.ts";
-import { click, mount, useHarness } from "./harness.tsx";
+import { click, deferred, flush, mount, useHarness } from "./harness.tsx";
 
 // Arms the module stubs for this file; unarmed, the real modules answer.
 useHarness();
@@ -185,6 +185,33 @@ describe("usePasskeyAction", () => {
     await click(view.find("#signin"));
 
     expect(view.find(".error").textContent).toBe("authentication failed");
+  });
+
+  test("both buttons are held while the ceremony is in flight", async () => {
+    const ceremony = deferred<{ data: unknown; error: null }>();
+    client.signIn.passkey = ceremony.answer;
+    const view = mount(<Runner />);
+
+    await click(view.find("#signin"));
+
+    // Still unresolved: the pair has to be held for the whole ceremony, not
+    // just re-enabled correctly once it lands, which is what the case below
+    // covers.
+    expect(view.find<HTMLButtonElement>("#signin").disabled).toBe(true);
+    expect(view.find<HTMLButtonElement>("#register").disabled).toBe(true);
+
+    ceremony.release({ data: null, error: null });
+    await flush();
+
+    /*
+     * And still held once it lands, because a success navigates: `assign` is
+     * called and `busy` is deliberately left set (src/client/passkey.ts), so the
+     * pair cannot be pressed again while the page is leaving. The refusal case
+     * below is the one that releases them.
+     */
+    expect(navigations).toEqual(["/dashboard"]);
+    expect(view.find<HTMLButtonElement>("#signin").disabled).toBe(true);
+    expect(view.find<HTMLButtonElement>("#register").disabled).toBe(true);
   });
 
   test("a refusal releases the buttons so the ceremony can be retried", async () => {

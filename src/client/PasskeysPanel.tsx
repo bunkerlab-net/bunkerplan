@@ -115,7 +115,7 @@ export function PasskeysPanel() {
         // then, and "No passkeys" beside it would be a second, wrong one.
         error === null && (
           <p className="empty" style={{ marginTop: "24px" }}>
-            {loaded ? "No passkeys." : "Loading..."}
+            {loaded ? "No passkeys." : "Loading…"}
           </p>
         )
       ) : (

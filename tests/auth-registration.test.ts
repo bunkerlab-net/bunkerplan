@@ -79,9 +79,15 @@ interface Registration {
 }
 
 function passkeyOptions(): Registration {
-  const [plugin] = buildAuthOptions(BASE).plugins;
+  // By `id`, not by position: `buildAuthOptions` fixes the order and
+  // auth-options.test.ts pins it, but a lookup that assumed index 0 would read
+  // the API key plugin's options and compare them against passkey fields, which
+  // fails as a mismatch rather than as the wiring mistake it is.
+  const plugin = buildAuthOptions(BASE).plugins.find(
+    (candidate) => candidate.id === "passkey",
+  );
   if (plugin === undefined) {
-    throw new Error("buildAuthOptions returned no plugins");
+    throw new Error("buildAuthOptions registered no passkey plugin");
   }
   return plugin.options as unknown as Registration;
 }

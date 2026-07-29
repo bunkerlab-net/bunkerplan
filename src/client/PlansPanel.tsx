@@ -845,7 +845,7 @@ export function PlansPanel() {
         // one.
         error === null && (
           <p className="empty" style={{ marginTop: "24px" }}>
-            {loaded ? "No plans yet." : "Loading..."}
+            {loaded ? "No plans yet." : "Loading…"}
           </p>
         )
       ) : (

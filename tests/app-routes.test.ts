@@ -365,7 +365,10 @@ describe("sharing", () => {
 
     expect(response.status).toBe(201);
     const { code } = (await response.json()) as { code: string };
-    expect(code).toMatch(/^[0-9a-z]{16}$/i);
+    // Spelled out rather than `[0-9a-z]` with an `i` flag: the generator's
+    // alphabet is base62 (src/ids.ts), which keeps case deliberately for the
+    // entropy, so mixed case is the contract and not an accident of matching.
+    expect(code).toMatch(/^[0-9A-Za-z]{16}$/);
 
     // There is no endpoint that reads it back.
     const state = await (

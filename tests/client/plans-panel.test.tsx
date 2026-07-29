@@ -98,7 +98,7 @@ describe("PlansPanel listing", () => {
 
     const view = mount(<PlansPanel />);
     await flush();
-    expect(view.find(".empty").textContent).toBe("Loading...");
+    expect(view.find(".empty").textContent).toBe("Loading…");
 
     list.release([plan({ id: "abc" })]);
     await flush();
@@ -780,10 +780,10 @@ describe("PlansPanel sharing expansion", () => {
     const view = await mountAsync(<PlansPanel />);
     await keyboardClick(view.byText("button", "Share"));
 
-    const deleteButton = view
-      .all("tbody tr")[0]
-      ?.querySelector<HTMLButtonElement>("button.btn-text-clay");
-    await keyboardClick(deleteButton as HTMLElement);
+    // By its label, like the test below, rather than by a styling class: the
+    // first row's is the first match, and `byText` throws if it is not there
+    // instead of casting an `undefined` into a click.
+    await keyboardClick(view.byText("button", "Delete"));
     // Closing is three rounds deep - the refresh drops the row, that clears
     // the selection, and only then does focus move.
     await flush();

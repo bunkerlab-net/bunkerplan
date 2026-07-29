@@ -116,6 +116,22 @@ describe("ApiKeysPanel listing", () => {
 });
 
 describe("ApiKeysPanel creating", () => {
+  /*
+   * `navigator.clipboard` is one object for the whole process, so the stub one
+   * test below installs would keep answering for every test after it. Declared
+   * at the top of the block rather than beside that test, because a hook
+   * registered mid-block still runs for all of them and reading it here is how
+   * anyone would know that.
+   */
+  const realClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  afterEach(() => {
+    if (realClipboard === undefined) {
+      Reflect.deleteProperty(navigator, "clipboard");
+    } else {
+      Object.defineProperty(navigator, "clipboard", realClipboard);
+    }
+  });
+
   /**
    * Installs a `create` that records the options it is handed.
    *
@@ -203,20 +219,6 @@ describe("ApiKeysPanel creating", () => {
     await click(view.byText("button", "Dismiss"));
 
     expect(view.maybe(".notice")).toBeNull();
-  });
-
-  /*
-   * Put back afterwards: `navigator.clipboard` is one object for the whole
-   * process, so a stub left in place is still answering for every test that
-   * runs after this one.
-   */
-  const realClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
-  afterEach(() => {
-    if (realClipboard === undefined) {
-      Reflect.deleteProperty(navigator, "clipboard");
-    } else {
-      Object.defineProperty(navigator, "clipboard", realClipboard);
-    }
   });
 
   test("the reveal copies the key to the clipboard", async () => {

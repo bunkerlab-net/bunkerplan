@@ -13,6 +13,7 @@ import {
   signedIn,
   useAuthStub,
 } from "./auth-stub.ts";
+import type { Mounted } from "./harness.tsx";
 import {
   click,
   deferred,
@@ -111,6 +112,27 @@ describe("unlocking with a code", () => {
   /** Puts the browser on the URL a code-bearing link actually lands on. */
   const standOn = (url: string): void => {
     history.replaceState(null, "", url);
+  };
+
+  /**
+   * A submit dispatched synchronously, the way a keypress delivers one.
+   *
+   * Not `submitForm`, which awaits a flush: the latch tests below need the
+   * dispatch to return before the next one starts.
+   *
+   * A `CustomEvent` carrying a `detail` for the reason `submitForm` gives:
+   * `hono/jsx`'s intrinsic `form` reads an untrusted event's action out of
+   * `event.detail`, and a bare `Event` makes that listener throw past the
+   * assertions while the test still passes.
+   */
+  const submitNow = (view: Mounted): void => {
+    view.find("form").dispatchEvent(
+      new CustomEvent("submit", {
+        bubbles: true,
+        cancelable: true,
+        detail: {},
+      }),
+    );
   };
 
   afterEach(() => {
@@ -316,13 +338,7 @@ describe("unlocking with a code", () => {
     // expected outcome here, so one impatient reader must not be able to lock
     // themselves out three presses at a time.
     for (let press = 0; press < 3; press++) {
-      view.find("form").dispatchEvent(
-        new CustomEvent("submit", {
-          bubbles: true,
-          cancelable: true,
-          detail: {},
-        }),
-      );
+      submitNow(view);
     }
     await flush();
 
@@ -338,13 +354,7 @@ describe("unlocking with a code", () => {
     await type(view.find<HTMLInputElement>('input[type="text"]'), "abcd1234");
 
     for (let round = 0; round < 2; round++) {
-      view.find("form").dispatchEvent(
-        new CustomEvent("submit", {
-          bubbles: true,
-          cancelable: true,
-          detail: {},
-        }),
-      );
+      submitNow(view);
       await flush();
     }
 
@@ -369,13 +379,7 @@ describe("unlocking with a code", () => {
     await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
 
     for (let round = 0; round < 2; round++) {
-      view.find("form").dispatchEvent(
-        new CustomEvent("submit", {
-          bubbles: true,
-          cancelable: true,
-          detail: {},
-        }),
-      );
+      submitNow(view);
       await flush();
     }
 

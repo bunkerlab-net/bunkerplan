@@ -29,7 +29,7 @@ import {
 const DOCUMENT = "<!doctype html><html><body><p>plan</p></body></html>";
 const CODE = "sHaReCoDe1234567";
 
-const serve = async (
+const serve = (
   over: {
     plan?: Parameters<typeof storedPlan>[0];
     sessionUser?: string | null;
@@ -235,7 +235,12 @@ describe("a code-shared plan", () => {
   test("a wrong code gates rather than opening", async () => {
     const app = await gated();
 
-    expect((await app.fetch(`/p/${PLAN_ID}?code=wrong`)).status).toBe(401);
+    // Full length on purpose: a short code is refused by validation before the
+    // digest is ever compared, so it would pass this without reaching the
+    // branch the test is named for.
+    expect(
+      (await app.fetch(`/p/${PLAN_ID}?code=wrongcode1234567`)).status,
+    ).toBe(401);
   });
 
   test("a cookie minted for another plan does not open this one", async () => {

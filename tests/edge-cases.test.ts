@@ -351,7 +351,9 @@ describe("the health probe", () => {
       storage: backend(() => new Promise<void>(() => {})),
     });
 
+    const started = Date.now();
     const response = await healthz("node", async () => services);
+    const elapsed = Date.now() - started;
 
     // The S3 client ships no request timeout, so a blackholed endpoint would
     // hold a socket and a pool client per call until both ran out.
@@ -359,6 +361,14 @@ describe("the health probe", () => {
     expect(await response.json<unknown>()).toMatchObject({
       checks: { storage: "error" },
     });
+    /*
+     * Bounded on both sides against `PROBE_TIMEOUT_MS` in src/http/healthz.ts,
+     * which is 2s. The floor says the deadline is what ended this rather than
+     * the probe answering after all - a hang that resolved instantly would mean
+     * the test was not testing a hang. The ceiling says a deadline exists.
+     */
+    expect(elapsed).toBeGreaterThanOrEqual(1_500);
+    expect(elapsed).toBeLessThan(5_000);
   }, 10_000);
 });
 

@@ -54,7 +54,7 @@ describe("PasskeysPanel listing", () => {
 
     const view = mount(<PasskeysPanel />);
     await flush();
-    expect(view.find(".empty").textContent).toBe("Loading...");
+    expect(view.find(".empty").textContent).toBe("Loading…");
 
     release?.([passkey()]);
     await flush();
