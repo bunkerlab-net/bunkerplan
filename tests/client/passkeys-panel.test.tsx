@@ -2,6 +2,7 @@ import "./dom-env.ts";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { PasskeysPanel } from "../../src/client/PasskeysPanel.tsx";
 import { client, explode, ok, refuse, useAuthStub } from "./auth-stub.ts";
+import type { Mounted } from "./harness.tsx";
 import { click, flush, mount, mountAsync, useHarness } from "./harness.tsx";
 
 // Arms the module stubs for this file; unarmed, the real modules answer.
@@ -22,6 +23,20 @@ const passkey = (over: Partial<Record<string, unknown>> = {}) => ({
   createdAt: new Date("2026-01-01T00:00:00Z"),
   ...over,
 });
+
+/**
+ * The Delete control on one row.
+ *
+ * Asserted rather than cast: `as Element` on a missing index hands `click` an
+ * `undefined` and the failure surfaces from inside the harness, naming nothing.
+ */
+const rowButton = (view: Mounted, index: number): Element => {
+  const button = view.all("tbody button")[index];
+  if (button === undefined) {
+    throw new Error(`no button on row ${index} in:\n${view.text()}`);
+  }
+  return button;
+};
 
 beforeEach(() => {
   client.passkey.listUserPasskeys = ok([]);
@@ -264,7 +279,7 @@ describe("PasskeysPanel deleting", () => {
     };
     const view = await mountAsync(<PasskeysPanel />);
 
-    await click(view.all("tbody button")[1] as Element);
+    await click(rowButton(view, 1));
 
     expect(deleted).toEqual({ id: "pk2" });
     expect(view.all("tbody tr").length).toBe(1);
@@ -275,7 +290,7 @@ describe("PasskeysPanel deleting", () => {
     client.passkey.deletePasskey = refuse("cannot delete the last passkey");
     const view = await mountAsync(<PasskeysPanel />);
 
-    await click(view.all("tbody button")[0] as Element);
+    await click(rowButton(view, 0));
 
     expect(view.find(".error").textContent).toBe(
       "cannot delete the last passkey",
@@ -288,7 +303,7 @@ describe("PasskeysPanel deleting", () => {
     client.passkey.deletePasskey = explode("network is down");
     const view = await mountAsync(<PasskeysPanel />);
 
-    await click(view.all("tbody button")[0] as Element);
+    await click(rowButton(view, 0));
 
     expect(view.find(".error").textContent).toBe("network is down");
   });
@@ -298,7 +313,7 @@ describe("PasskeysPanel deleting", () => {
     client.passkey.deletePasskey = async () => ({ data: null, error: {} });
     const view = await mountAsync(<PasskeysPanel />);
 
-    await click(view.all("tbody button")[0] as Element);
+    await click(rowButton(view, 0));
 
     expect(view.find(".error").textContent).toBe(
       "could not delete the passkey",
@@ -309,11 +324,11 @@ describe("PasskeysPanel deleting", () => {
     client.passkey.listUserPasskeys = ok([passkey(), passkey({ id: "pk2" })]);
     client.passkey.deletePasskey = refuse("try again");
     const view = await mountAsync(<PasskeysPanel />);
-    await click(view.all("tbody button")[0] as Element);
+    await click(rowButton(view, 0));
     expect(view.maybe(".error")).not.toBeNull();
 
     client.passkey.deletePasskey = ok({ success: true });
-    await click(view.all("tbody button")[0] as Element);
+    await click(rowButton(view, 0));
 
     expect(view.maybe(".error")).toBeNull();
   });

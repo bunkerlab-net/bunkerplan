@@ -331,6 +331,34 @@ describe("unlocking with a code", () => {
     await flush();
   });
 
+  test("a successful unlock keeps the latch closed as the page leaves", async () => {
+    standOn(`/p/${PLAN_ID}`);
+    api.unlockPlan = async () => undefined;
+    const view = await mountAsync(gate());
+    await type(view.find<HTMLInputElement>('input[type="text"]'), "abcd1234");
+
+    for (let round = 0; round < 2; round++) {
+      view.find("form").dispatchEvent(
+        new CustomEvent("submit", {
+          bubbles: true,
+          cancelable: true,
+          detail: {},
+        }),
+      );
+      await flush();
+    }
+
+    /*
+     * The counterpart to the refusal case above, and the reason the latch is
+     * released in `catch` rather than in a `finally`. `replace()` does not
+     * unload the document here, so this component is still mounted and still
+     * submittable; a `finally` would let the second submit through. In a browser
+     * that lands while the unlocked document is already loading.
+     */
+    expect(countOf("unlockPlan")).toBe(1);
+    expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+  });
+
   test("a refused attempt releases the latch, so it can be retried", async () => {
     let attempts = 0;
     api.unlockPlan = async () => {

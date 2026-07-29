@@ -80,6 +80,9 @@ interface Registration {
 
 function passkeyOptions(): Registration {
   const [plugin] = buildAuthOptions(BASE).plugins;
+  if (plugin === undefined) {
+    throw new Error("buildAuthOptions returned no plugins");
+  }
   return plugin.options as unknown as Registration;
 }
 

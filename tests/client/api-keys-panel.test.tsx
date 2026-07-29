@@ -116,58 +116,57 @@ describe("ApiKeysPanel listing", () => {
 });
 
 describe("ApiKeysPanel creating", () => {
-  test("an unnamed key gets a default name rather than an empty one", async () => {
-    let created: unknown;
-    client.apiKey.create = async (options: unknown) => {
-      created = options;
+  /**
+   * Installs a `create` that records the options it is handed.
+   *
+   * Returns the record rather than the options, because the call happens on the
+   * click below: reading a value out here would only ever see the seed.
+   */
+  const recordCreate = (): { options: Record<string, unknown> } => {
+    const record: { options: Record<string, unknown> } = { options: {} };
+    client.apiKey.create = async (options: Record<string, unknown>) => {
+      record.options = options;
       return { data: { key: "bkp_secret" }, error: null };
     };
+    return record;
+  };
+
+  test("an unnamed key gets a default name rather than an empty one", async () => {
+    const created = recordCreate();
     const view = await mountAsync(<ApiKeysPanel />);
 
     await click(view.byText("button", "Create key"));
 
-    expect(created).toEqual({ name: "API key" });
+    expect(created.options).toEqual({ name: "API key" });
   });
 
   test("a name is trimmed before it is sent", async () => {
-    let created: unknown;
-    client.apiKey.create = async (options: unknown) => {
-      created = options;
-      return { data: { key: "bkp_secret" }, error: null };
-    };
+    const created = recordCreate();
     const view = await mountAsync(<ApiKeysPanel />);
 
     await type(view.find<HTMLInputElement>("input[type=text]"), "  CI  ");
     await click(view.byText("button", "Create key"));
 
-    expect(created).toEqual({ name: "CI" });
+    expect(created.options).toEqual({ name: "CI" });
   });
 
   test("a whitespace-only name is the same as no name", async () => {
-    let created: unknown;
-    client.apiKey.create = async (options: unknown) => {
-      created = options;
-      return { data: { key: "bkp_secret" }, error: null };
-    };
+    const created = recordCreate();
     const view = await mountAsync(<ApiKeysPanel />);
 
     await type(view.find<HTMLInputElement>("input[type=text]"), "   ");
     await click(view.byText("button", "Create key"));
 
-    expect(created).toEqual({ name: "API key" });
+    expect(created.options).toEqual({ name: "API key" });
   });
 
   test("the default expiry sends no expiresIn at all", async () => {
-    let created: Record<string, unknown> = {};
-    client.apiKey.create = async (options: Record<string, unknown>) => {
-      created = options;
-      return { data: { key: "bkp_secret" }, error: null };
-    };
+    const created = recordCreate();
     const view = await mountAsync(<ApiKeysPanel />);
 
     await click(view.byText("button", "Create key"));
 
-    expect("expiresIn" in created).toBe(false);
+    expect("expiresIn" in created.options).toBe(false);
   });
 
   test.each([
@@ -175,17 +174,13 @@ describe("ApiKeysPanel creating", () => {
     ["2", 90 * DAY],
     ["3", 365 * DAY],
   ])("expiry choice %s sends %i seconds", async (index, seconds) => {
-    let created: Record<string, unknown> = {};
-    client.apiKey.create = async (options: Record<string, unknown>) => {
-      created = options;
-      return { data: { key: "bkp_secret" }, error: null };
-    };
+    const created = recordCreate();
     const view = await mountAsync(<ApiKeysPanel />);
 
     await choose(view.find<HTMLSelectElement>("select"), index);
     await click(view.byText("button", "Create key"));
 
-    expect(created["expiresIn"]).toBe(seconds);
+    expect(created.options["expiresIn"]).toBe(seconds);
   });
 
   test("the plaintext is revealed once and the name field is cleared", async () => {

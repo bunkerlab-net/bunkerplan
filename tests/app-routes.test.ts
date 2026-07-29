@@ -443,8 +443,21 @@ describe("sharing", () => {
       plans: memoryPlans([storedPlan()]),
     });
 
+    const asJson = (body: unknown) => ({
+      method: "PUT" as const,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
     for (const [path, init] of [
       [`/api/plans/${PLAN_ID}/sharing`, undefined],
+      // The two that change it, which are the ones worth refusing: going public
+      // and granting an account are how a stranger would help themselves.
+      [`/api/plans/${PLAN_ID}/sharing`, asJson({ visibility: "public" })],
+      [
+        `/api/plans/${PLAN_ID}/grants`,
+        { ...asJson({ accounts: "stranger" }), method: "POST" as const },
+      ],
       [`/api/plans/${PLAN_ID}/share-code`, { method: "POST" }],
       [`/api/plans/${PLAN_ID}/share-code`, { method: "DELETE" }],
       [`/api/plans/${PLAN_ID}/grants/brisk-heron`, { method: "DELETE" }],
