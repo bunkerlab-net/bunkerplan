@@ -36,6 +36,11 @@ describe("messageOf", () => {
     expect(messageOf({ message: "" }, FALLBACK)).toBe(FALLBACK);
   });
 
+  test("a message of only whitespace falls back, because it renders blank", () => {
+    expect(messageOf(new Error("   "), FALLBACK)).toBe(FALLBACK);
+    expect(messageOf({ message: "\n\t " }, FALLBACK)).toBe(FALLBACK);
+  });
+
   test("a non-string message is not rendered", () => {
     expect(messageOf({ message: 404 }, FALLBACK)).toBe(FALLBACK);
   });

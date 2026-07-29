@@ -59,7 +59,10 @@ const NAMES = [
   "addGrants",
   "removeGrant",
   "unlockPlan",
-] as const satisfies ReadonlyArray<keyof Api>;
+  // Against the real module as well as `Api`: this list is hand-written, so
+  // without `keyof typeof real` a renamed export keeps compiling here and the
+  // passthrough below quietly forwards to nothing.
+] as const satisfies ReadonlyArray<keyof Api & keyof typeof real>;
 
 /**
  * An unstubbed call throws rather than resolving to `undefined`: a panel that
@@ -101,7 +104,11 @@ mock.module("../../src/client/api.ts", () =>
         // registration outlived it. Forward to the real module - api.test.ts
         // exercises exactly that, and it must get the real `fetch` wrappers.
         if (!arm.on) {
-          return await passthrough[name]?.(...args);
+          const forward = passthrough[name];
+          if (forward === undefined) {
+            throw new Error(`src/client/api.ts exports no ${name}`);
+          }
+          return await forward(...args);
         }
         calls.push({ method: name, args });
         return await (api[name] as (...rest: unknown[]) => unknown)(...args);

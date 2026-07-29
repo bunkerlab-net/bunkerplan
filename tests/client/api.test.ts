@@ -42,12 +42,13 @@ beforeEach(() => {
   sent.length = 0;
   queued = [];
   globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    // Through `Headers` rather than `Object.entries`: that yields nothing for a
+    // `Headers` instance or an array of pairs, so a capture would come back
+    // empty and take the assertions with it. `Headers` also lower-cases keys.
     const headers: Record<string, string> = {};
-    for (const [key, value] of Object.entries(
-      (init?.headers ?? {}) as Record<string, string>,
-    )) {
-      headers[key.toLowerCase()] = value;
-    }
+    new Headers(init?.headers).forEach((value, key) => {
+      headers[key] = value;
+    });
     sent.push({
       url: String(input),
       method: init?.method ?? "GET",

@@ -148,13 +148,15 @@ for (const [method, log] of [
   ["assign", navigations],
   ["replace", replacements],
 ] as const) {
-  const real = window.location[method].bind(window.location);
+  // Not `real`: that name is the `src/client/auth.ts` namespace imported above,
+  // and shadowing it here makes this block read as if it reached into it.
+  const navigate = window.location[method].bind(window.location);
   Object.defineProperty(window.location, method, {
     configurable: true,
     writable: true,
     value: (url: string) => {
       if (!arm.on) {
-        real(url);
+        navigate(url);
         return;
       }
       log.push(String(url));

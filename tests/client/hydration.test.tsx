@@ -184,7 +184,7 @@ describe("attributes across the two renderers", () => {
         </button>
       </>
     );
-    hydrateRoot(host, <Box />);
+    roots.push(hydrateRoot(host, <Box />));
     await flush();
 
     // Both were on the server's markup and are now gone.

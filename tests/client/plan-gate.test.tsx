@@ -230,7 +230,7 @@ describe("unlocking with a code", () => {
     );
   });
 
-  test("a non-Error rejection still reads as something", async () => {
+  test("a non-Error rejection reads as the shared fallback", async () => {
     api.unlockPlan = async () => {
       throw "the request was aborted";
     };
@@ -239,8 +239,24 @@ describe("unlocking with a code", () => {
     await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
     await submitForm(view.find("form"));
 
+    // Not the thrown string: `messageOf` renders wording this app chose rather
+    // than whatever value happened to be thrown, the same as every panel.
     expect(view.find('[role="alert"]').textContent).toBe(
-      "the request was aborted",
+      "could not unlock the plan",
+    );
+  });
+
+  test("an Error with an empty message falls back rather than blanking", async () => {
+    api.unlockPlan = async () => {
+      throw new Error("");
+    };
+    const view = await mountAsync(gate());
+
+    await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
+    await submitForm(view.find("form"));
+
+    expect(view.find('[role="alert"]').textContent).toBe(
+      "could not unlock the plan",
     );
   });
 

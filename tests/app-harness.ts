@@ -160,6 +160,13 @@ export function memoryPlans(
 
   return {
     rows,
+    /*
+     * `createdAt` is stamped here, not taken from `row`: `PlanRepo.insert` in
+     * src/services/types.ts declares the row as `{ id, userId, label, size,
+     * visibility, shareCodeHash }` with no `createdAt` in it, because both real
+     * drivers let the column default in the database. A caller cannot pass one
+     * through this signature, so there is nothing here to preserve.
+     */
     insert: async (row, maxPlans): Promise<PlanInsert> => {
       if (rows.has(row.id)) return "duplicate";
       const held = [...rows.values()].filter(
@@ -270,7 +277,10 @@ export function memoryStorage(
   return {
     objects,
     put: async (id, body) => {
-      objects.set(id, body as Uint8Array<ArrayBufferLike>);
+      // A copy, because a real bucket keeps the bytes it was handed: retaining
+      // the caller's buffer lets a later mutation of it silently rewrite a
+      // stored document and the etag derived from it.
+      objects.set(id, new Uint8Array(body as Uint8Array));
     },
     get: async (id): Promise<PlanObject | null> => {
       const bytes = objects.get(id);
@@ -331,6 +341,16 @@ export interface HarnessOptions<S extends PlanStorage = MemoryStorage> {
   unlockRateLimits?: RateLimitRepo;
   accountClosing?: AccountClosingRepo;
   config?: Config;
+  /**
+   * The database probe, which is the one `/healthz` failure this harness is
+   * used to drive.
+   *
+   * Deliberately not widened to storage and KV probes: the suite that needs a
+   * failing or hanging backend builds `Services` directly (see the health probe
+   * block in tests/edge-cases.test.ts) because it also needs to assert which
+   * names are reported. Adding overrides here would be a second way to do that
+   * with no caller.
+   */
   probe?: () => Promise<void>;
   /** Counts resolutions, so "not touched before the refusal" is observable. */
   onServices?: () => void;

@@ -106,19 +106,26 @@ afterEach(() => {
 describe("authClient", () => {
   test("is constructed once and reused", () => {
     const first = authClient();
+    const afterFirst = constructedWith.length;
     const second = authClient();
 
     expect(second).toBe(first);
-    // An absolute count, not a delta against whatever ran before: the
-    // singleton is module-level and lives for the process, so "exactly one was
-    // ever built" is the invariant whichever order the tests run in. A delta
-    // would only hold if this test happened to be the first to call it.
-    expect(constructedWith.length).toBe(1);
+    /*
+     * That the second call added nothing, rather than that the total is one.
+     * The singleton is module-level and lives for the process, so anything
+     * importing this file's dependencies could already have built it before the
+     * recording arm went on, which would make an absolute count of 1 wrong
+     * through no fault of the code. "A repeat call constructs nothing" is the
+     * invariant, and it holds whatever ran first.
+     */
+    expect(constructedWith.length).toBe(afterFirst);
   });
 
   test("is bound to the window's own origin, which WebAuthn requires", () => {
     authClient();
-    expect(constructedWith[0]).toBe(window.location.origin);
+    // The most recent construction is the one that produced the live singleton;
+    // index 0 would name whichever call happened to be first in the process.
+    expect(constructedWith.at(-1)).toBe(window.location.origin);
   });
 
   test("carries the passkey and API key plugins", () => {

@@ -47,7 +47,9 @@ function fileDrag(
   Object.defineProperty(event, "dataTransfer", {
     value: {
       types: files.length > 0 ? ["Files"] : [],
-      files: Object.assign(files, { item: (i: number) => files[i] ?? null }),
+      files: Object.assign([...files], {
+        item: (i: number) => files[i] ?? null,
+      }),
       dropEffect: "none",
     },
   });
@@ -288,6 +290,9 @@ describe("PlansPanel drop zone", () => {
 
     expect(view.find(".dropzone").className).toContain("is-dragging");
     expect(event.defaultPrevented).toBe(true);
+    // The half the name promises: without this the cursor shows a move, which
+    // says the dashboard is about to take the file out of its folder.
+    expect((event as DragEvent).dataTransfer?.dropEffect).toBe("copy");
   });
 
   test("leaving the zone clears the mark", async () => {

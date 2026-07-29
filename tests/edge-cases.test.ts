@@ -381,7 +381,9 @@ describe("the fixed-window arithmetic both limiters share", () => {
   });
 
   test("the sweep fires on a minority of calls", () => {
-    const fired = Array.from({ length: 4000 }, sometimes).filter(
+    // Wrapped, so `Array.from` cannot pass its index in as an argument if
+    // `sometimes` ever grows a parameter.
+    const fired = Array.from({ length: 4000 }, () => sometimes()).filter(
       Boolean,
     ).length;
 

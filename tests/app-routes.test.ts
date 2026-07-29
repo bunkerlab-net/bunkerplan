@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
+import { PLAN_PAGE_SIZE } from "../src/services/types.ts";
 import {
   buildApp,
   CLIENT_IP,
@@ -168,7 +169,7 @@ describe("the plan collection", () => {
     };
 
     expect(body.truncated).toBe(true);
-    expect(body.plans.length).toBe(500);
+    expect(body.plans.length).toBe(PLAN_PAGE_SIZE);
   });
 });
 
@@ -548,6 +549,9 @@ describe("redeeming a code", () => {
     // The alternative is one shared bucket for every anonymous caller, which
     // is exactly the lockout the per-address keying exists to prevent.
     expect(response.status).toBe(429);
+    // A flat one second from the handler's own unidentified-caller branch, not
+    // the limiter's window: `consumed` staying 0 is what says the limiter was
+    // never reached to be asked.
     expect(response.headers.get("retry-after")).toBe("1");
     expect(consumed).toBe(0);
   });

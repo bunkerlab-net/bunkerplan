@@ -26,7 +26,13 @@ const ASSETS: AssetManifest = {
 
 const ORIGIN = "https://plans.example.test";
 
-/** What the client will parse back out of the document. */
+/**
+ * What the client will parse back out of the document.
+ *
+ * Handed to `JSON.parse` untouched, which is what `entry.tsx` does with
+ * `textContent`. Pre-substituting `\u003c` here would decode the very escape
+ * the breakout test is checking, and would stop matching the client.
+ */
 function pageProps(markup: string): unknown {
   const match = new RegExp(
     `<script type="application/json" id="${PAGE_PROPS_ID}">(.*?)</script>`,
@@ -35,7 +41,7 @@ function pageProps(markup: string): unknown {
   if (match?.[1] === undefined) {
     throw new Error(`no props element in:\n${markup}`);
   }
-  return JSON.parse(match[1].replaceAll("\\u003c", "<"));
+  return JSON.parse(match[1]);
 }
 
 const metaOf = (markup: string, key: string): string | null => {

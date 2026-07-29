@@ -11,13 +11,16 @@
  * instances, so those are read too.
  */
 export function messageOf(cause: unknown, fallback: string): string {
-  if (cause instanceof Error && cause.message !== "") return cause.message;
+  // Trimmed, not merely compared to "": a message of spaces renders as a blank
+  // line, which is the same nothing an empty one gives.
+  if (cause instanceof Error && cause.message.trim() !== "")
+    return cause.message;
   if (
     typeof cause === "object" &&
     cause !== null &&
     "message" in cause &&
     typeof cause.message === "string" &&
-    cause.message !== ""
+    cause.message.trim() !== ""
   ) {
     return cause.message;
   }

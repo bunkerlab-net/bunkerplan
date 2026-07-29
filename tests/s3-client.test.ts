@@ -174,7 +174,7 @@ describe("construction", () => {
     storage();
     storage({ s3Endpoint: "https://minio.internal:9000" });
 
-    expect("endpoint" in (constructed[0] ?? {})).toBe(false);
+    expect("endpoint" in optionsAt(0)).toBe(false);
     expect(constructed[1]).toMatchObject({
       endpoint: "https://minio.internal:9000",
     });

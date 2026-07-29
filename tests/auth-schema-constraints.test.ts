@@ -120,6 +120,13 @@ const generated = [["pg"], ["sqlite"]] as const satisfies ReadonlyArray<
  * The dialect is resolved here rather than threaded through `describe.each`:
  * the two `getTableConfig` functions take different table types, so a tuple
  * carrying both has no common signature to call.
+ *
+ * `shapeOf` in tests/schema-shape.test.ts projects references the same way and
+ * is deliberately not shared with this. That one sorts, because it compares two
+ * whole shapes for equality and needs a stable order; every caller here reads
+ * the result with `toContainEqual` or against `[]`, where order cannot change
+ * an outcome. Merging them would mean one helper carrying a sort that only half
+ * its callers want, to save nine lines in a test.
  */
 function foreignKeysOf(dialect: Dialect, name: string) {
   const schema = dialect === "pg" ? pgSchema : sqliteSchema;

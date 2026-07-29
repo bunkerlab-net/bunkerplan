@@ -3,6 +3,7 @@ import { unlockPlan } from "./api.ts";
 import { useSession } from "./auth.ts";
 import { SiteFrame } from "./Chrome.tsx";
 import { inputOf } from "./dom.ts";
+import { messageOf } from "./errors.ts";
 import type { GateProps } from "./pages.tsx";
 import { usePasskeyAction } from "./passkey.ts";
 
@@ -33,8 +34,16 @@ function useUnlock(planId: string) {
    * created in, so three Enter presses in one tick all see `false` and all
    * three reach the network. This route is rate-limited per client address and
    * a wrong code is the expected outcome here, so that turns an impatient
-   * reader into someone who has locked themselves out. Not cleared on success:
-   * the page is navigating away.
+   * reader into someone who has locked themselves out.
+   *
+   * Deliberately released in `catch` rather than in a `finally`: on the success
+   * path this page is navigating away, and browsers run that navigation
+   * asynchronously. A `finally` would reopen the box while the unlocked
+   * document is still loading, which is the second submission the latch exists
+   * to prevent. A `replace()` that throws lands in the `catch` like any other
+   * failure. One that neither throws nor unloads - an embedding where it is a
+   * no-op - does stay latched, which is the same state as a navigation still in
+   * progress and the safer of the two readings.
    */
   const inFlight = useRef(false);
 
@@ -69,7 +78,7 @@ function useUnlock(planId: string) {
           window.location.pathname + window.location.hash,
         );
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setError(messageOf(cause, "could not unlock the plan"));
         inFlight.current = false;
         setBusy(false);
       }

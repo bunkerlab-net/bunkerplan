@@ -241,10 +241,12 @@ export async function pickFiles(
   node: HTMLInputElement,
   files: File[],
 ): Promise<void> {
-  Object.defineProperty(node, "files", {
-    configurable: true,
-    value: Object.assign(files, { item: (i: number) => files[i] ?? null }),
+  // A copy: `Object.assign(files, ...)` would bolt `item` onto the caller's own
+  // array, so the array a test still holds is no longer a plain one.
+  const list = Object.assign([...files], {
+    item: (i: number) => files[i] ?? null,
   });
+  Object.defineProperty(node, "files", { configurable: true, value: list });
   node.dispatchEvent(new Event("input", { bubbles: true }));
   node.dispatchEvent(new Event("change", { bubbles: true }));
   await flush();
