@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { getTableName, type Table } from "drizzle-orm";
-import { getTableConfig as pgTableConfig } from "drizzle-orm/pg-core";
-import { getTableConfig as sqliteTableConfig } from "drizzle-orm/sqlite-core";
+import {
+  PgDialect,
+  getTableConfig as pgTableConfig,
+} from "drizzle-orm/pg-core";
+import {
+  SQLiteSyncDialect,
+  getTableConfig as sqliteTableConfig,
+} from "drizzle-orm/sqlite-core";
 import * as pgAccountClosing from "../src/db/schema/account-closing.pg.ts";
 import * as sqliteAccountClosing from "../src/db/schema/account-closing.sqlite.ts";
 import * as pgPlan from "../src/db/schema/plan.pg.ts";
@@ -33,13 +39,13 @@ interface Shape {
   name: string;
   columns: Array<{ name: string; notNull: boolean; primary: boolean }>;
   primaryKey: string[];
-  indexes: string[][];
+  indexes: Array<{ unique: boolean; columns: string[] }>;
   foreignKeys: Array<{
     columns: string[];
     references: string[];
     onDelete: string | undefined;
   }>;
-  checks: string[];
+  checks: Array<{ name: string; value: string }>;
   /**
    * Empty in every table today. Compared anyway: a unique constraint added to
    * one dialect and not the other is a rule the database enforces on Postgres
@@ -47,6 +53,19 @@ interface Shape {
    */
   uniqueConstraints: Array<{ name: string | undefined; columns: string[] }>;
 }
+
+/**
+ * Renders a constraint's SQL the way its own dialect would.
+ *
+ * `String(sql)` gives "[object Object]" - drizzle's `SQL` has no `toString` -
+ * so a check compared that way is identical to every other check and the
+ * comparison proves nothing. Both dialects happen to render the expressions
+ * here the same, which is what makes them comparable across the two.
+ */
+const renderSql = (dialect: "pg" | "sqlite", value: unknown): string =>
+  dialect === "pg"
+    ? new PgDialect().sqlToQuery(value as never).sql
+    : new SQLiteSyncDialect().sqlToQuery(value as never).sql;
 
 /** One comparable description per table, from either dialect's config. */
 function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
@@ -73,12 +92,15 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
       .sort((a, b) => a.name.localeCompare(b.name)),
     primaryKey: [...composite, ...inline].sort(),
     indexes: config.indexes
-      .map((index) =>
-        (index.config.columns as Array<{ name?: string }>).map(
+      .map((index) => ({
+        // The `unique` flag is the rule the database enforces. Without it an
+        // index that stopped being unique on one dialect reads as no drift.
+        unique: index.config.unique === true,
+        columns: (index.config.columns as Array<{ name?: string }>).map(
           (column) => column.name ?? "?",
         ),
-      )
-      .sort(),
+      }))
+      .sort((a, b) => a.columns.join().localeCompare(b.columns.join())),
     foreignKeys: config.foreignKeys
       .map((key) => {
         const reference = key.reference();
@@ -91,7 +113,14 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
         };
       })
       .sort((a, b) => a.columns.join().localeCompare(b.columns.join())),
-    checks: config.checks.map((check) => check.name).sort(),
+    // Name and expression both: two dialects can agree on what a constraint is
+    // called while disagreeing on what it permits.
+    checks: config.checks
+      .map((check) => ({
+        name: check.name,
+        value: renderSql(dialect, check.value),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
     uniqueConstraints: config.uniqueConstraints
       .map((unique) => ({
         name: unique.name,
@@ -210,7 +239,9 @@ describe("cascading from the account", () => {
       // a foreign key to hang from.
       expect(shape.foreignKeys).toEqual([]);
       // It sweeps itself by window instead, which is what this index is for.
-      expect(shape.indexes).toEqual([["window_start"]]);
+      expect(shape.indexes).toEqual([
+        { unique: false, columns: ["window_start"] },
+      ]);
     },
   );
 });
@@ -224,7 +255,14 @@ describe("the plan table", () => {
     (dialect, table) => {
       // `$type` is a compile-time claim and the repo is not the only writer: a
       // migration or a console session can put anything in this column.
-      expect(shapeOf(dialect, table).checks).toEqual(["plan_visibility_check"]);
+      // The expression too, not just the name: a check called the right thing
+      // that permits anything is the failure this guards against.
+      expect(shapeOf(dialect, table).checks).toEqual([
+        {
+          name: "plan_visibility_check",
+          value: `"visibility" in ('public', 'private')`,
+        },
+      ]);
     },
   );
 
@@ -234,7 +272,10 @@ describe("the plan table", () => {
   ] as const)(
     "%s indexes the owner, which is how the dashboard lists",
     (dialect, table) => {
-      expect(shapeOf(dialect, table).indexes).toContainEqual(["user_id"]);
+      expect(shapeOf(dialect, table).indexes).toContainEqual({
+        unique: false,
+        columns: ["user_id"],
+      });
     },
   );
 
@@ -249,7 +290,10 @@ describe("the plan table", () => {
         "user_id",
       ]);
       // And indexes the grantee, which is how the read gate checks one.
-      expect(shapeOf(dialect, table).indexes).toContainEqual(["user_id"]);
+      expect(shapeOf(dialect, table).indexes).toContainEqual({
+        unique: false,
+        columns: ["user_id"],
+      });
     },
   );
 });

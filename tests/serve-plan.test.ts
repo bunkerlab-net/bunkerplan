@@ -204,7 +204,10 @@ describe("a code-shared plan", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(DOCUMENT);
-    // Without this the parameter would be needed on every later request.
+    // Without this the parameter would be needed on every later request. That
+    // the minted header carries Path, HttpOnly, SameSite and Secure is the
+    // subject of tests/share-auth.test.ts; what this route owes is returning
+    // it at all.
     expect(response.headers.get("set-cookie")).toContain(
       shareCookieName(PLAN_ID),
     );

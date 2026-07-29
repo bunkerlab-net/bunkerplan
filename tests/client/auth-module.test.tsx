@@ -175,7 +175,7 @@ function Toggle() {
 }
 
 describe("useSession", () => {
-  test("seeds from the store, so hydration starts where the server left off", async () => {
+  test("reads the store once effects run, not at first render", async () => {
     value = {
       data: { user: { name: "swift-otter" } },
       error: null,
@@ -183,6 +183,10 @@ describe("useSession", () => {
     };
     const view = mount(<Probe />);
     await flush();
+    // Not a synchronous seed: the first paint is pending (below), and the
+    // stored session arrives when the effect reads it. Both orderings matter -
+    // the first keeps hydration matching the server, the second is what puts
+    // the visitor's name on screen without a second round trip.
 
     expect(view.text()).toBe("swift-otter");
   });

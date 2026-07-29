@@ -437,7 +437,12 @@ describe("sharing", () => {
       { method: "DELETE" },
     );
 
+    // 204 alone only says the route matched. The point of the escaping is
+    // that the handle it decoded is the one whose grant went.
     expect(response.status).toBe(204);
+    expect(
+      await (await app.fetch(`/api/plans/${PLAN_ID}/sharing`)).json(),
+    ).toMatchObject({ grants: [] });
   });
 
   test("a stranger cannot read or change sharing", async () => {

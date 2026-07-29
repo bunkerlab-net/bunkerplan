@@ -45,7 +45,7 @@ async function deleteAccount(): Promise<string | null> {
  * other - the panel renders a typed confirmation, and this owns whether the
  * account still exists.
  */
-function useAccountDeletion(): {
+function useAccountDeletion(confirmed: boolean): {
   error: string | null;
   busy: boolean;
   onDelete: () => Promise<void>;
@@ -70,7 +70,13 @@ function useAccountDeletion(): {
   const inFlight = useRef(false);
 
   const onDelete = async () => {
-    if (inFlight.current) return;
+    /*
+     * The confirmation is re-checked here, not only through the button's
+     * `disabled`. A `click` dispatched at a disabled button still runs its
+     * listeners - only user activation is suppressed - so `disabled` is a
+     * hint, and this is the one action in the app that cannot be taken back.
+     */
+    if (!confirmed || inFlight.current) return;
     inFlight.current = true;
     // The previous attempt's refusal is not about this one. Leaving it up
     // makes a retry look like it failed again before the call even lands.
@@ -118,7 +124,7 @@ function useAccountDeletion(): {
 
 export function DangerZone({ handle }: DangerZoneProps) {
   const [typed, setTyped] = useState("");
-  const { error, busy, onDelete } = useAccountDeletion();
+  const { error, busy, onDelete } = useAccountDeletion(typed === handle);
   return (
     /*
      * The palette has no danger colour and forbids inventing one, so gravity

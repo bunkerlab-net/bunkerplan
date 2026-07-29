@@ -47,16 +47,7 @@ describe("DangerZone", () => {
     expect(button.disabled).toBe(false);
   });
 
-  test("a confirmed delete leaves for the home page", async () => {
-    client.deleteUser = ok({ success: true });
-    const view = mount(<DangerZone handle={HANDLE} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
-
-    expect(navigations).toEqual(["/"]);
-  });
-
-  test("the button stays held while the page is leaving", async () => {
+  test("a confirmed delete leaves for the home page and stays held", async () => {
     client.deleteUser = ok({ success: true });
     const view = mount(<DangerZone handle={HANDLE} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
@@ -67,6 +58,26 @@ describe("DangerZone", () => {
     // that is already gone.
     expect(navigations).toEqual(["/"]);
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
+  });
+
+  test("a click dispatched without the typed handle deletes nothing", async () => {
+    let attempts = 0;
+    client.deleteUser = async () => {
+      attempts += 1;
+      return { data: { success: true }, error: null };
+    };
+    const view = mount(<DangerZone handle={HANDLE} />);
+
+    // Nothing typed, so the button is disabled - but a dispatched `click`
+    // still runs the listener, because only user activation is suppressed.
+    // `disabled` is a hint to a person, not a guard on the call.
+    const button = view.find<HTMLButtonElement>("button");
+    expect(button.disabled).toBe(true);
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    await flush();
+
+    expect(attempts).toBe(0);
+    expect(navigations).toEqual([]);
   });
 
   test("a navigation that throws still never offers a second delete", async () => {

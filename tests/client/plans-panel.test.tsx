@@ -373,29 +373,44 @@ describe("PlansPanel drop zone", () => {
     await flush();
   });
 
-  test("a file dropped anywhere else is swallowed, not navigated to", async () => {
-    await mountAsync(<PlansPanel />);
+  /**
+   * A node outside the panel, removed even when the assertion throws.
+   *
+   * Left behind, it keeps receiving the window-level drag handlers this panel
+   * installs, so a failure here would surface again as an unrelated one in a
+   * later test.
+   */
+  const outside = (body: (node: HTMLElement) => void): void => {
     const elsewhere = document.createElement("div");
     document.body.appendChild(elsewhere);
+    try {
+      body(elsewhere);
+    } finally {
+      elsewhere.remove();
+    }
+  };
 
-    const event = fileDrag("drop", [htmlFile()]);
-    elsewhere.dispatchEvent(event);
+  test("a file dropped anywhere else is swallowed, not navigated to", async () => {
+    await mountAsync(<PlansPanel />);
 
-    // Without this the browser leaves the dashboard to render the file.
-    expect(event.defaultPrevented).toBe(true);
-    elsewhere.remove();
+    outside((elsewhere) => {
+      const event = fileDrag("drop", [htmlFile()]);
+      elsewhere.dispatchEvent(event);
+
+      // Without this the browser leaves the dashboard to render the file.
+      expect(event.defaultPrevented).toBe(true);
+    });
   });
 
   test("dragging text elsewhere is left alone, so other inputs still take it", async () => {
     await mountAsync(<PlansPanel />);
-    const elsewhere = document.createElement("div");
-    document.body.appendChild(elsewhere);
 
-    const event = fileDrag("dragover");
-    elsewhere.dispatchEvent(event);
+    outside((elsewhere) => {
+      const event = fileDrag("dragover");
+      elsewhere.dispatchEvent(event);
 
-    expect(event.defaultPrevented).toBe(false);
-    elsewhere.remove();
+      expect(event.defaultPrevented).toBe(false);
+    });
   });
 });
 

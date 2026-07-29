@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildAuthOptions } from "../src/auth/options.ts";
 import type { Logger } from "../src/log.ts";
+import { BASE } from "./auth-fixture.ts";
 
 /**
  * The Better Auth wiring, as a value.
@@ -15,8 +16,6 @@ import type { Logger } from "../src/log.ts";
  *
  * The two schema constraints are covered by auth-schema-constraints.test.ts.
  */
-
-import { BASE } from "./auth-fixture.ts";
 
 const options = buildAuthOptions(BASE);
 
