@@ -115,7 +115,21 @@ const arm: Arm = { on: false };
  */
 const passthrough = { ...real };
 
-mock.module("../../src/client/auth.ts", () => ({
+/**
+ * Every value export this stub stands in for.
+ *
+ * The list catches a name that has gone; `Unmocked` catches one that has
+ * arrived, which a list cannot see and which would otherwise leave the export
+ * missing from `stubs` and `undefined` for every armed consumer.
+ */
+const EXPORT_KEYS = [
+  "authClient",
+  "useSession",
+] as const satisfies ReadonlyArray<keyof typeof real>;
+
+type Unmocked = Exclude<keyof typeof real, (typeof EXPORT_KEYS)[number]>;
+
+const implementations = {
   // Unarmed means some other file imported this stub earlier and the
   // registration outlived it. `auth-module.test.tsx` and `auth-ssr.test.ts`
   // exercise the real module and must get it.
@@ -125,7 +139,15 @@ mock.module("../../src/client/auth.ts", () => ({
     return client;
   },
   useSession: () => (arm.on ? session : passthrough.useSession()),
-}));
+} satisfies Record<(typeof EXPORT_KEYS)[number], unknown> &
+  Record<Unmocked, never>;
+
+/** Built by mapping the list, so it is what the module carries, not just a check. */
+const stubs = Object.fromEntries(
+  EXPORT_KEYS.map((name) => [name, implementations[name]]),
+);
+
+mock.module("../../src/client/auth.ts", () => stubs);
 
 /**
  * Where the page was sent, instead of going there.

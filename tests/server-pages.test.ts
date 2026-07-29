@@ -241,9 +241,19 @@ describe("the plan gate", () => {
   test("the props element parses as the JSON the client expects", () => {
     const markup = renderPlanGate(ASSETS, "abc123", true, ORIGIN);
 
+    // The type is what stops the browser executing it, and the id is what
+    // `entry.tsx` finds it by.
     expect(markup).toContain(
       `<script type="application/json" id="${PAGE_PROPS_ID}">`,
     );
+    // A payload that will not parse means a page that never hydrates.
+    expect(pageProps(markup)).toEqual({
+      name: "gate",
+      planId: "abc123",
+      hasCode: true,
+      path: "/p/abc123",
+      origin: ORIGIN,
+    });
   });
 });
 
