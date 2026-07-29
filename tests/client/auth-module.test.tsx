@@ -121,15 +121,28 @@ describe("authClient", () => {
     expect(constructedWith.length).toBe(afterFirst);
   });
 
+  /*
+   * Both of these read what the construction was handed, so both need a
+   * construction to have been recorded. Asserted rather than guarded with an
+   * `if`: the project runs `bun test --isolate`, which gives every file its own
+   * module registry, so the singleton is always built inside this file. Skipping
+   * the assertion when the recording is empty would turn a genuine regression -
+   * a client built with the wrong origin, or with a plugin dropped - into a
+   * silent pass.
+   */
   test("is bound to the window's own origin, which WebAuthn requires", () => {
     authClient();
-    // The most recent construction is the one that produced the live singleton;
-    // index 0 would name whichever call happened to be first in the process.
+
+    expect(constructedWith.length).toBeGreaterThan(0);
+    // The newest construction is the one holding the live singleton; index 0
+    // would name whichever call happened to be first in the process.
     expect(constructedWith.at(-1)).toBe(window.location.origin);
   });
 
   test("carries the passkey and API key plugins", () => {
     authClient();
+
+    expect(constructedWith.length).toBeGreaterThan(0);
     expect(pluginNames).toEqual(["passkey", "api-key"]);
   });
 });

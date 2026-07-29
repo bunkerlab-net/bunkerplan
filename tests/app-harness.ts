@@ -176,6 +176,16 @@ export function memoryPlans(
       rows.set(row.id, { ...storedPlan(), ...row, createdAt: new Date() });
       return "created";
     },
+    /*
+     * `createdAt` descending and nothing else, because that is the whole of the
+     * `orderBy` both drivers issue (src/db/plans.pg.ts and plans.sqlite.ts).
+     *
+     * Two inserts inside one millisecond therefore tie, and neither the SQL nor
+     * this says which comes back first. Deliberately not broken by insertion
+     * order here: a fake that promises an ordering production does not have lets
+     * a test depend on it and pass, which is the failure a fake is supposed to
+     * prevent. Suites that care seed distinct timestamps.
+     */
     listByUser: async (userId, limit): Promise<PlanRow[]> =>
       [...rows.values()]
         .filter((row) => row.userId === userId)

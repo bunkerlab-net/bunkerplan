@@ -466,17 +466,29 @@ describe("redeeming a code", () => {
       storage: memoryStorage({ [PLAN_ID]: "<p>secret</p>" }),
     });
 
+  /**
+   * The method, headers and body every unlock request here carries.
+   *
+   * `identified` drops the forwarded-address header. It is a parameter rather
+   * than a hand-written literal at that one call site so the missing header is
+   * the only difference between the cases, which is what they are contrasting.
+   */
+  const unlockInit = (code: string, identified = true): RequestInit => ({
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(identified ? { [CLIENT_IP_HEADER]: CLIENT_IP } : {}),
+    },
+    body: JSON.stringify({ code }),
+  });
+
   test("a correct code sets the unlock cookie, with no credential at all", async () => {
     const app = await gated();
 
-    const response = await app.fetch(`/api/plans/${PLAN_ID}/unlock`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        [CLIENT_IP_HEADER]: CLIENT_IP,
-      },
-      body: JSON.stringify({ code: CODE }),
-    });
+    const response = await app.fetch(
+      `/api/plans/${PLAN_ID}/unlock`,
+      unlockInit(CODE),
+    );
 
     expect(response.status).toBe(204);
     expect(response.headers.get("set-cookie")).toContain(
@@ -490,14 +502,10 @@ describe("redeeming a code", () => {
   test("a wrong code is refused", async () => {
     const app = await gated();
 
-    const response = await app.fetch(`/api/plans/${PLAN_ID}/unlock`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        [CLIENT_IP_HEADER]: CLIENT_IP,
-      },
-      body: JSON.stringify({ code: "wrongcode1234567" }),
-    });
+    const response = await app.fetch(
+      `/api/plans/${PLAN_ID}/unlock`,
+      unlockInit("wrongcode1234567"),
+    );
 
     // 401, not 403: no credential was accepted, and the reader may still
     // present a correct one.
@@ -513,14 +521,10 @@ describe("redeeming a code", () => {
       unlockRateLimits: closedRateLimits,
     });
 
-    const response = await app.fetch(`/api/plans/${PLAN_ID}/unlock`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        [CLIENT_IP_HEADER]: CLIENT_IP,
-      },
-      body: JSON.stringify({ code: CODE }),
-    });
+    const response = await app.fetch(
+      `/api/plans/${PLAN_ID}/unlock`,
+      unlockInit(CODE),
+    );
 
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("30");
@@ -540,11 +544,10 @@ describe("redeeming a code", () => {
       },
     });
 
-    const response = await app.fetch(`/api/plans/${PLAN_ID}/unlock`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: CODE }),
-    });
+    const response = await app.fetch(
+      `/api/plans/${PLAN_ID}/unlock`,
+      unlockInit(CODE, false),
+    );
 
     // The alternative is one shared bucket for every anonymous caller, which
     // is exactly the lockout the per-address keying exists to prevent.
@@ -579,14 +582,7 @@ describe("redeeming a code", () => {
     });
 
     for (const id of ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"]) {
-      await app.fetch(`/api/plans/${id}/unlock`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          [CLIENT_IP_HEADER]: CLIENT_IP,
-        },
-        body: JSON.stringify({ code: CODE }),
-      });
+      await app.fetch(`/api/plans/${id}/unlock`, unlockInit(CODE));
     }
 
     // Without the count this passes on an empty list: two undefined reads are

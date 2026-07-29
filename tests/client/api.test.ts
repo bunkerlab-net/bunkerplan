@@ -63,6 +63,11 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  // A response nobody consumed means the call under test never happened, which
+  // `beforeEach` would otherwise clear away silently.
+  const unused = queued.length;
+  queued = [];
+  expect(unused).toBe(0);
 });
 
 const json = (body: unknown, status = 200): Response =>

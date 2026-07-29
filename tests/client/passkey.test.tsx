@@ -86,7 +86,10 @@ describe("samePathOnly", () => {
   });
 
   test("a traversal that stays on the origin is left alone", () => {
-    expect(samePathOnly("/p/../dashboard", ORIGIN)).toBe("/dashboard");
+    // Deliberately not `/p/../dashboard`: that normalises to `/dashboard`,
+    // which is also the refusal fallback, so the assertion would hold whether
+    // the traversal was accepted or rejected.
+    expect(samePathOnly("/p/abc/../def", ORIGIN)).toBe("/p/def");
   });
 });
 

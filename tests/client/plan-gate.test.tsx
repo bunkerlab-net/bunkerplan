@@ -6,6 +6,7 @@ import {
   client,
   navigations,
   ok,
+  PENDING,
   refuse,
   replacements,
   setSession,
@@ -88,8 +89,9 @@ describe("what the gate says", () => {
 
     expect(view.text()).toContain("Signed in as brisk-heron");
     expect(view.text()).toContain("Ask its owner to share it with");
-    // Nothing to press: signing in again would change nothing.
-    expect(view.maybe("button.btn-text")).not.toBeNull();
+    // The only control here is the nav's own Sign out; pressing sign-in again
+    // would change nothing, so the gate offers no passkey button.
+    expect(view.byText("button.btn-text", "Sign out")).not.toBeNull();
     expect(
       view
         .all("button")
@@ -397,14 +399,21 @@ describe("signing in from the gate", () => {
   });
 
   test("both sign-in controls are held while the session is still resolving", () => {
-    // The very first render, before the effect reads the session store: the
-    // server could not know the session either, which is what makes the two
-    // renders match.
+    // Set explicitly: the stub's default session is already resolved, so
+    // without this the two controls below are live and the count this test
+    // used to make was satisfied by Unlock, which the empty code box disables.
+    setSession(PENDING);
     const view = mount(gate());
-
+    /*
+     * Named rather than counted. At this point Unlock is also disabled, because
+     * the code box is empty, so "at least one disabled button" would hold even
+     * if both of these were live.
+     */
     expect(
-      view.all<HTMLButtonElement>("button").filter((node) => node.disabled)
-        .length,
-    ).toBeGreaterThan(0);
+      view.byText<HTMLButtonElement>("button", "Sign in with passkey").disabled,
+    ).toBe(true);
+    expect(
+      view.byText<HTMLButtonElement>(".nav-right button", "Sign in").disabled,
+    ).toBe(true);
   });
 });
