@@ -225,8 +225,12 @@ describe("replacing a plan whose row vanishes underneath", () => {
     // The caller still gets the honest answer; the orphan is the operator's
     // problem and has to be findable.
     expect(response.status).toBe(404);
-    expect(logged.map((line) => line["msg"])).toContain("orphaned plan object");
-    expect(logged[0]).toMatchObject({ planId: PLAN_ID });
+    // Located by message rather than by position: the log is not ordered by
+    // this test, and `logged[0]` would silently start checking another line.
+    const orphan = logged.find(
+      (line) => line["msg"] === "orphaned plan object",
+    );
+    expect(orphan).toMatchObject({ planId: PLAN_ID });
   });
 });
 

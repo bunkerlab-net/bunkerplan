@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { APP_CSP } from "../src/http/security-headers.ts";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
 import { PLAN_PAGE_SIZE } from "../src/services/types.ts";
 import {
@@ -695,15 +694,35 @@ describe("routes that do not exist", () => {
 });
 
 describe("the security headers the middleware pins", () => {
+  /*
+   * Spelled out rather than compared against `APP_CSP`. Asserting the header
+   * equals the constant that produces it only proves the middleware read its
+   * own source: dropping `object-src` would still pass. These are the
+   * directives the policy exists for, so they are written out here and a
+   * weakened source has to fail one of them.
+   */
+  const REQUIRED_DIRECTIVES = [
+    "base-uri 'none'",
+    "object-src 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ];
+
   test("every app response carries them, including a 404", async () => {
     const app = buildApp();
 
     for (const path of ["/", "/api/plans", "/nope"]) {
       const response = await app.fetch(path);
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-      // The policy itself, not merely that one is set: a weakened header would
-      // satisfy a presence check while granting exactly what it forbids.
-      expect(response.headers.get("content-security-policy")).toBe(APP_CSP);
+      // Split into whole directives rather than matched as substrings: a
+      // policy reading `not-base-uri 'none'` contains the text and forbids
+      // nothing.
+      const directives = (response.headers.get("content-security-policy") ?? "")
+        .split(";")
+        .map((directive) => directive.trim());
+      for (const directive of REQUIRED_DIRECTIVES) {
+        expect(directives).toContain(directive);
+      }
     }
   });
 });

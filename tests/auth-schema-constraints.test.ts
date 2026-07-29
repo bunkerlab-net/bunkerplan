@@ -17,6 +17,11 @@ import * as sqliteSchema from "../src/db/schema/auth.sqlite.ts";
  * both. Nothing failed. Asserted at both levels for that reason - the
  * declaration is the mechanism, the generated tables are the artefact, and a
  * removed declaration would otherwise stay invisible until someone regenerated.
+ *
+ * Written against Drizzle's Relations v1, which is what `drizzle-orm@^0.45.2`
+ * resolves to. `createTableRelationsHelpers` and the `declared.config` /
+ * `declared.table` reads below are v1 internals; a v2 adapter reshapes both and
+ * these assertions have to be rewritten rather than merely repointed.
  */
 
 const [passkeyPlugin, apiKeyPlugin] = buildAuthOptions({

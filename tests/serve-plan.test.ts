@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PLAN_CSP } from "../src/http/security-headers.ts";
+import { APP_CSP, PLAN_CSP } from "../src/http/security-headers.ts";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
 import {
   buildApp,
@@ -147,7 +147,9 @@ describe("a private plan", () => {
     const body = await response.text();
     expect(body).toContain("This plan is private.");
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("content-security-policy")).not.toBe(PLAN_CSP);
+    // Positively the app policy, not merely "not the sandbox": an absent
+    // header would satisfy the negative while leaving the page unpoliced.
+    expect(response.headers.get("content-security-policy")).toBe(APP_CSP);
     // And it says nothing about the document.
     expect(body).not.toContain("plan</p>");
   });
@@ -331,7 +333,7 @@ describe("a plan that is not there", () => {
     expect(response.status).toBe(404);
     expect(await response.text()).toContain("Nothing lives at this URL.");
     // Trusted HTML, so it takes the app policy rather than the plan sandbox.
-    expect(response.headers.get("content-security-policy")).not.toBe(PLAN_CSP);
+    expect(response.headers.get("content-security-policy")).toBe(APP_CSP);
   });
 
   test("a row with no object 404s rather than serving an empty document", async () => {

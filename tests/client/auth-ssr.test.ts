@@ -17,6 +17,11 @@ import { authClient } from "../../src/client/auth.ts";
  * `bun test`, where every file shares one global, any client suite that ran
  * earlier has already put one there. Deleting it here is what makes the test
  * mean the same thing whichever runner is used.
+ *
+ * The memoised client is not a hazard here: `authClient()` checks `window`
+ * before it touches the cached instance, so a suite that constructed one
+ * earlier still gets the throw. The only thing this test needs is the absence
+ * of `window`, which the body arranges rather than assumes.
  */
 test("authClient refuses to construct outside a browser", () => {
   const installed = Object.getOwnPropertyDescriptor(globalThis, "window");

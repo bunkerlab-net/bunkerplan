@@ -215,6 +215,25 @@ describe("useSession", () => {
     expect(view.text()).toBe("brisk-heron");
   });
 
+  test("an update between mount and the first effect is not lost", async () => {
+    const view = mount(<Probe />);
+
+    /*
+     * The window the effect has to close. Nothing is subscribed yet, so this
+     * notification reaches no one; only the `get()` the effect performs before
+     * subscribing can recover it. A subscribe-only effect would leave the
+     * component pending forever against a store that had already answered.
+     */
+    push({
+      data: { user: { name: "brisk-heron" } },
+      error: null,
+      isPending: false,
+    });
+    await flush();
+
+    expect(view.text()).toBe("brisk-heron");
+  });
+
   test("surfaces a store error", async () => {
     const view = mount(<Probe />);
     await flush();

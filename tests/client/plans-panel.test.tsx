@@ -10,6 +10,7 @@ import {
   flush,
   htmlFile,
   keyboardClick,
+  type Mounted,
   mount,
   mountAsync,
   pickFiles,
@@ -752,21 +753,34 @@ describe("PlansPanel sharing expansion", () => {
     expect(document.activeElement).toBe(view.byText("button", "Share"));
   });
 
+  /**
+   * The Share control on a given row, failing at the lookup rather than
+   * handing back an `undefined` for a caller to cast away.
+   *
+   * Re-queried per call on purpose: opening one editor re-renders the table,
+   * so a handle taken before the first click can be stale by the second.
+   */
+  const shareButton = (view: Mounted, index: number): Element => {
+    const row = view.all("tbody tr")[index];
+    const button = row
+      ? [...row.querySelectorAll("button")].find(
+          (node) => node.textContent === "Share",
+        )
+      : undefined;
+    if (button === undefined) {
+      throw new Error(`no Share button on row ${index} in:\n${view.text()}`);
+    }
+    return button;
+  };
+
   test("only one editor is open at a time", async () => {
     api.listPlans = async () => [plan({ id: "aaa" }), plan({ id: "bbb" })];
     const view = await mountAsync(<PlansPanel />);
-    const [first, second] = view.all("tbody tr").map((row) => {
-      const button = [...row.querySelectorAll("button")].find(
-        (node) => node.textContent === "Share",
-      );
-      if (button === undefined) throw new Error("no Share button in the row");
-      return button;
-    });
 
-    await click(first as Element);
+    await click(shareButton(view, 0));
     expect(view.maybe("#sharing-aaa")).not.toBeNull();
 
-    await click(second as Element);
+    await click(shareButton(view, 1));
     expect(view.maybe("#sharing-aaa")).toBeNull();
     expect(view.maybe("#sharing-bbb")).not.toBeNull();
   });

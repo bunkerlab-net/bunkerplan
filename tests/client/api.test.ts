@@ -5,6 +5,7 @@ import {
   deletePlan,
   getSharing,
   listPlans,
+  type PlanSummary,
   relabelPlan,
   removeGrant,
   replacePlan,
@@ -86,8 +87,23 @@ const only = (): Recorded => {
 
 describe("listPlans", () => {
   test("unwraps the envelope", async () => {
-    queued = [json({ plans: [{ id: "abc" }], truncated: false })];
-    expect(await listPlans()).toEqual([{ id: "abc" }] as never);
+    /*
+     * A whole `PlanSummary` rather than `{ id }` widened with `as never`: the
+     * cast made the assertion accept any shape, so a field the client silently
+     * stopped passing through would still have matched.
+     */
+    const summary: PlanSummary = {
+      id: "abc",
+      url: "https://plans.example.test/p/abc",
+      label: "Q3",
+      size: 12,
+      createdAt: "2026-01-01T00:00:00Z",
+      visibility: "private",
+      hasShareCode: false,
+    };
+    queued = [json({ plans: [summary], truncated: false })];
+
+    expect(await listPlans()).toEqual([summary]);
     expect(only()).toMatchObject({ url: "/api/plans", method: "GET" });
   });
 
@@ -429,6 +445,19 @@ describe("unlockPlan", () => {
       new Response(null, { status: 429, headers: { "retry-after": "-5" } }),
     ];
 
+    await expect(unlockPlan("abc", "nope")).rejects.toThrow(
+      "Too many attempts. Try again shortly.",
+    );
+  });
+
+  test("a zero retry-after reads as no wait rather than 'in 0 seconds'", async () => {
+    queued = [
+      new Response(null, { status: 429, headers: { "retry-after": "0" } }),
+    ];
+
+    // The boundary of the `> 0` guard: zero is finite and not negative, so a
+    // `>= 0` test would send the reader back immediately and phrase it as a
+    // wait that has already elapsed.
     await expect(unlockPlan("abc", "nope")).rejects.toThrow(
       "Too many attempts. Try again shortly.",
     );

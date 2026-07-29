@@ -49,6 +49,32 @@ export function registerSharingCases(): void {
     const radios = (view: Mounted) =>
       view.all<HTMLInputElement>('input[type="radio"]');
 
+    /**
+     * One radio by position, failing at the lookup rather than handing back an
+     * `undefined` for the caller to cast away or read through `?.`.
+     */
+    const radio = (view: Mounted, index: number): HTMLInputElement => {
+      const node = radios(view)[index];
+      if (node === undefined) {
+        throw new Error(`no radio ${index} in:\n${view.text()}`);
+      }
+      return node;
+    };
+
+    /** The Share control on a given row, asserted the same way. */
+    const shareButton = (view: Mounted, index: number): Element => {
+      const row = view.all("tbody tr")[index];
+      const button = row
+        ? [...row.querySelectorAll("button")].find(
+            (node) => node.textContent === "Share",
+          )
+        : undefined;
+      if (button === undefined) {
+        throw new Error(`no Share button on row ${index} in:\n${view.text()}`);
+      }
+      return button;
+    };
+
     /** Picks a radio the way the browser does: checked, then an input event. */
     async function choose(node: HTMLInputElement): Promise<void> {
       node.checked = true;
@@ -190,20 +216,20 @@ export function registerSharingCases(): void {
       test("the current visibility is the checked radio", async () => {
         const view = await openEditor();
 
-        expect(radios(view)[0]?.checked).toBe(true);
-        expect(radios(view)[1]?.checked).toBe(false);
+        expect(radio(view, 0).checked).toBe(true);
+        expect(radio(view, 1).checked).toBe(false);
       });
 
       test("choosing public sends it and re-renders from the answer", async () => {
         api.setVisibility = async () => sharing({ visibility: "public" });
         const view = await openEditor();
 
-        await choose(radios(view)[1] as HTMLInputElement);
+        await choose(radio(view, 1));
 
         expect(
           calls.filter((c) => c.method === "setVisibility")[0]?.args,
         ).toEqual([PLAN_ID, "public"]);
-        expect(radios(view)[1]?.checked).toBe(true);
+        expect(radio(view, 1).checked).toBe(true);
       });
 
       test("a public plan says why the accounts below grant nothing", async () => {
@@ -256,7 +282,7 @@ export function registerSharingCases(): void {
         );
         // Several editors can have been open in one document, so the radio group
         // name is scoped to the plan rather than shared.
-        expect(radios(view)[0]?.name).toBe(`visibility-${PLAN_ID}`);
+        expect(radio(view, 0).name).toBe(`visibility-${PLAN_ID}`);
       });
 
       test("a refused change shows the panel's error line", async () => {
@@ -265,7 +291,7 @@ export function registerSharingCases(): void {
         };
         const view = await openEditor();
 
-        await choose(radios(view)[1] as HTMLInputElement);
+        await choose(radio(view, 1));
 
         expect(view.find(".error").textContent).toBe("not yours");
       });
@@ -275,7 +301,7 @@ export function registerSharingCases(): void {
         api.setVisibility = change.answer;
         const view = await openEditor();
 
-        const pub = radios(view)[1] as HTMLInputElement;
+        const pub = radio(view, 1);
         pub.checked = true;
         pub.dispatchEvent(new Event("input", { bubbles: true }));
         await flush();
@@ -440,7 +466,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Create code"));
         expect(view.maybe(".snippet")).not.toBeNull();
 
-        await choose(radios(view)[1] as HTMLInputElement);
+        await choose(radio(view, 1));
 
         // Showing it would hand the owner a link that no longer opens anything.
         expect(view.maybe(".snippet")).toBeNull();
@@ -737,19 +763,12 @@ export function registerSharingCases(): void {
         return `code-for-${id}`;
       };
       const view = await mountAsync(<PlansPanel />);
-      const shares = view
-        .all("tbody tr")
-        .map((row) =>
-          [...row.querySelectorAll("button")].find(
-            (node) => node.textContent === "Share",
-          ),
-        );
 
-      await click(shares[0] as Element);
+      await click(shareButton(view, 0));
       await click(view.byText("button", "Create code"));
       expect(view.find(".snippet code").textContent).toContain("code-for-aaa");
 
-      await click(shares[1] as Element);
+      await click(shareButton(view, 1));
 
       // Reusing the instance would leave the previous plan's one-time plaintext
       // on screen under this plan's name.
