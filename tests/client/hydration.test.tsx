@@ -10,7 +10,7 @@ import {
   renderPlanGate,
 } from "../../src/server/pages.tsx";
 import { useApiStub } from "./api-stub.ts";
-import { useAuthStub } from "./auth-stub.ts";
+import { navigations, replacements, useAuthStub } from "./auth-stub.ts";
 import { flush, useHarness } from "./harness.tsx";
 
 /**
@@ -50,9 +50,15 @@ const roots: Array<{ unmount: () => void }> = [];
  * last, disarmed last.
  */
 afterEach(async () => {
-  for (const root of roots.splice(0)) root.unmount();
-  await flush();
-  for (const host of hosts.splice(0)) host.remove();
+  try {
+    for (const root of roots.splice(0)) root.unmount();
+    await flush();
+    for (const host of hosts.splice(0)) host.remove();
+  } finally {
+    // The relay test moves the browser to `/s/{id}`, and the stub captures the
+    // forward instead of following it, so nothing else puts this back.
+    window.history.replaceState(null, "", "/");
+  }
 });
 
 useHarness();
@@ -129,6 +135,27 @@ describe("the plan gate", () => {
 
     expect(root.textContent).toContain("This plan is private.");
     expect(root.querySelector("input")).toBeNull();
+  });
+
+  test("the relay's own prop survives into the hydrated effect", async () => {
+    /*
+     * The markup is identical either way - the flag only changes what happens
+     * after mount - so asserting on the DOM would pass with `relay` deleted.
+     * What this pins is the whole path: the server puts the flag in the props
+     * element, hydration reads it back, and the effect forwards. A page that
+     * hydrated with the flag lost would sit on `/s/{id}` showing a reader a box
+     * for a plan they may already be allowed to read.
+     */
+    window.history.replaceState(null, "", "/s/abc123");
+
+    const root = await hydrate(
+      renderPlanGate(ASSETS, "abc123", true, ORIGIN, { relay: true }),
+    );
+
+    expect(root.querySelector("input")).not.toBeNull();
+    expect(replacements).toEqual(["/p/abc123"]);
+    // `replace`, not `assign`: the relay must not sit in the back history.
+    expect(navigations).toEqual([]);
   });
 });
 

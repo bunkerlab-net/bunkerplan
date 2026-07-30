@@ -48,6 +48,22 @@ function codeInFragment(hash: string): string | null {
 }
 
 /**
+ * This URL without either half of a share code.
+ *
+ * The fragment goes because that is what the link carried. `?code=` goes with
+ * it: it is the same secret by the other route - the one a reader without a
+ * browser uses - and a document that arrived by it should not leave the value
+ * sitting in the address bar and this browser's history. Any other query is
+ * kept, because nothing here has a reason to drop it.
+ */
+function scrubbed(): string {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("code");
+  url.hash = "";
+  return `${url.pathname}${url.search}`;
+}
+
+/**
  * Takes a code out of the fragment on mount and spends it once.
  *
  * A link that brought its own code spends it without asking: the reader already
@@ -83,7 +99,7 @@ function useLinkCode(
 
     if (fromLink !== null) {
       onCode(fromLink);
-      window.history.replaceState(null, "", window.location.pathname);
+      window.history.replaceState(null, "", scrubbed());
     }
 
     /*

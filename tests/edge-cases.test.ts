@@ -415,10 +415,10 @@ describe("the health probe", () => {
       // connection and a pool client for as long as the endpoint stays silent.
       //
       // The reason as well as the flag. Cancellation happens in one place - the
-      // timeout callback, which calls `controller.abort(expired)` before it
-      // rejects; `withTimeout`'s `finally` only clears the timer. So the message
-      // is what identifies the deadline as what cancelled this, rather than some
-      // later abort, and it pins the wording an operator reads in the log.
+      // timeout callback, which rejects and then calls `controller.abort(expired)`
+      // with the same error; `withTimeout`'s `finally` only clears the timer. So
+      // the message is what identifies the deadline as what cancelled this,
+      // rather than some later abort, and it pins the wording an operator reads.
       expect(seen?.aborted).toBe(true);
       expect((seen?.reason as Error | undefined)?.message).toBe(
         `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
@@ -426,6 +426,37 @@ describe("the health probe", () => {
     },
     10_000,
   );
+
+  test("a driver that fails on abort still reports the deadline", async () => {
+    /*
+     * The reason the reject comes before the abort. `abort` runs a listener
+     * synchronously, so a driver that turns cancellation into its own rejection
+     * settles the race first if the order is reversed - and `/healthz` then
+     * blames the driver's error for a failure the deadline caused, which is the
+     * one thing an operator reads this line to find out.
+     */
+    const { services, lines } = probed({
+      storage: backend((signal?: AbortSignal) => {
+        return new Promise<void>((_, reject) => {
+          signal?.addEventListener("abort", () => {
+            reject(new Error("connection reset by peer"));
+          });
+        });
+      }),
+    });
+
+    const response = await healthz("node", async () => services);
+
+    expect(response.status).toBe(503);
+    const failure = lines.find((line) => line["check"] === "storage");
+    expect(failure).toBeDefined();
+    expect(JSON.stringify(failure?.["err"])).toContain(
+      `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
+    );
+    expect(JSON.stringify(failure?.["err"])).not.toContain(
+      "connection reset by peer",
+    );
+  }, 10_000);
 });
 
 describe("the fixed-window arithmetic both limiters share", () => {

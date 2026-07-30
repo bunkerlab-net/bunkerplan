@@ -141,6 +141,20 @@ export function countOf(method: keyof Api): number {
   return calls.filter((call) => call.method === method).length;
 }
 
+/**
+ * Arguments of the first `method` call; throws if there was none.
+ *
+ * `[0]?.args` compares `undefined` against the expected array, so no call reads
+ * as the wrong arguments. Those are different failures.
+ */
+export function argsOf(method: keyof Api): unknown[] {
+  const call = calls.find((entry) => entry.method === method);
+  if (call === undefined) {
+    throw new Error(`no ${String(method)} call was made`);
+  }
+  return call.args;
+}
+
 let nextId = 0;
 
 export function plan(over: Partial<PlanSummary> = {}): PlanSummary {

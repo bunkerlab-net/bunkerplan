@@ -60,13 +60,16 @@ Known and accepted, so please do not report these as new:
 - **A share code in a URL is visible wherever that URL is, so the link people
   paste does not put it in one a server sees.** The dashboard hands out
   `/s/{id}#code=…`. A fragment is never sent to a server, so it reaches no
-  access log, no proxy and no `Referer`; `/s/{id}` is the app's own page, under
-  the app policy, and it strips the code from the address bar before it tries to
-  redeem it - so a wrong code or a dropped connection does not leave it in
-  history either. It is deliberately not `/p/{id}#code=`: that path answers a
-  reader who already holds access with the uploaded document, and a plan can read
-  its own `location.hash`, so the credential would be handed to HTML the reader
-  did not write.
+  request line, no access log and no `Referer`. The code itself does reach this
+  deployment when it is redeemed, in the body of `POST /api/plans/{id}/unlock` -
+  a code has to be presented to be checked - so a proxy that logs request bodies
+  sees it there; what the fragment buys is that no URL carries it. `/s/{id}` is
+  the app's own page, under the app policy, and it strips the code from the
+  address bar before it tries to redeem it - so a wrong code or a dropped connection
+  does not leave it in history either. It is deliberately not `/p/{id}#code=`:
+  that path answers a reader who already holds access with the uploaded
+  document, and a plan can read its own `location.hash`, so the credential would
+  be handed to HTML the reader did not write.
 
   The `?code=` parameter on `/p/{id}` is kept, because a reader without a DOM
   cannot send a fragment at all. A link used that way does reach the

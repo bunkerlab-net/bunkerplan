@@ -1,7 +1,7 @@
 import "./dom-env.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { PlanGate } from "../../src/client/PlanGate.tsx";
-import { api, calls, countOf, useApiStub } from "./api-stub.ts";
+import { api, argsOf, countOf, useApiStub } from "./api-stub.ts";
 import {
   client,
   navigations,
@@ -158,10 +158,7 @@ describe("unlocking with a code", () => {
     await type(view.find<HTMLInputElement>('input[type="text"]'), "abcd1234");
     await submitForm(view.find("form"));
 
-    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args).toEqual([
-      PLAN_ID,
-      "abcd1234",
-    ]);
+    expect(argsOf("unlockPlan")).toEqual([PLAN_ID, "abcd1234"]);
     /*
      * Replaced rather than assigned, and built from the plan id rather than the
      * path this page was served at: the same component renders at `/s/{id}`,
@@ -186,9 +183,7 @@ describe("unlocking with a code", () => {
     );
     await submitForm(view.find("form"));
 
-    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args[1]).toBe(
-      "abcd1234",
-    );
+    expect(argsOf("unlockPlan")[1]).toBe("abcd1234");
   });
 
   test("Unlock is dead until the code has something in it", async () => {
@@ -470,11 +465,23 @@ describe("a link that brought its own code", () => {
 
     await mountAsync(gate());
 
-    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args).toEqual([
-      PLAN_ID,
-      "abcd1234",
-    ]);
+    expect(argsOf("unlockPlan")).toEqual([PLAN_ID, "abcd1234"]);
     expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+  });
+
+  test("the scrub takes both halves of the code and leaves the rest", async () => {
+    /*
+     * `?code=` is the same secret by the route a reader without a DOM uses, so
+     * a document that arrived carrying one should not leave it in the address
+     * bar. Anything else in the query is not this page's business to drop.
+     */
+    standOn(`/p/${PLAN_ID}?ref=email&code=by-the-other-route#code=abcd1234`);
+    api.unlockPlan = async () => undefined;
+
+    await mountAsync(gate());
+
+    expect(window.location.hash).toBe("");
+    expect(window.location.search).toBe("?ref=email");
   });
 
   test("trims it, the same as a code typed into the box", async () => {
@@ -486,10 +493,7 @@ describe("a link that brought its own code", () => {
 
     await mountAsync(gate());
 
-    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args).toEqual([
-      PLAN_ID,
-      "abcd1234",
-    ]);
+    expect(argsOf("unlockPlan")).toEqual([PLAN_ID, "abcd1234"]);
   });
 
   test("a fragment that is only padding is no code at all", async () => {
@@ -528,9 +532,7 @@ describe("a link that brought its own code", () => {
 
     await mountAsync(gate());
 
-    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args[1]).toBe(
-      "a b&c=d",
-    );
+    expect(argsOf("unlockPlan")[1]).toBe("a b&c=d");
   });
 
   test("takes it out of the address bar before spending it", async () => {
@@ -605,14 +607,14 @@ describe("the share-link relay", () => {
 
     await mountAsync(gate({ relay: true }));
 
-    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args).toEqual([
-      PLAN_ID,
-      "abcd1234",
-    ]);
+    expect(argsOf("unlockPlan")).toEqual([PLAN_ID, "abcd1234"]);
     // To the plan, not back to `/s/{id}` - and the code is gone from the URL
     // before the navigation, so the document never sees it.
     expect(replacements).toEqual([`/p/${PLAN_ID}`]);
     expect(window.location.hash).toBe("");
+    // `replace`, never `assign`: the relay must not leave itself in the back
+    // history, or the button returns a reader to a page with nothing on it.
+    expect(navigations).toEqual([]);
   });
 
   test("forwards a bare visit rather than claiming the plan is private", async () => {
@@ -625,6 +627,7 @@ describe("the share-link relay", () => {
 
     expect(countOf("unlockPlan")).toBe(0);
     expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+    expect(navigations).toEqual([]);
   });
 
   test("strips a revoked code and forwards rather than dead-ending", async () => {
@@ -643,6 +646,7 @@ describe("the share-link relay", () => {
     // that was.
     expect(window.location.hash).toBe("");
     expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+    expect(navigations).toEqual([]);
   });
 
   test("a refused code keeps the reader here, with the box and the reason", async () => {
@@ -655,6 +659,7 @@ describe("the share-link relay", () => {
 
     // Not forwarded: there is something to do here, which is try again.
     expect(replacements).toEqual([]);
+    expect(navigations).toEqual([]);
     expect(view.find('[role="alert"]').textContent).toBe("wrong code");
     expect(view.find<HTMLInputElement>('input[type="text"]').value).toBe(
       "wrongcode123",

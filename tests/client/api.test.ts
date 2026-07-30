@@ -437,13 +437,17 @@ describe("unlockPlan", () => {
     );
   });
 
-  test("a nonsense retry-after does not leak NaN into the message", async () => {
+  test("an HTTP-date retry-after falls back to the generic wait", async () => {
     queued = [
       new Response(null, {
         status: 429,
         headers: { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" },
       }),
     ];
+
+    // RFC 9110 allows a date here as well as a delay. This client reads only
+    // the delay form, so a date is no number: the generic wording is what a
+    // reader gets rather than a `NaN` in the sentence.
 
     await expect(unlockPlan("abc", "nope")).rejects.toThrow(
       "Too many attempts. Try again shortly.",

@@ -1,7 +1,14 @@
 import "./dom-env.ts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PlansPanel } from "../../src/client/PlansPanel.tsx";
-import { api, calls, countOf, grantResult, plan, sharing } from "./api-stub.ts";
+import {
+  api,
+  argsOf,
+  countOf,
+  grantResult,
+  plan,
+  sharing,
+} from "./api-stub.ts";
 import type { Mounted } from "./harness.tsx";
 import {
   click,
@@ -240,9 +247,7 @@ export function registerSharingCases(): void {
 
         await choose(radio(view, 1));
 
-        expect(
-          calls.filter((c) => c.method === "setVisibility")[0]?.args,
-        ).toEqual([PLAN_ID, "public"]);
+        expect(argsOf("setVisibility")).toEqual([PLAN_ID, "public"]);
         expect(radio(view, 1).checked).toBe(true);
       });
 
@@ -578,10 +583,7 @@ export function registerSharingCases(): void {
         await type(field(view), "a, b");
         await press(view);
 
-        expect(calls.filter((c) => c.method === "addGrants")[0]?.args).toEqual([
-          PLAN_ID,
-          "a, b",
-        ]);
+        expect(argsOf("addGrants")).toEqual([PLAN_ID, "a, b"]);
       });
 
       test("the field is trimmed before it is sent", async () => {
@@ -591,9 +593,7 @@ export function registerSharingCases(): void {
         await type(field(view), "  a  ");
         await press(view);
 
-        expect(calls.filter((c) => c.method === "addGrants")[0]?.args[1]).toBe(
-          "a",
-        );
+        expect(argsOf("addGrants")[1]).toBe("a");
       });
 
       test("everything that landed is cleared out of the field", async () => {
@@ -720,9 +720,7 @@ export function registerSharingCases(): void {
 
         await click(view.byText(".tag-list button", "Remove"));
 
-        expect(
-          calls.filter((c) => c.method === "removeGrant")[0]?.args,
-        ).toEqual([PLAN_ID, "brisk-heron"]);
+        expect(argsOf("removeGrant")).toEqual([PLAN_ID, "brisk-heron"]);
         expect(view.find(".sharing .empty").textContent).toBe(
           "No accounts yet.",
         );

@@ -30,7 +30,16 @@ useAuthStub();
 
 const DAY = 86_400;
 
-const key = (over: Partial<Record<string, unknown>> = {}) => ({
+/** The row shape the panel renders, so a misspelled override is a type error. */
+interface KeyRow {
+  id: string;
+  name: string | null;
+  start: string | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+}
+
+const key = (over: Partial<KeyRow> = {}): KeyRow => ({
   id: "k1",
   name: "CI",
   start: "bkp_abc",

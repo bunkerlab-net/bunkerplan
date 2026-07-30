@@ -24,7 +24,19 @@ useAuthStub();
  * because pressing it would lock the account out permanently.
  */
 
-const passkey = (over: Partial<Record<string, unknown>> = {}) => ({
+/**
+ * The row shape the fixture supplies, so a misspelled override is a type error.
+ *
+ * Stricter than the panel's own optional fields on purpose: every row here sets
+ * both, and the placeholder cases pass `null` explicitly rather than by omission.
+ */
+interface PasskeyRow {
+  id: string;
+  name: string | null;
+  createdAt: Date | null;
+}
+
+const passkey = (over: Partial<PasskeyRow> = {}): PasskeyRow => ({
   id: "pk1",
   name: "Laptop",
   createdAt: new Date("2026-01-01T00:00:00Z"),
@@ -203,7 +215,7 @@ describe("PasskeysPanel adding", () => {
     // The refresh is the only thing that puts the new key on the page - the
     // panel never appends the row itself - so a success that skipped it would
     // leave the visitor looking at a list without the passkey they just made.
-    let listed: Array<Record<string, unknown>> = [];
+    let listed: PasskeyRow[] = [];
     client.passkey.listUserPasskeys = async () => ({
       data: listed,
       error: null,
@@ -300,6 +312,30 @@ describe("PasskeysPanel deleting", () => {
 
     expect(deleted).toEqual({ id: "pk2" });
     expect(view.all("tbody tr").length).toBe(1);
+  });
+
+  test("a second press while a delete is in flight sends nothing", async () => {
+    // Deleting a passkey is not undoable, and a row's button sits under the
+    // pointer that just pressed it. Two presses in one flight must be one
+    // request: the second would answer 404 or, worse, take the next row.
+    const removal = deferred<{ data: { success: boolean }; error: null }>();
+    let deletions = 0;
+    client.passkey.listUserPasskeys = ok([passkey(), passkey({ id: "pk2" })]);
+    client.passkey.deletePasskey = async () => {
+      deletions += 1;
+      return await removal.answer();
+    };
+    const view = await mountAsync(<PasskeysPanel />);
+
+    await click(rowButton(view, 0));
+    expect(rowButton(view, 0)).toHaveProperty("disabled", true);
+
+    await click(rowButton(view, 0));
+    expect(deletions).toBe(1);
+
+    removal.release({ data: { success: true }, error: null });
+    await flush();
+    expect(deletions).toBe(1);
   });
 
   test("a refused delete leaves both rows in place", async () => {

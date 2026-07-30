@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "hono/jsx";
+import { useCallback, useEffect, useRef, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { messageOf } from "./errors.ts";
 
@@ -8,11 +8,54 @@ interface PasskeyRow {
   createdAt?: Date | null | undefined;
 }
 
+/**
+ * One write against the passkey list at a time: busy while it runs, the list
+ * refreshed after it, and either kind of failure rendered rather than thrown.
+ *
+ * The latch is a ref because `busy` is state - two presses in one tick both read
+ * the value their render closed over - and `disabled` needs a re-render to
+ * appear, so it never guarded the call. Neither ceremony wants doing twice.
+ */
+function usePasskeyWrite(
+  refresh: () => Promise<void>,
+  setError: (message: string | null) => void,
+) {
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+
+  const run = async (
+    operation: () => Promise<
+      { error?: { message?: string } | null } | undefined
+    >,
+    fallback: string,
+  ) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      const result = await operation();
+      if (result?.error) {
+        setError(result.error.message ?? fallback);
+        return;
+      }
+      setError(null);
+      await refresh();
+    } catch (cause) {
+      setError(messageOf(cause, fallback));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  return { busy, run };
+}
+
 /** Passkeys, and the two ceremonies that change them. */
 function usePasskeys() {
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+
   /**
    * False until the first list call has answered. Without it the panel says
    * "No passkeys" for the length of that request, to an account that cannot
@@ -47,41 +90,22 @@ function usePasskeys() {
     void refresh();
   }, [refresh]);
 
-  const add = async () => {
-    setBusy(true);
-    try {
-      const result = await authClient().passkey.addPasskey({
-        name: `Passkey ${passkeys.length + 1}`,
-      });
-      if (result?.error) {
-        setError(result.error.message ?? "could not add a passkey");
-        return;
-      }
-      setError(null);
-      await refresh();
-    } catch (cause) {
-      setError(messageOf(cause, "could not add a passkey"));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, run } = usePasskeyWrite(refresh, setError);
 
-  const remove = async (id: string) => {
-    setBusy(true);
-    try {
-      const result = await authClient().passkey.deletePasskey({ id });
-      if (result.error) {
-        setError(result.error.message ?? "could not delete the passkey");
-        return;
-      }
-      setError(null);
-      await refresh();
-    } catch (cause) {
-      setError(messageOf(cause, "could not delete the passkey"));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const add = () =>
+    run(
+      () =>
+        authClient().passkey.addPasskey({
+          name: `Passkey ${passkeys.length + 1}`,
+        }),
+      "could not add a passkey",
+    );
+
+  const remove = (id: string) =>
+    run(
+      () => authClient().passkey.deletePasskey({ id }),
+      "could not delete the passkey",
+    );
 
   return { passkeys, error, busy, loaded, add, remove };
 }

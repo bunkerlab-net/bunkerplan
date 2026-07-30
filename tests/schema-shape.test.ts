@@ -274,6 +274,36 @@ describe.each(tables)("%s", (name, pg, sqlite) => {
   );
 });
 
+/*
+ * A recorded difference is only checked when a column of that name is found, so
+ * renaming or dropping one leaves its entry unconsulted - and the claim on
+ * `DIALECT_DIFFERENCES`, that an entry which no longer holds fails on the way
+ * in, would quietly stop being true. An allowlist nothing reads is the kind that
+ * grows.
+ */
+describe("the recorded dialect differences", () => {
+  test("are all still reached by a column", () => {
+    // Walked here rather than collected from the suites above: a test that only
+    // passes when its neighbours ran first fails alone under `-t`.
+    const reached = new Set<string>();
+    for (const [name, pg, sqlite] of tables) {
+      for (const [dialect, table] of [
+        ["pg", pg],
+        ["sqlite", sqlite],
+      ] as const) {
+        for (const column of shapeOf(dialect, table).columns) {
+          const key = `${name}.${column.name}`;
+          if (key in DIALECT_DIFFERENCES) reached.add(key);
+        }
+      }
+    }
+
+    expect([...reached].sort()).toEqual(
+      Object.keys(DIALECT_DIFFERENCES).sort(),
+    );
+  });
+});
+
 describe("cascading from the account", () => {
   const cascading = [
     ["plan", "user_id", pgPlan.plan, sqlitePlan.plan],

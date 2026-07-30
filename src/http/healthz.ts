@@ -49,8 +49,11 @@ async function withTimeout(
           const expired = new Error(
             `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
           );
-          controller.abort(expired);
+          // Rejected before the abort. `abort` runs a driver's own handler
+          // synchronously, and a driver that rejects with its own error would
+          // otherwise win the race and report that instead of the deadline.
           reject(expired);
+          controller.abort(expired);
         }, PROBE_TIMEOUT_MS);
       }),
     ]);

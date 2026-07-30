@@ -54,6 +54,21 @@ describe("messageOf", () => {
     expect(messageOf({ message: 404 }, FALLBACK)).toBe(FALLBACK);
   });
 
+  test("a value that throws when read falls back rather than escaping", () => {
+    // `unknown` includes this. A getter that throws would otherwise take out the
+    // handler reporting the failure, replacing a message with a blank panel.
+    const hostile = new Proxy(
+      {},
+      {
+        has: () => {
+          throw new Error("trap");
+        },
+      },
+    );
+
+    expect(messageOf(hostile, FALLBACK)).toBe(FALLBACK);
+  });
+
   test("an Error whose message is not a string falls back rather than throwing", () => {
     // `Error.message` is writable. Calling `trim()` on a replaced one would
     // throw from inside the catch handler that was reporting the failure.

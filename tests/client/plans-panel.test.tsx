@@ -3,7 +3,15 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { useState } from "hono/jsx";
 import { PlansPanel } from "../../src/client/PlansPanel.tsx";
 import { MAX_PLAN_LABEL_LENGTH } from "../../src/http/plan-label.ts";
-import { api, calls, countOf, plan, sharing, useApiStub } from "./api-stub.ts";
+import {
+  api,
+  argsOf,
+  calls,
+  countOf,
+  plan,
+  sharing,
+  useApiStub,
+} from "./api-stub.ts";
 import {
   click,
   deferred,
@@ -412,6 +420,20 @@ describe("PlansPanel drop zone", () => {
       expect(event.defaultPrevented).toBe(false);
     });
   });
+
+  test("the drag swallower is removed when the panel leaves the page", async () => {
+    const view = await mountAsync(<Toggle />);
+    await click(view.find("#hide"));
+
+    outside((elsewhere) => {
+      const event = fileDrag("drop", [htmlFile()]);
+      elsewhere.dispatchEvent(event);
+
+      // Still listening after unmount would keep swallowing drops for a panel
+      // that is no longer on the page.
+      expect(event.defaultPrevented).toBe(false);
+    });
+  });
 });
 
 describe("PlansPanel labels", () => {
@@ -425,10 +447,7 @@ describe("PlansPanel labels", () => {
     input.dispatchEvent(new Event("blur", { bubbles: true }));
     await flush();
 
-    expect(calls.filter((c) => c.method === "relabelPlan")[0]?.args).toEqual([
-      "abc",
-      "Q3 roadmap",
-    ]);
+    expect(argsOf("relabelPlan")).toEqual(["abc", "Q3 roadmap"]);
   });
 
   test("an unchanged label sends nothing", async () => {
@@ -466,10 +485,7 @@ describe("PlansPanel labels", () => {
       .dispatchEvent(new Event("blur", { bubbles: true }));
     await flush();
 
-    expect(calls.filter((c) => c.method === "relabelPlan")[0]?.args).toEqual([
-      "abc",
-      null,
-    ]);
+    expect(argsOf("relabelPlan")).toEqual(["abc", null]);
   });
 
   test("Enter commits by blurring, which is what the field is bound to", async () => {
@@ -841,20 +857,6 @@ describe("PlansPanel sharing expansion", () => {
     expect(view.find("#sharing-abc").getAttribute("aria-label")).toBe(
       "Sharing for renamed",
     );
-  });
-
-  test("the drag swallower is removed when the panel leaves the page", async () => {
-    const view = await mountAsync(<Toggle />);
-    await click(view.find("#hide"));
-
-    outside((elsewhere) => {
-      const event = fileDrag("drop", [htmlFile()]);
-      elsewhere.dispatchEvent(event);
-
-      // Still listening after unmount would keep swallowing drops for a panel
-      // that is no longer on the page.
-      expect(event.defaultPrevented).toBe(false);
-    });
   });
 });
 

@@ -693,7 +693,7 @@ describe("redeeming a code", () => {
       unlockRateLimits: {
         consume: async () => {
           consumed += 1;
-          return { allowed: true, retryAfter: 0, windowStart: 0 };
+          return { allowed: true, retryAfter: 0, windowStart: WINDOW_START };
         },
         refund: async () => {},
       },
@@ -734,7 +734,7 @@ describe("redeeming a code", () => {
         // hand their count straight back.
         consume: async (key) => {
           keys.push(key);
-          return { allowed: true, retryAfter: 0, windowStart: 0 };
+          return { allowed: true, retryAfter: 0, windowStart: WINDOW_START };
         },
         refund: async () => {},
       },
