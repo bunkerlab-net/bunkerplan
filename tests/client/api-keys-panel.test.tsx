@@ -329,11 +329,9 @@ describe("ApiKeysPanel creating", () => {
   });
 
   test("the create button is held while the call is in flight", async () => {
-    let release: (() => void) | undefined;
+    const creating = deferred<void>();
     client.apiKey.create = async () => {
-      await new Promise<void>((resolve) => {
-        release = resolve;
-      });
+      await creating.answer();
       return { data: { key: "bkp_secret" }, error: null };
     };
     const view = await mountAsync(<ApiKeysPanel />);
@@ -343,7 +341,7 @@ describe("ApiKeysPanel creating", () => {
     await flush();
     expect(button.disabled).toBe(true);
 
-    release?.();
+    creating.release(undefined);
     await flush();
     expect(
       view.byText<HTMLButtonElement>("button", "Create key").disabled,

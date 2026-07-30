@@ -14,8 +14,9 @@ import { type Arm, armWhileFileRuns } from "../armed-mock.ts";
  * `window.location.origin`, which does not exist during the server render -
  * and WebAuthn rejects a ceremony whose origin does not match. And
  * `useSession` is five lines standing in for the React hook Better Auth's
- * vanilla client does not ship: it must seed from the store synchronously so
- * the first client render matches the server's, then track it.
+ * vanilla client does not ship: its first render is unconditionally pending,
+ * which is what the server produced, and the store is read once effects run
+ * and tracked from then on.
  */
 
 type Subscriber = (state: SessionValue) => void;

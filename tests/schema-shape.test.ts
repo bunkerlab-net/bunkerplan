@@ -96,8 +96,11 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
         // The `unique` flag is the rule the database enforces. Without it an
         // index that stopped being unique on one dialect reads as no drift.
         unique: index.config.unique === true,
+        // An expression index has no `name`. Rendered rather than flattened to
+        // "?", so two different expressions stay two different things - the
+        // fallback made every one of them compare equal.
         columns: (index.config.columns as Array<{ name?: string }>).map(
-          (column) => column.name ?? "?",
+          (column) => column.name ?? renderSql(dialect, column),
         ),
       }))
       .sort((a, b) => a.columns.join().localeCompare(b.columns.join())),

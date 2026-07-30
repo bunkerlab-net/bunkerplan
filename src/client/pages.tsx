@@ -84,7 +84,14 @@ export function LandingPage({ path, origin }: LandingProps) {
  */
 export function DashboardPage({ path }: DashboardProps) {
   const { data: session, error, isPending } = useSession();
-  const handle = session?.user.name ?? null;
+  /*
+   * The whole user, not just the handle. `DangerZone` needs the id to pin
+   * which account a delete is for, and taking it here - at the one branch that
+   * has a resolved session - keeps that panel from reaching for the auth
+   * client during its own render, which is browser-only.
+   */
+  const user = session?.user ?? null;
+  const handle = user?.name ?? null;
 
   useEffect(() => {
     if (!isPending && error === null && handle === null) {
@@ -106,7 +113,7 @@ export function DashboardPage({ path }: DashboardProps) {
           )}
         </div>
       ) : (
-        <Dashboard handle={handle} />
+        <Dashboard handle={handle} userId={user?.id ?? ""} />
       )}
     </SiteFrame>
   );

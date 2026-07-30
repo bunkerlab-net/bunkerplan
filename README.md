@@ -101,6 +101,15 @@ a speed choice: Miniflare runs a workerd child process, and sharing a process
 with the AWS SDK intermittently wedges a concurrent S3 request that then never
 settles.
 
+That is also why the coverage figure from `bun run test` reads low. Bun
+instruments per worker and the merged report credits each file only with the
+lines its own worker executed, so a module exercised from several files is
+undercounted - `src/client/errors.ts` reports 44% of lines with every branch
+in it covered. `bun run test:coverage` runs the same suite in one process for
+an accurate number (99.5% of lines at the time of writing). It is a
+measurement, not the gate: it is the process-sharing arrangement the flag
+exists to avoid, so CI runs `bun run test`.
+
 ## Self-hosting
 
 See [docs/self-hosting.md](docs/self-hosting.md) for the environment contract,

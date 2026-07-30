@@ -53,6 +53,11 @@ export const shareButton = (view: Mounted, index: number): Element => {
  * credits each half only with the lines its own worker executed. One entry
  * point, one instrumentation map, one honest number - the suites stay separate
  * here for the same reason they always were.
+ *
+ * The registering file must have called `useHarness()` and `useApiStub()`
+ * first. These cases drive the panel through the armed api stub and mount onto
+ * the harness's DOM; registered from a file that armed neither, they would
+ * reach the real module and the real network.
  */
 export function registerSharingCases(): void {
   describe("the sharing editor", () => {
@@ -315,10 +320,10 @@ export function registerSharingCases(): void {
         pub.dispatchEvent(new Event("input", { bubbles: true }));
         await flush();
 
-        expect(radios(view).every((radio) => radio.disabled)).toBe(true);
+        expect(radios(view).every((node) => node.disabled)).toBe(true);
         change.release(sharing({ visibility: "public" }));
         await flush();
-        expect(radios(view).some((radio) => radio.disabled)).toBe(false);
+        expect(radios(view).some((node) => node.disabled)).toBe(false);
       });
     });
 

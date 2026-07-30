@@ -18,6 +18,8 @@ useHarness();
 useAuthStub();
 
 const HANDLE = "swift-otter-42";
+/** The account the panel is mounted for; `signedIn()` reports the same id. */
+const USER_ID = "u1";
 
 /**
  * The one control in the app that destroys data with no undo. Its whole
@@ -33,13 +35,13 @@ describe("DangerZone", () => {
   });
 
   test("names the handle that has to be typed", () => {
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     expect(view.find("code").textContent).toBe(HANDLE);
     expect(view.text()).toContain("It cannot be undone.");
   });
 
   test("the delete button is dead until the handle matches exactly", async () => {
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     const button = view.find<HTMLButtonElement>("button");
     expect(button.disabled).toBe(true);
 
@@ -58,7 +60,7 @@ describe("DangerZone", () => {
 
   test("a confirmed delete leaves for the home page and stays held", async () => {
     client.deleteUser = ok({ success: true });
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 
@@ -75,7 +77,7 @@ describe("DangerZone", () => {
       attempts += 1;
       return { data: { success: true }, error: null };
     };
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
 
     // Nothing typed, so the button is disabled - but a dispatched `click`
     // still runs the listener, because only user activation is suppressed.
@@ -105,7 +107,7 @@ describe("DangerZone", () => {
     });
 
     try {
-      const view = mount(<DangerZone handle={HANDLE} />);
+      const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
       await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
       await click(view.find("button"));
 
@@ -135,7 +137,7 @@ describe("DangerZone", () => {
 
   test("a refusal is shown and the visitor stays put", async () => {
     client.deleteUser = refuse("account has plans pending removal");
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 
@@ -155,7 +157,7 @@ describe("DangerZone", () => {
     };
     client.signIn.passkey = ok({ user: { id: "u1" } });
 
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 
@@ -180,7 +182,7 @@ describe("DangerZone", () => {
      */
     client.signIn.passkey = ok({ user: { id: "u2", name: "brisk-heron" } });
 
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 
@@ -201,7 +203,7 @@ describe("DangerZone", () => {
     };
     client.signIn.passkey = ok({ user: { id: "u2", name: "brisk-heron" } });
 
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
     expect(attempt).toBe(1);
@@ -228,7 +230,7 @@ describe("DangerZone", () => {
       attempt += 1;
       return { data: { success: true }, error: null };
     };
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
 
     /*
      * The store now reports a different account than the one frozen at mount.
@@ -257,7 +259,7 @@ describe("DangerZone", () => {
     };
     client.signIn.passkey = refuse("the ceremony was cancelled");
 
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 
@@ -271,7 +273,7 @@ describe("DangerZone", () => {
       data: null,
       error: { message: "   " },
     });
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 
@@ -292,7 +294,7 @@ describe("DangerZone", () => {
       error: { message: "" },
     });
 
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 
@@ -301,7 +303,7 @@ describe("DangerZone", () => {
 
   test("the button is released again after a refusal, so it can be retried", async () => {
     client.deleteUser = refuse("try again");
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 
@@ -310,7 +312,7 @@ describe("DangerZone", () => {
 
   test("a retry clears the previous refusal rather than leaving it up", async () => {
     client.deleteUser = refuse("account has plans pending removal");
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
     expect(view.find(".error").textContent).toBe(
@@ -332,7 +334,7 @@ describe("DangerZone", () => {
       attempts += 1;
       return { data: null, error: null };
     };
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
 
     // Both dispatched before any re-render, which is the whole window: `busy`
@@ -352,7 +354,7 @@ describe("DangerZone", () => {
       attempts += 1;
       return { data: null, error: { message: "not fresh enough" } };
     };
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
 
     // A refusal returns out of the `try` without reaching the `catch`, so a
@@ -366,7 +368,7 @@ describe("DangerZone", () => {
 
   test("a thrown failure is not swallowed into a stuck button", async () => {
     client.deleteUser = explode("network down");
-    const view = mount(<DangerZone handle={HANDLE} />);
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.find("button"));
 

@@ -5,9 +5,11 @@ import { PlansPanel } from "./PlansPanel.tsx";
 
 interface DashboardProps {
   handle: string;
+  /** Pinned by `DangerZone`: which account a delete is allowed to remove. */
+  userId: string;
 }
 
-export function Dashboard({ handle }: DashboardProps) {
+export function Dashboard({ handle, userId }: DashboardProps) {
   return (
     <div className="shell">
       <div className="hero">
@@ -28,7 +30,7 @@ export function Dashboard({ handle }: DashboardProps) {
         <PlansPanel />
         <ApiKeysPanel />
         <PasskeysPanel />
-        <DangerZone handle={handle} />
+        <DangerZone handle={handle} userId={userId} />
       </div>
     </div>
   );

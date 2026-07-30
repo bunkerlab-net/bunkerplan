@@ -5,6 +5,13 @@ import { messageOf } from "./errors.ts";
 
 interface DangerZoneProps {
   handle: string;
+  /**
+   * The account this panel may delete, resolved by the caller.
+   *
+   * A prop rather than a read of the auth client, because that client is
+   * browser-only and this would otherwise reach for it during render.
+   */
+  userId: string;
 }
 
 /**
@@ -95,7 +102,10 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
  * other - the panel renders a typed confirmation, and this owns whether the
  * account still exists.
  */
-function useAccountDeletion(confirmed: boolean): {
+function useAccountDeletion(
+  confirmed: boolean,
+  userId: string,
+): {
   error: string | null;
   busy: boolean;
   onDelete: () => Promise<void>;
@@ -119,16 +129,16 @@ function useAccountDeletion(confirmed: boolean): {
    */
   const inFlight = useRef(false);
   /**
-   * The account this panel was mounted for, frozen at that moment.
+   * The account this panel was mounted for.
    *
-   * `useRef`'s initial value is kept from the first render and never replaced,
-   * which is the point: not the `handle` prop and not a fresh read per
-   * attempt, because both track the live session that a passkey ceremony can
-   * swap for another account's. A comparison against something that moves with
-   * the session is no comparison at all. Null stays null, and `deleteAccount`
-   * treats that as reason to refuse rather than to proceed.
+   * `useRef` keeps the first render's value, so a re-render carrying a
+   * different `userId` cannot quietly redefine what "intended" means. That is
+   * defence in depth rather than the load-bearing guard: a swapped session
+   * changes the `handle` prop too, and the typed confirmation stops the button
+   * on its own. The checks that do the work are in `deleteAccount` - the live
+   * session before the first call, and the ceremony's own answer after it.
    */
-  const intended = useRef(currentUserId());
+  const intended = useRef(userId);
 
   const onDelete = async () => {
     /*
@@ -186,9 +196,12 @@ function useAccountDeletion(confirmed: boolean): {
   return { error, busy, onDelete };
 }
 
-export function DangerZone({ handle }: DangerZoneProps) {
+export function DangerZone({ handle, userId }: DangerZoneProps) {
   const [typed, setTyped] = useState("");
-  const { error, busy, onDelete } = useAccountDeletion(typed === handle);
+  const { error, busy, onDelete } = useAccountDeletion(
+    typed === handle,
+    userId,
+  );
   return (
     /*
      * The palette has no danger colour and forbids inventing one, so gravity

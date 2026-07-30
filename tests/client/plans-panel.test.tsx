@@ -63,6 +63,23 @@ function fileDrag(
 }
 
 /**
+ * A node outside the panel, removed even when the assertion throws.
+ *
+ * Left behind, it keeps receiving the window-level drag handlers this panel
+ * installs, so a failure here would surface again as an unrelated one in a
+ * later test.
+ */
+function outside(body: (node: HTMLElement) => void): void {
+  const elsewhere = document.createElement("div");
+  document.body.appendChild(elsewhere);
+  try {
+    body(elsewhere);
+  } finally {
+    elsewhere.remove();
+  }
+}
+
+/**
  * Every `value` a handler assigns to `node`.
  *
  * happy-dom refuses a non-empty write to a file input, the way the platform
@@ -372,23 +389,6 @@ describe("PlansPanel drop zone", () => {
     upload.release(plan());
     await flush();
   });
-
-  /**
-   * A node outside the panel, removed even when the assertion throws.
-   *
-   * Left behind, it keeps receiving the window-level drag handlers this panel
-   * installs, so a failure here would surface again as an unrelated one in a
-   * later test.
-   */
-  const outside = (body: (node: HTMLElement) => void): void => {
-    const elsewhere = document.createElement("div");
-    document.body.appendChild(elsewhere);
-    try {
-      body(elsewhere);
-    } finally {
-      elsewhere.remove();
-    }
-  };
 
   test("a file dropped anywhere else is swallowed, not navigated to", async () => {
     await mountAsync(<PlansPanel />);
@@ -845,15 +845,14 @@ describe("PlansPanel sharing expansion", () => {
     const view = await mountAsync(<Toggle />);
     await click(view.find("#hide"));
 
-    const elsewhere = document.createElement("div");
-    document.body.appendChild(elsewhere);
-    const event = fileDrag("drop", [htmlFile()]);
-    elsewhere.dispatchEvent(event);
+    outside((elsewhere) => {
+      const event = fileDrag("drop", [htmlFile()]);
+      elsewhere.dispatchEvent(event);
 
-    // Still listening after unmount would keep swallowing drops for a panel
-    // that is no longer on the page.
-    expect(event.defaultPrevented).toBe(false);
-    elsewhere.remove();
+      // Still listening after unmount would keep swallowing drops for a panel
+      // that is no longer on the page.
+      expect(event.defaultPrevented).toBe(false);
+    });
   });
 });
 
