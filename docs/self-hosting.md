@@ -231,8 +231,11 @@ DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
   Workers.
 - **Account deletion is immediate and irreversible.** There is no email
   confirmation because addresses are synthetic (`…@passkey.invalid`) and cannot
-  receive mail. The safeguards are Better Auth's fresh-session requirement
-  (re-prompting for the passkey) and a type-the-handle confirmation in the UI.
+  receive mail. Three safeguards stand in: Better Auth's fresh-session
+  requirement (re-prompting for the passkey), a type-the-handle confirmation in
+  the UI, and the `x-expected-account` header, which the request must carry and
+  the server compares against the session that made it - see API below, and
+  expect a script that omits it to be refused.
 
 ## API
 

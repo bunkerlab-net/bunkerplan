@@ -44,11 +44,21 @@ function pageProps(markup: string): unknown {
   return JSON.parse(match[1]);
 }
 
+/**
+ * The `content` of the `<meta>` carrying `key`, or null if there is none.
+ *
+ * The tag is found first and its `content` read second, rather than matching
+ * one fixed attribute order: the renderer is free to emit `content` before
+ * `name`, and a pattern that assumed otherwise would return null for a tag
+ * that is present - turning every negative assertion below into one that
+ * passes for the wrong reason.
+ */
 const metaOf = (markup: string, key: string): string | null => {
-  const match = new RegExp(
-    `<meta (?:name|property)="${key}" content="([^"]*)"`,
+  const tag = new RegExp(
+    `<meta\\b[^>]*\\b(?:name|property)="${key}"[^>]*>`,
   ).exec(markup);
-  return match?.[1] ?? null;
+  if (tag === null) return null;
+  return /\bcontent="([^"]*)"/.exec(tag[0])?.[1] ?? null;
 };
 
 describe("every page", () => {

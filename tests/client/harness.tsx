@@ -1,7 +1,7 @@
 import "./dom-env.ts";
 import { afterEach, beforeEach } from "bun:test";
-import { type Child, jsx, useState } from "hono/jsx";
-import { render } from "hono/jsx/dom";
+import type { Child } from "hono/jsx";
+import { createRoot } from "hono/jsx/dom/client";
 
 /**
  * Mounting and driving `hono/jsx` components on a real DOM.
@@ -15,7 +15,7 @@ import { render } from "hono/jsx/dom";
 
 interface Entry {
   host: HTMLElement;
-  hide: () => void;
+  unmount: () => void;
 }
 
 const mounted: Entry[] = [];
@@ -49,13 +49,6 @@ let registered = false;
  *
  * Register this before any stub arming, so trees come down while their stubs
  * are still standing in.
- *
- * TEARDOWN: rendering a tree away removes its DOM but does not run the
- * subtree's `useEffect` cleanups, so a mounted component's effects outlive its
- * test. Six shapes were measured and none changed it, including the two that
- * look obvious - taking a render factory so the element is built inside the
- * root, and driving the removal through a dispatched click. A suite whose
- * stubs can notice resets them itself; auth-module.test.tsx does.
  */
 export function useHarness(): void {
   beforeEach(() => {
@@ -64,11 +57,18 @@ export function useHarness(): void {
   afterEach(async () => {
     try {
       const entries = mounted.splice(0);
-      // `hono/jsx/dom` has no imperative unmount and dropping the host element
-      // runs no effect teardown, so each tree is rendered away through its own
-      // parent's state - which is what runs the cleanups.
-      for (const entry of entries) entry.hide();
-      if (entries.length > 0) await flush();
+      if (entries.length > 0) {
+        // Flushed before the unmount as well as after: a test that mounted and
+        // asserted without ever flushing leaves its first effects queued, and
+        // those would otherwise run *after* the tree came down - subscribing to
+        // something with no cleanup left to cancel it.
+        await flush();
+        for (const entry of entries) entry.unmount();
+        // `root.unmount()` is what runs the subtree's effect cleanups.
+        // Dropping the host element does not, and neither does rendering the
+        // tree away through a parent's own state - measured, both.
+        await flush();
+      }
       for (const entry of entries) entry.host.remove();
     } finally {
       registered = false;
@@ -129,20 +129,15 @@ export function mount(node: Child): Mounted {
   const host = document.createElement("div");
   document.body.appendChild(host);
 
-  // The root exists only so the teardown has something to render the component
-  // away with; it adds no element of its own. That removes the DOM but not the
-  // subtree's effect cleanups - see TEARDOWN below.
-  let hide = (): void => {};
-  // Returns `Child` rather than an element, which JSX cannot type - the point
-  // is to render whatever it was handed, including a bare string.
-  const Root = (): unknown => {
-    const [shown, setShown] = useState(true);
-    hide = () => setShown(false);
-    return shown ? node : null;
-  };
-
-  mounted.push({ host, hide: () => hide() });
-  render(jsx(Root as never, {}) as never, host);
+  /*
+   * Hono's own root, not a hand-rolled one. `root.unmount()` is the only thing
+   * measured to run the subtree's `useEffect` cleanups: dropping the host
+   * element does not, and neither does rendering the tree away through a
+   * parent's state, however that removal is staged.
+   */
+  const root = createRoot(host);
+  root.render(node as never);
+  mounted.push({ host, unmount: () => root.unmount() });
 
   const all = (selector: string): HTMLElement[] => [
     ...host.querySelectorAll<HTMLElement>(selector),

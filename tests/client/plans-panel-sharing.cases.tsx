@@ -706,6 +706,10 @@ export function registerSharingCases(): void {
         field(view).value = "brisk-heron";
         field(view).dispatchEvent(new Event("input", { bubbles: true }));
         await flush();
+        // The planted value survived the render, so what refuses below is the
+        // public-visibility guard - not an empty field, which the case above
+        // already covers and which would pass this without it.
+        expect(field(view).value).toBe("brisk-heron");
 
         await press(view);
 

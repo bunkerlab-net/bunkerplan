@@ -1,5 +1,5 @@
 import "./dom-env.ts";
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as realApiKey from "@better-auth/api-key/client";
 import * as realPasskey from "@better-auth/passkey/client";
 import * as realClient from "better-auth/client";
@@ -107,23 +107,24 @@ useHarness();
 armWhileFileRuns(arm, () => {});
 
 /*
- * The clear is load-bearing, and not a way of hiding leaks.
+ * The check sits in `beforeEach`, not `afterEach`: Bun runs `afterEach` hooks
+ * in reverse registration order, so this one would run before the harness's
+ * teardown and read a tree that is still mounted. Here the previous test's
+ * teardown has finished.
  *
- * Measured, both ways: asserting `subscribers.size === 0` in an `afterEach`
- * fails four cases, and moving it to the next `beforeEach` - after the
- * harness's own teardown - fails the same ones. The harness renders each tree
- * away, and that removes the DOM without running the subtree's effect
- * cleanups; see the note in harness.tsx, which records what was tried. So a
- * subscription outliving the teardown is the harness's limit rather than this
- * module's bug, and asserting here would pin that instead.
- *
- * Where the unsubscribe can be seen is the case built for it: "unsubscribes
- * when the subscriber leaves the tree" removes a child from a tree that stays
- * mounted, which does run the cleanup, and watches the delivery count.
+ * And there is no `subscribers.clear()`. The harness unmounts through hono's
+ * own root, which runs each subtree's effect cleanups, so a subscription still
+ * in the set is one that leaked - and clearing would tidy it away before the
+ * next test could see it.
  */
-afterEach(() => {
+beforeEach(() => {
+  expect(subscribers.size).toBe(0);
   value = UNRESOLVED;
-  subscribers.clear();
+});
+
+afterAll(() => {
+  // The last test has no `beforeEach` after it to check its own cleanup.
+  expect(subscribers.size).toBe(0);
 });
 
 describe("authClient", () => {

@@ -173,8 +173,26 @@ export function memoryPlans(
    * fixture a test built, or a constant two tests share. A seed is an input, and
    * an input a callee rewrites is a fake teaching the wrong lesson.
    */
+  /*
+   * The state the database will not hold: `setVisibility` nulls the hash on
+   * the way out of private and `setShareCodeHash` only writes to a private
+   * row, so no SQL path produces a public plan with a code. A row that did
+   * would let a test assert against a plan production cannot make, which is
+   * the one thing a fake must never allow - so both writers check, the seed
+   * and the insert alike.
+   */
+  const legal = <
+    T extends { visibility: PlanVisibility; shareCodeHash: string | null },
+  >(
+    row: T,
+  ): T => {
+    if (row.visibility === "public" && row.shareCodeHash !== null) {
+      throw new Error("a public plan cannot carry a share code");
+    }
+    return row;
+  };
   const rows = new Map(
-    seed.map((row) => [row.id, { ...row, grants: [...row.grants] }]),
+    seed.map((row) => [row.id, legal({ ...row, grants: [...row.grants] })]),
   );
   const owned = (id: string, userId: string): StoredPlan | undefined => {
     const row = rows.get(id);
@@ -194,16 +212,7 @@ export function memoryPlans(
      */
     insert: async (row, maxPlans): Promise<PlanInsert> => {
       if (rows.has(row.id)) return "duplicate";
-      /*
-       * The state the database will not hold: `setVisibility` nulls the hash
-       * on the way out of private and `setShareCodeHash` only writes to a
-       * private row, so no SQL path produces a public plan with a code. A seed
-       * that did would let a test assert against a plan production cannot
-       * make - which is the one thing a fake must never allow.
-       */
-      if (row.visibility === "public" && row.shareCodeHash !== null) {
-        throw new Error("a public plan cannot carry a share code");
-      }
+      legal(row);
       const held = [...rows.values()].filter(
         (item) => item.userId === row.userId,
       ).length;
