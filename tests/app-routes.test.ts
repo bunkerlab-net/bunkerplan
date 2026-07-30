@@ -736,6 +736,44 @@ describe("redeeming a code", () => {
     expect(consumed).toBe(0);
   });
 
+  test("an unlock that throws gives its count back", async () => {
+    /*
+     * The budget rations guessing, and a route that fell over told nobody
+     * whether the code was right. Keeping the count would let a reader whose
+     * request hit a broken deployment spend their way to a lockout without
+     * ever having guessed once.
+     */
+    const refunded: Array<[string, number]> = [];
+    const app = await gated({
+      plans: {
+        ...memoryPlans(),
+        findAccess: async () => {
+          throw new Error("the database is unreachable");
+        },
+      },
+      unlockRateLimits: {
+        consume: async () => ({
+          allowed: true,
+          retryAfter: 0,
+          windowStart: WINDOW_START,
+        }),
+        refund: async (key, windowStart) => {
+          refunded.push([key, windowStart]);
+        },
+      },
+    });
+
+    const response = await app.fetch(
+      `/api/plans/${PLAN_ID}/unlock`,
+      unlockInit(CODE),
+    );
+
+    expect(response.status).toBe(500);
+    // To the window that charged it, which is the only window it may go back
+    // to - see the note on `windowStart` in src/services/types.ts.
+    expect(refunded).toEqual([[refunded[0]?.[0] ?? "", WINDOW_START]]);
+  });
+
   test("the bucket is keyed on the address, never on the plan", async () => {
     const keys: string[] = [];
     const plans = memoryPlans([

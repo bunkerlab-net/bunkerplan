@@ -424,9 +424,12 @@ describe("a plan that is not there", () => {
       },
     });
 
-    await app.fetch(`/p/${PLAN_ID}`);
+    const response = await app.fetch(`/p/${PLAN_ID}`);
 
-    // An unauthorised visitor costs one row read and never an object read.
+    // An unauthorised visitor costs one row read and never an object read -
+    // and the status is what says the refusal is why. A route that 500'd
+    // before reaching storage would read zero objects too.
+    expect(response.status).toBe(401);
     expect(reads).toBe(0);
   });
 });

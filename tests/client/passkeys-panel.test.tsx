@@ -57,6 +57,12 @@ const rowButton = (view: Mounted, index: number): Element => {
   return button;
 };
 
+/*
+ * Not redundant with `useAuthStub`. That resets every method to a throwing
+ * stub, in a `beforeEach` registered above this one, so this runs after it and
+ * supplies the default the listing cases assume: a panel whose account has no
+ * passkeys. A test wanting anything else overrides it.
+ */
 beforeEach(() => {
   client.passkey.listUserPasskeys = ok([]);
 });

@@ -1,5 +1,8 @@
 import { useRef, useState } from "hono/jsx";
-import { EXPECTED_ACCOUNT_HEADER } from "../http/expected-account.ts";
+import {
+  EXPECTED_ACCOUNT_HEADER,
+  WRONG_ACCOUNT_CODE,
+} from "../http/expected-account.ts";
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
 import { messageOf } from "./errors.ts";
@@ -136,7 +139,7 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
      * this request. Terminal for the same reason that check's mismatch is -
      * this client is holding somebody else, and pressing again cannot help.
      */
-    if (result.error.code === "WRONG_ACCOUNT") {
+    if (result.error.code === WRONG_ACCOUNT_CODE) {
       return { kind: "blocked", message: WRONG_ACCOUNT };
     }
     return {

@@ -77,7 +77,10 @@ function useKeyList() {
     try {
       const result = await authClient().apiKey.list();
       if (result.error) {
-        setError(result.error.message ?? "could not list API keys");
+        // `messageOf`, as everywhere else here: a whitespace-only message
+        // renders a blank error line, and it also suppresses the empty state -
+        // so the panel would show nothing at all where a reason belongs.
+        setError(messageOf(result.error, "could not list API keys"));
         return;
       }
       setError(null);

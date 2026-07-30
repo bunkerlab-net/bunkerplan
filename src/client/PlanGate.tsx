@@ -42,8 +42,10 @@ const NO_SPELLCHECK: Record<string, string> = { spellcheck: "false" };
  * the app builds `/s/{id}?code=`, and teaching this to redeem one would widen
  * where a code is accepted for a link the app never hands out.
  */
+const CODE_FRAGMENT = /^#code=(.+)$/;
+
 function codeInFragment(hash: string): string | null {
-  const match = /^#code=(.+)$/.exec(hash);
+  const match = CODE_FRAGMENT.exec(hash);
   if (match === null) return null;
   try {
     const code = decodeURIComponent(match[1] ?? "");
@@ -110,13 +112,21 @@ function useLinkCode(
   redeem: (code: string) => void,
 ): void {
   useEffect(() => {
-    const fromLink = codeInFragment(window.location.hash);
+    const hash = window.location.hash;
+    const fromLink = codeInFragment(hash);
 
     if (fromLink !== null) onCode(fromLink);
 
-    // Whichever route brought it. A `?code=` arrival never reaches the box -
-    // the server already spent it - but it is still in the bar to be taken out.
-    const cleaned = scrubbed(fromLink !== null);
+    /*
+     * Whichever route brought it. A `?code=` arrival never reaches the box -
+     * the server already spent it - but it is still in the bar to be taken out.
+     *
+     * Keyed on the fragment matching `#code=`, not on the code decoding: a
+     * malformed escape is nothing anyone can spend, and it is still something
+     * the reader was handed. Leaving it in the bar and this browser's history
+     * is the surface the fragment was chosen to avoid.
+     */
+    const cleaned = scrubbed(CODE_FRAGMENT.test(hash));
     if (cleaned !== null) window.history.replaceState(null, "", cleaned);
 
     /*

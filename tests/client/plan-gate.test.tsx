@@ -609,6 +609,10 @@ describe("a link that brought its own code", () => {
     expect(countOf("unlockPlan")).toBe(0);
     expect(view.maybe('[role="alert"]')).toBeNull();
     expect(codeBox(view).value).toBe("");
+    // Still taken out of the bar. Nobody can spend it, but the reader was
+    // handed it, and a fragment left in this browser's history is the surface
+    // the fragment form exists to avoid.
+    expect(window.location.hash).toBe("");
   });
 });
 

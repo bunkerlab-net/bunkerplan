@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { buildAuthOptions } from "../src/auth/options.ts";
-import { EXPECTED_ACCOUNT_HEADER } from "../src/http/expected-account.ts";
+import {
+  EXPECTED_ACCOUNT_HEADER,
+  WRONG_ACCOUNT_CODE,
+} from "../src/http/expected-account.ts";
 import type { Logger } from "../src/log.ts";
 import { BASE } from "./auth-fixture.ts";
 
@@ -113,6 +116,10 @@ describe("logging", () => {
    * The claim below is that a Better Auth line reaches the app logger *instead
    * of* console, and only half of that is visible in the app logger's own
    * capture: a bridge that wrote to both would satisfy it.
+   *
+   * The swap spans one synchronous `body()` and is undone in a `finally`, so
+   * nothing else in the process can run inside the window - which is what
+   * keeps a shared global safe to borrow here.
    */
   const consoleCallsDuring = (body: () => void): unknown[][] => {
     const names = ["log", "info", "warn", "error", "debug"] as const;
@@ -264,10 +271,11 @@ describe("deleting an account", () => {
   test("a request that names no account is refused rather than assumed", async () => {
     // Failing closed: a caller that skipped the header has not said which
     // account it means, and defaulting to the session is the guess this
-    // exists to prevent.
+    // exists to prevent. The same code as a mismatch, because the client does
+    // the same thing with either - stops.
     await expect(
       options.user.deleteUser.beforeDelete?.({ id: "user-a" }, asking(null)),
-    ).rejects.toThrow(EXPECTED_ACCOUNT_HEADER);
+    ).rejects.toMatchObject({ body: { code: WRONG_ACCOUNT_CODE } });
   });
 
   test("a call with no request at all is refused too", async () => {
@@ -276,6 +284,6 @@ describe("deleting an account", () => {
     // something it never saw.
     await expect(
       options.user.deleteUser.beforeDelete?.({ id: "user-a" }),
-    ).rejects.toThrow(EXPECTED_ACCOUNT_HEADER);
+    ).rejects.toMatchObject({ body: { code: WRONG_ACCOUNT_CODE } });
   });
 });

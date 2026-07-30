@@ -19,3 +19,14 @@
  * nobody named. A script deleting its own account says which one that is.
  */
 export const EXPECTED_ACCOUNT_HEADER = "x-expected-account";
+
+/**
+ * The code both refusals carry: a header naming another account, and no header
+ * at all.
+ *
+ * One code for both because the client does one thing with either - stops, and
+ * says the page is holding somebody else. Named here rather than spelled at
+ * the throw and again at the read, since a rename that missed one would turn a
+ * blocked delete back into a retryable one silently.
+ */
+export const WRONG_ACCOUNT_CODE = "WRONG_ACCOUNT";

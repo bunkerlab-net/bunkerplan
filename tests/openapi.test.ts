@@ -57,7 +57,10 @@ const UNDOCUMENTED: Record<string, true> = {
    * because a share code rides in a fragment and `/p/{id}` answers an
    * authorised reader with untrusted HTML that could read its own
    * `location.hash`. What a client needs is how to compose the link, and that
-   * is described on both endpoints that hand a code out.
+   * is described on both endpoints that hand a code out. Documenting the page
+   * itself would put a browser route in a document whose every other entry is
+   * something a client calls - `/dashboard` is left out for the same reason,
+   * and `/p/{id}` is in because a client can fetch a plan.
    *
    * Those two are `PUT /api/plans` with `?visibility=code` - the upload, at
    * `app.put("/api/plans")` in src/app.ts, with the intent declared as

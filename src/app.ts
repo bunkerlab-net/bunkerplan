@@ -204,23 +204,38 @@ function registerPlanUnlock(app: Hono, getServices: GetServices): void {
     );
     if ("refused" in reservation) return reservation.refused;
 
-    const response = await unlockPlan(
-      db.plans,
-      config,
-      c.req.raw,
-      c.req.param("id"),
-    );
-    if (response.ok) {
-      // A redemption was never the thing being rationed, so it gives its count
-      // back. Swallowed on failure: the reader has their cookie, and losing a
-      // refund only leaves the budget one lower than it should be - which errs
-      // towards refusing rather than towards letting a guesser through.
+    /*
+     * A redemption was never the thing being rationed, so a count that did not
+     * buy a guess goes back. Both endings qualify: a `200`, and a throw - the
+     * budget rations guessing, and a route that fell over told nobody whether
+     * the code was right. A refusal keeps its count, because that is a guess.
+     *
+     * Swallowed on failure, and only on the refund: the reader has their
+     * cookie, or their 500, and losing a refund leaves the budget one lower
+     * than it should be - which errs towards refusing rather than towards
+     * letting a guesser through.
+     */
+    const refund = async () => {
       try {
         await refundUnlockAttempt(db.unlockRateLimits, reservation);
       } catch (cause) {
         logger.warn({ err: cause }, "unlock reservation was not refunded");
       }
+    };
+
+    let response: Response;
+    try {
+      response = await unlockPlan(
+        db.plans,
+        config,
+        c.req.raw,
+        c.req.param("id"),
+      );
+    } catch (cause) {
+      await refund();
+      throw cause;
     }
+    if (response.ok) await refund();
     return response;
   });
 }

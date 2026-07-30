@@ -4,7 +4,10 @@ import { APIError } from "@better-auth/core/error";
 import { passkey } from "@better-auth/passkey";
 import type { BetterAuthOptions } from "better-auth";
 import { setSessionCookie } from "better-auth/cookies";
-import { EXPECTED_ACCOUNT_HEADER } from "../http/expected-account.ts";
+import {
+  EXPECTED_ACCOUNT_HEADER,
+  WRONG_ACCOUNT_CODE,
+} from "../http/expected-account.ts";
 import { handleEmail, newUserHandle } from "../ids.ts";
 import type { Logger } from "../log.ts";
 
@@ -245,7 +248,7 @@ export function buildAuthOptions(input: AuthOptionsInput) {
           const expected = request?.headers.get(EXPECTED_ACCOUNT_HEADER);
           if (expected !== user.id) {
             throw new APIError("BAD_REQUEST", {
-              code: "WRONG_ACCOUNT",
+              code: WRONG_ACCOUNT_CODE,
               message:
                 expected == null
                   ? `deleting an account requires the ${EXPECTED_ACCOUNT_HEADER} header`

@@ -396,7 +396,10 @@ describe("the health probe", () => {
     async (check) => {
       let seen: AbortSignal | undefined;
       const { services } = probed({
-        [check]: backend((signal?: AbortSignal) => {
+        // Typed by the key rather than left to infer: a computed key gives
+        // `backend` no contextual type, so `T` lands on `unknown` and the
+        // stub would satisfy `Partial<Probed>` whatever shape it had.
+        [check]: backend<Probed[typeof check]>((signal?: AbortSignal) => {
           seen = signal;
           return new Promise<void>(() => {});
         }),
@@ -450,7 +453,14 @@ describe("the health probe", () => {
     });
 
     const stray: unknown[] = [];
-    const watch = (reason: unknown) => stray.push(reason);
+    // Only the rejection this test provokes. The listener is process-wide, so
+    // anything else running in the same isolate would otherwise land in the
+    // assertion below and fail a claim it has nothing to do with.
+    const watch = (reason: unknown) => {
+      if (String(reason).includes("connection reset by peer")) {
+        stray.push(reason);
+      }
+    };
     process.on("unhandledRejection", watch);
     // Declared before the `try` rather than assigned in one `const`: the
     // listener is a process-wide global, so every path out of here - including

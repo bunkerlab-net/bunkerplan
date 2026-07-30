@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { BetterAuthPluginDBSchema } from "@better-auth/core/db";
-import { createTableRelationsHelpers, getTableName } from "drizzle-orm";
+import {
+  createTableRelationsHelpers,
+  getTableName,
+  type Table,
+} from "drizzle-orm";
 import { getTableConfig as pgTableConfig } from "drizzle-orm/pg-core";
 import { getTableConfig as sqliteTableConfig } from "drizzle-orm/sqlite-core";
 import { buildAuthOptions } from "../src/auth/options.ts";
@@ -120,23 +124,57 @@ const generated = [["pg"], ["sqlite"]] as const satisfies ReadonlyArray<
 >;
 
 /**
- * The table a dialect calls `name`, and its config, in one place.
+ * The parts of a dialect's table config that these tests read.
  *
  * The pair is what needs resolving together: the schema module and the
  * `getTableConfig` that can read it come from the same dialect, and picking one
  * without the other is how a `pg` table reaches the SQLite reader.
+ *
+ * Projected to two fields rather than returned as the union of both configs.
+ * The two are structurally different, so a caller reaching for anything else
+ * would need a cast to compile - and the cast, not the difference, is what
+ * would decide whether it worked. Adding a field here is a deliberate act with
+ * a type error on each side if the dialects disagree about it.
  */
-function tableOf(dialect: Dialect, name: string) {
-  const schema = dialect === "pg" ? pgSchema : sqliteSchema;
-  const table = schema[name as "session"];
-  if (table === undefined) {
+interface TableShape {
+  columns: ReadonlyArray<{ name: string; isUnique: boolean }>;
+  foreignKeys: ReadonlyArray<{
+    reference: () => {
+      columns: ReadonlyArray<{ name: string }>;
+      foreignColumns: ReadonlyArray<{ name: string; table: Table }>;
+    };
+    onDelete: string | undefined;
+  }>;
+}
+
+/*
+ * Copied out of the namespaces once. Indexing a module namespace by a computed
+ * name defeats tree shaking, and biome says so - these are plain objects, and
+ * the lookup below is the same one it always was.
+ */
+const pgTables = { ...pgSchema };
+const sqliteTables = { ...sqliteSchema };
+
+function tableOf(dialect: Dialect, name: string): TableShape {
+  /*
+   * Two branches rather than one ternary. The schema and its reader have to be
+   * picked together, and TypeScript cannot correlate them across a shared
+   * `table` binding - so a single path needs a cast, and the cast is what
+   * decides whether it works rather than the types.
+   */
+  const missing = () => new Error(`no ${dialect} auth table named "${name}"`);
+  if (dialect === "pg") {
+    const table = pgTables[name as "session"];
     // A table renamed by `auth generate` would otherwise reach the dialect
     // config as `undefined` and fail somewhere inside Drizzle, naming nothing.
-    throw new Error(`no ${dialect} auth table named "${name}"`);
+    if (table === undefined) throw missing();
+    const config = pgTableConfig(table);
+    return { columns: config.columns, foreignKeys: config.foreignKeys };
   }
-  return dialect === "pg"
-    ? pgTableConfig(table as never)
-    : sqliteTableConfig(table as never);
+  const table = sqliteTables[name as "session"];
+  if (table === undefined) throw missing();
+  const config = sqliteTableConfig(table);
+  return { columns: config.columns, foreignKeys: config.foreignKeys };
 }
 
 /**

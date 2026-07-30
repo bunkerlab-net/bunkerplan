@@ -152,7 +152,11 @@ describe("DangerZone", () => {
      * otherwise retarget the delete, and `deleteAccount` compares against
      * whatever the ref holds.
      */
-    client.deleteUser = ok({ success: true });
+    let options: unknown;
+    client.deleteUser = async (_body: unknown, opts: unknown) => {
+      options = opts;
+      return { data: { success: true }, error: null };
+    };
 
     function Swapping() {
       const [userId, setUserId] = useState<string | null>(USER_ID);
@@ -179,6 +183,10 @@ describe("DangerZone", () => {
     await click(view.byText("button", "Delete account"));
 
     expect(navigations).toEqual(["/"]);
+    // And it named the latched account, not the swapped-in one. The navigation
+    // alone would pass if the request had asked to delete `u2` and the server
+    // had happened to agree.
+    expect(options).toEqual({ headers: { "x-expected-account": USER_ID } });
   });
 
   test("the delete button is dead until the handle matches exactly", async () => {

@@ -241,13 +241,17 @@ describe("ApiKeysPanel creating", () => {
       ? []
       : [[String(index), choice.seconds, choice.label] as const],
   );
-  // A configuration where every choice is `null` would register no cases at
-  // all, and a suite that runs nothing reports the same green as one that
-  // proved something.
-  expect(expiries.length).toBeGreaterThan(0);
+
+  test("the panel offers at least one expiry to choose", () => {
+    // A named case rather than a bare assertion at module scope: a
+    // configuration where every choice is `null` would register no cases below
+    // at all, and a suite that runs nothing reports the same green as one that
+    // proved something. Failing here says which.
+    expect(expiries.length).toBeGreaterThan(0);
+  });
 
   test.each(expiries)(
-    "expiry choice %s (%i seconds) sends what its label says",
+    "expiry choice %s sends %i seconds, the option labelled %s",
     async (index, seconds) => {
       const created = recordCreate();
       const view = await mountAsync(<ApiKeysPanel />);
