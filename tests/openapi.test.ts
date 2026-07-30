@@ -57,8 +57,14 @@ const UNDOCUMENTED: Record<string, true> = {
    * because a share code rides in a fragment and `/p/{id}` answers an
    * authorised reader with untrusted HTML that could read its own
    * `location.hash`. What a client needs is how to compose the link, and that
-   * is described on both endpoints that hand a code out - `PUT /api/plans` with
-   * `?visibility=code`, and `POST /api/plans/{id}/share-code`.
+   * is described on both endpoints that hand a code out.
+   *
+   * Those two are `PUT /api/plans` with `?visibility=code` - the upload, at
+   * `app.put("/api/plans")` in src/app.ts, with the intent declared as
+   * `UploadVisibility` in src/http/plan-visibility.ts - and
+   * `POST /api/plans/{id}/share-code`. Neither is `POST /api/plans`, which
+   * does not exist, and `PUT /api/plans/{id}/sharing` mints no code: its body
+   * takes `public` or `private` and has no `"code"` intent at all.
    */
   "/s/{id}": true,
 };

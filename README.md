@@ -33,7 +33,7 @@ bun run dev
 | `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it   |
-| `bun run test`                         | Builds, then the whole suite, with coverage. Partial by default: the container-backed suites run only when their `TEST_*` variables are set - see Tests |
+| `bun run test`                         | Builds, then runs the whole suite with coverage. Partial by default: the container-backed suites run only when their `TEST_*` variables are set - see Tests |
 | `bun run test:backends`                | Starts Postgres, Valkey, and MinIO on localhost; set the `TEST_*` variables to reach them               |
 | `bun run check`                        | Biome lint and format                                                                                   |
 | `bun run typecheck`                    | Builds, then `tsc --noEmit`                                                                             |

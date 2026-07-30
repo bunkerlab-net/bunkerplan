@@ -195,7 +195,7 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
             : JSON.stringify(column.default)
           : "-",
       }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+      .sort(byRecord),
     primaryKey: [...composite, ...inline],
     indexes: config.indexes
       .map((index) => ({

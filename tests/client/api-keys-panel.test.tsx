@@ -241,6 +241,10 @@ describe("ApiKeysPanel creating", () => {
       ? []
       : [[String(index), choice.seconds, choice.label] as const],
   );
+  // A configuration where every choice is `null` would register no cases at
+  // all, and a suite that runs nothing reports the same green as one that
+  // proved something.
+  expect(expiries.length).toBeGreaterThan(0);
 
   test.each(expiries)(
     "expiry choice %s (%i seconds) sends what its label says",

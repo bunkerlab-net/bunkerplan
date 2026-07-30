@@ -260,8 +260,10 @@ authenticated before anything is removed. A caller that omits the header is
 refused rather than defaulted to its own session: the check exists because a
 client cannot compare the two itself without leaving a window in which the
 session changes, and one a request can skip is one a client regression drops
-silently. The dashboard sends it; a script deleting its own account should
-send the id `/api/auth/get-session` hands back.
+silently. Both refusals - a missing header and one naming a different account
+than the session - answer `400` with the error code `WRONG_ACCOUNT`, and
+nothing is deleted in either case. The dashboard sends the header; a script
+deleting its own account should send the id `/api/auth/get-session` hands back.
 
 Two routes are deliberately unauthenticated, because they are how someone
 holding only a share code gets in: `GET /p/{id}?code=...` and

@@ -34,6 +34,14 @@ const NO_SPELLCHECK: Record<string, string> = { spellcheck: "false" };
  * Matched only in the exact shape the dashboard emits. An ordinary `#section`
  * is left alone rather than parsed as parameters, which would rewrite it.
  */
+/*
+ * The fragment only, with no fallback to `?code=`. On `/p/{id}` that query is
+ * the documented form for a client that can only fetch a URL, and it is
+ * scrubbed here rather than spent - see `scrubbed` below and SECURITY.md. On
+ * `/s/{id}` it is not a form at all: the dashboard emits `#code=`, nothing in
+ * the app builds `/s/{id}?code=`, and teaching this to redeem one would widen
+ * where a code is accepted for a link the app never hands out.
+ */
 function codeInFragment(hash: string): string | null {
   const match = /^#code=(.+)$/.exec(hash);
   if (match === null) return null;

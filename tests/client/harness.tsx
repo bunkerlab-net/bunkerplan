@@ -55,9 +55,9 @@ export function useHarness(): void {
     registered = true;
   });
   afterEach(async () => {
+    const entries = mounted.splice(0);
     const failures: unknown[] = [];
     try {
-      const entries = mounted.splice(0);
       if (entries.length > 0) {
         // Flushed before the unmount as well as after: a test that mounted and
         // asserted without ever flushing leaves its first effects queued, and
@@ -66,8 +66,8 @@ export function useHarness(): void {
         await flush();
         // Each tree on its own. One component throwing from a cleanup must not
         // leave the rest mounted into the next test, which is the failure this
-        // hook exists to prevent - so every unmount is attempted and every host
-        // removed, and what went wrong is raised once that is done.
+        // hook exists to prevent - so every unmount is attempted, and what went
+        // wrong is raised once the rest is done.
         for (const entry of entries) {
           try {
             entry.unmount();
@@ -80,8 +80,11 @@ export function useHarness(): void {
         // tree away through a parent's own state - measured, both.
         await flush();
       }
-      for (const entry of entries) entry.host.remove();
     } finally {
+      // Hosts go whatever happened above, including a `flush` that threw:
+      // a `<div>` left on `document.body` is one the next test's queries can
+      // still find, which is a suite failing on another suite's markup.
+      for (const entry of entries) entry.host.remove();
       registered = false;
     }
     if (failures.length > 0) throw failures[0];

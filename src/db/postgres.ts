@@ -56,10 +56,16 @@ async function probeOnce(pool: pg.Pool, signal?: AbortSignal): Promise<void> {
    */
   const pending = pool.connect();
   if (signal !== undefined) {
+    /*
+     * Named and removed rather than left to `once: true`. The signal belongs
+     * to the caller and outlives this race - a listener left on it holds this
+     * closure, and its rejected promise, for as long as the caller keeps the
+     * signal around.
+     */
+    let onAbort = (): void => {};
     const abandoned = new Promise<never>((_, reject) => {
-      signal.addEventListener("abort", () => reject(signal.reason), {
-        once: true,
-      });
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
     });
     try {
       await Promise.race([pending, abandoned]);
@@ -69,6 +75,8 @@ async function probeOnce(pool: pg.Pool, signal?: AbortSignal): Promise<void> {
         () => {},
       );
       throw cause;
+    } finally {
+      signal.removeEventListener("abort", onAbort);
     }
   }
   const client = await pending;
