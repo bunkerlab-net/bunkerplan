@@ -136,17 +136,23 @@ function useUnlock(planId: string, hasCode: boolean, relay: boolean) {
    */
   const inFlight = useRef(false);
 
-  // Codes get copied out of chat clients and mail, which is where a stray
-  // space either side comes from. The server compares a digest, so it cannot
-  // forgive one.
+  // Only for the button's own state; `redeem` trims what it is given. A box
+  // holding nothing but spaces offers nothing to submit.
   const trimmed = code.trim();
 
   /**
    * One redemption path for both ways in: the box below, and a code the link
    * itself carried. They differ only in where the string came from, and having
    * two copies of the latch and the navigation is how those drift apart.
+   *
+   * The trim belongs here for the same reason. Codes get copied out of chat
+   * clients and mail, which is where a stray space either side comes from, and
+   * the server compares a digest so it cannot forgive one. A link can carry the
+   * same thing - `#code=%20abcd` is a space - so trimming only what the box
+   * submitted would refuse a code the box would have accepted.
    */
-  const redeem = (value: string) => {
+  const redeem = (raw: string) => {
+    const value = raw.trim();
     if (inFlight.current || busy || value === "") return;
     inFlight.current = true;
     setBusy(true);

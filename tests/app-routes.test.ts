@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { PAGE_PROPS_ID } from "../src/client/mount.ts";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
 import { PLAN_PAGE_SIZE } from "../src/services/types.ts";
 import {
@@ -763,8 +764,11 @@ describe("the share-link relay", () => {
       ...over,
     });
 
+  // Built from the id the client actually looks the element up by, so a rename
+  // breaks this rather than leaving it matching nothing and parsing "{}".
   const propsOf = (markup: string): Record<string, unknown> => {
-    const json = /id="page-props">([^<]*)</.exec(markup)?.[1] ?? "{}";
+    const pattern = new RegExp(`id="${PAGE_PROPS_ID}">([^<]*)<`);
+    const json = pattern.exec(markup)?.[1] ?? "{}";
     return JSON.parse(json) as Record<string, unknown>;
   };
 

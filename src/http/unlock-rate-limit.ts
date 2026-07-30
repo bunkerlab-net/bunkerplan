@@ -42,45 +42,57 @@ async function bucketFor(
 }
 
 /**
- * Null means proceed; otherwise the 429 to return. Spends nothing.
+ * Either the 429 to return, or the bucket the attempt will be charged against.
+ *
+ * The key rather than a bare "proceed": it is an HMAC of the caller's address,
+ * and handing it back means the charge cannot compute a second one. Same bucket
+ * by construction rather than by two call sites agreeing.
  */
+export type UnlockBudget =
+  | { readonly refused: Response }
+  | { readonly bucket: string };
+
+/** Spends nothing. */
 export async function checkUnlockRate(
   limits: RateLimitRepo,
   config: UnlockRateConfig,
   request: Request,
-): Promise<Response | null> {
-  const key = await bucketFor(config, request);
-  if (key === null) {
-    return problem(429, "rate limit exceeded", { "retry-after": "1" });
+): Promise<UnlockBudget> {
+  const bucket = await bucketFor(config, request);
+  if (bucket === null) {
+    return {
+      refused: problem(429, "rate limit exceeded", { "retry-after": "1" }),
+    };
   }
 
   const limit = await limits.peek(
-    key,
+    bucket,
     config.unlockRateMax,
     config.unlockRateWindowSec,
   );
-  if (limit.allowed) return null;
+  if (limit.allowed) return { bucket };
 
-  return problem(429, "rate limit exceeded", {
-    "retry-after": String(limit.retryAfter),
-  });
+  return {
+    refused: problem(429, "rate limit exceeded", {
+      "retry-after": String(limit.retryAfter),
+    }),
+  };
 }
 
 /**
- * Charges one refused redemption.
+ * Charges one refused redemption, against the bucket the gate read.
  *
- * Called after the attempt, and only when it did not grant access. An
- * unidentifiable caller is already refused by the gate above, so there is
- * nothing to charge here and nothing to report: the return is the caller's
- * response either way.
+ * Called after the attempt and only when it did not grant access. A write
+ * failure propagates: catching it would leave the limiter silently not counting.
  */
 export async function chargeUnlockAttempt(
   limits: RateLimitRepo,
   config: UnlockRateConfig,
-  request: Request,
+  bucket: string,
 ): Promise<void> {
-  const key = await bucketFor(config, request);
-  if (key === null) return;
-
-  await limits.consume(key, config.unlockRateMax, config.unlockRateWindowSec);
+  await limits.consume(
+    bucket,
+    config.unlockRateMax,
+    config.unlockRateWindowSec,
+  );
 }

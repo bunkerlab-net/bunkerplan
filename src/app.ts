@@ -195,12 +195,12 @@ function registerPlanSharing(app: Hono, getServices: GetServices): void {
 function registerPlanUnlock(app: Hono, getServices: GetServices): void {
   app.post("/api/plans/:id/unlock", async (c) => {
     const { config, db } = await getServices();
-    const limited = await checkUnlockRate(
+    const budget = await checkUnlockRate(
       db.unlockRateLimits,
       config,
       c.req.raw,
     );
-    if (limited !== null) return limited;
+    if ("refused" in budget) return budget.refused;
 
     const response = await unlockPlan(
       db.plans,
@@ -211,8 +211,11 @@ function registerPlanUnlock(app: Hono, getServices: GetServices): void {
     // Anything that did not grant access: a wrong code, a plan with none, a
     // body that was not a code at all. `ok` rather than a status list, so a
     // refusal added later is charged without this line being remembered.
+    //
+    // Against the bucket the gate already read, so the two cannot pick
+    // different ones and the HMAC is computed once.
     if (!response.ok) {
-      await chargeUnlockAttempt(db.unlockRateLimits, config, c.req.raw);
+      await chargeUnlockAttempt(db.unlockRateLimits, config, budget.bucket);
     }
     return response;
   });

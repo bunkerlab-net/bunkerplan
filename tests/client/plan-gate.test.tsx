@@ -111,12 +111,22 @@ describe("what the gate says", () => {
   });
 });
 
-describe("unlocking with a code", () => {
-  /** Puts the browser on the URL a code-bearing link actually lands on. */
-  const standOn = (url: string): void => {
-    history.replaceState(null, "", url);
-  };
+/** Puts the browser on the URL a code-bearing link actually lands on. */
+const standOn = (url: string): void => {
+  history.replaceState(null, "", url);
+};
 
+/*
+ * One cleanup for the file. Three suites below stand the browser on a URL, and
+ * a copy of this in each is a copy that can be forgotten: the address bar is
+ * process-wide, so a suite that left one behind would change what the next one
+ * reads out of `location`.
+ */
+afterEach(() => {
+  standOn("/");
+});
+
+describe("unlocking with a code", () => {
   /**
    * A submit dispatched synchronously, the way a keypress delivers one.
    *
@@ -137,10 +147,6 @@ describe("unlocking with a code", () => {
       }),
     );
   };
-
-  afterEach(() => {
-    standOn("/");
-  });
 
   test("a code is traded for the cookie and the plan loaded bare", async () => {
     // The URL someone is handed: the code is in the query, and the fragment
@@ -458,14 +464,6 @@ describe("signing in from the gate", () => {
  * `?code=` still exists for a reader without a DOM and is covered above.
  */
 describe("a link that brought its own code", () => {
-  const standOn = (url: string): void => {
-    history.replaceState(null, "", url);
-  };
-
-  afterEach(() => {
-    standOn("/");
-  });
-
   test("spends it on arrival, with nothing to press", async () => {
     standOn(`/p/${PLAN_ID}#code=abcd1234`);
     api.unlockPlan = async () => undefined;
@@ -477,6 +475,21 @@ describe("a link that brought its own code", () => {
       "abcd1234",
     ]);
     expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+  });
+
+  test("trims it, the same as a code typed into the box", async () => {
+    // A link can carry padding just as a paste can: `%20` either side survives
+    // encoding, and the server compares a digest so it cannot forgive one.
+    // Trimming only the box's own value would refuse a code the box would take.
+    standOn(`/p/${PLAN_ID}#code=%20abcd1234%20`);
+    api.unlockPlan = async () => undefined;
+
+    await mountAsync(gate());
+
+    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args).toEqual([
+      PLAN_ID,
+      "abcd1234",
+    ]);
   });
 
   test("decodes it, matching what the dashboard encoded", async () => {
@@ -556,14 +569,6 @@ describe("a link that brought its own code", () => {
  * hands the reader to `/p/{id}`, which is what decides whether they may read it.
  */
 describe("the share-link relay", () => {
-  const standOn = (url: string): void => {
-    history.replaceState(null, "", url);
-  };
-
-  afterEach(() => {
-    standOn("/");
-  });
-
   test("spends the fragment code and sends the reader to the plan", async () => {
     standOn(`/s/${PLAN_ID}#code=abcd1234`);
     api.unlockPlan = async () => undefined;

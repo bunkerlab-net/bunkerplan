@@ -126,9 +126,13 @@ describe("the landing page", () => {
       .dispatchEvent(new Event("click", { bubbles: true }));
     await flush();
 
-    expect(
-      view.all<HTMLButtonElement>("button").every((node) => node.disabled),
-    ).toBe(true);
+    // Counted before swept: `every` over an empty list is true, so a page that
+    // rendered no buttons at all would satisfy the sweep on its own. Here the
+    // sweep is the right shape - the claim is that one flag reaches every
+    // control, nav included - so the length is what makes it mean something.
+    const buttons = view.all<HTMLButtonElement>("button");
+    expect(buttons.length).toBeGreaterThan(1);
+    expect(buttons.every((node) => node.disabled)).toBe(true);
 
     ceremony.release({ data: null, error: { message: "cancelled" } });
     await flush();
@@ -247,8 +251,13 @@ describe("the chrome", () => {
 
     // A tooltip is invisible at a glance and absent on touch, and this is the
     // one string another account needs in order to share a plan.
+    //
+    // The value is a bare text node beside the label, so it is asserted by
+    // containment rather than as `"Handlebrisk-heron"` - that spelling reads as
+    // if the app rendered one word, and would have to be rewritten for any
+    // change to the label it is not about.
     expect(view.find(".nav-handle-label").textContent).toBe("Handle");
-    expect(view.find(".nav-handle").textContent).toBe("Handlebrisk-heron");
+    expect(view.find(".nav-handle").textContent).toContain("brisk-heron");
   });
 
   test("the nav offers the dashboard from the landing page", async () => {

@@ -97,7 +97,11 @@ describe("DangerZone", () => {
       attempts += 1;
       return { data: { success: true }, error: null };
     };
-    const assign = window.location.assign;
+    // The descriptor, not the value: `location.assign` is installed by
+    // tests/client/auth-stub.ts on the one `window.location` this process has,
+    // and putting a plain writable property back where a differently configured
+    // one stood would leave that stub subtly replaced for every later file.
+    const original = Object.getOwnPropertyDescriptor(window.location, "assign");
     Object.defineProperty(window.location, "assign", {
       configurable: true,
       writable: true,
@@ -127,11 +131,11 @@ describe("DangerZone", () => {
       await flush();
       expect(attempts).toBe(1);
     } finally {
-      Object.defineProperty(window.location, "assign", {
-        configurable: true,
-        writable: true,
-        value: assign,
-      });
+      if (original === undefined) {
+        Reflect.deleteProperty(window.location, "assign");
+      } else {
+        Object.defineProperty(window.location, "assign", original);
+      }
     }
   });
 
@@ -155,7 +159,10 @@ describe("DangerZone", () => {
         ? { data: null, error: { message: "stale", code: "SESSION_EXPIRED" } }
         : { data: { success: true }, error: null };
     };
-    client.signIn.passkey = ok({ user: { id: "u1" } });
+    // The same account the panel was mounted for: the retry is only allowed
+    // when the ceremony came back holding the id being deleted, and spelling it
+    // as a literal here would keep passing if `USER_ID` ever changed.
+    client.signIn.passkey = ok({ user: { id: USER_ID } });
 
     const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
