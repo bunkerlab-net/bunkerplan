@@ -270,6 +270,16 @@ function registerAuthAndDocs(app: Hono, getServices: GetServices): void {
 function registerShareRelay(app: Hono, deps: AppDeps): void {
   const { getServices, assets } = deps;
 
+  /*
+   * Not rate limited, deliberately. It answers with one indexed lookup by
+   * primary key and tells an unknown id from a known one only by rendering the
+   * gate rather than the 404 - the same disclosure `/p/{id}` already makes, on
+   * the same lookup, also unthrottled. A limiter here would need the trusted
+   * address header to key on, which is the one thing a share link's reader may
+   * arrive without, and would lock out a link opened by a room of people
+   * behind one egress address. What guesses is the unlock route, and that is
+   * where the budget is.
+   */
   app.get("/s/:planId", async (c) => {
     const { config, db } = await getServices();
     const planId = c.req.param("planId");

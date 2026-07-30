@@ -108,8 +108,14 @@ export async function reserveUnlockAttempt(
         "no trusted client address header, so every unlock is refused",
       );
     }
+    /*
+     * A minute, not the one second a spent budget gets. Nothing here refills:
+     * the deployment refuses every unlock until an operator changes the proxy,
+     * so "try again immediately" invites a client to retry forever against an
+     * answer that cannot change.
+     */
     return {
-      refused: problem(429, "rate limit exceeded", { "retry-after": "1" }),
+      refused: problem(429, "rate limit exceeded", { "retry-after": "60" }),
     };
   }
 

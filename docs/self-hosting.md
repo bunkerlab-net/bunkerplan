@@ -250,6 +250,16 @@ read. Listing plans, relabelling them, changing who a plan is shared with,
 managing keys, and deleting the account all require a session - a leaked key
 must not be able to hand out access to other people.
 
+Deleting an account takes one more thing. `POST /api/auth/delete-user` refuses
+unless the request carries `x-expected-account` naming the account id it means
+to delete, and Better Auth compares that against the session the same request
+authenticated before anything is removed. A caller that omits the header is
+refused rather than defaulted to its own session: the check exists because a
+client cannot compare the two itself without leaving a window in which the
+session changes, and one a request can skip is one a client regression drops
+silently. The dashboard sends it; a script deleting its own account should
+send the id `/api/auth/get-session` hands back.
+
 Two routes are deliberately unauthenticated, because they are how someone
 holding only a share code gets in: `GET /p/{id}?code=...` and
 `POST /api/plans/{id}/unlock`. Both authorise on the code itself. Redeeming a

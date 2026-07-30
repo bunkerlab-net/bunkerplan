@@ -728,10 +728,11 @@ describe("redeeming a code", () => {
     // The alternative is one shared bucket for every anonymous caller, which
     // is exactly the lockout the per-address keying exists to prevent.
     expect(response.status).toBe(429);
-    // A flat one second from the handler's own unidentified-caller branch, not
-    // the limiter's window: the limiter never having been called is what says it
-    // was not reached to be asked.
-    expect(response.headers.get("retry-after")).toBe("1");
+    // A flat minute from the handler's own unidentified-caller branch, not the
+    // limiter's window: the limiter never having been called is what says it
+    // was not reached to be asked. Long, because nothing here refills - the
+    // deployment refuses every unlock until its proxy is fixed.
+    expect(response.headers.get("retry-after")).toBe("60");
     expect(consumed).toBe(0);
   });
 

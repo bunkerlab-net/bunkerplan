@@ -223,6 +223,11 @@ describe("the requests it composes", () => {
     await storage().probe();
 
     expect(sent[0]).toEqual({ command: "head", input: { Bucket: "plans" } });
+    // Absent, not present-and-undefined: the SDK reads `abortSignal` off the
+    // options object, and an explicit `undefined` is a different thing to
+    // build than a key that was never set - one of which stops being harmless
+    // the moment a middleware starts checking `in`.
+    expect(sendOptions[0] ?? {}).not.toHaveProperty("abortSignal");
   });
 
   test("the probe hands its cancellation signal to the SDK", async () => {

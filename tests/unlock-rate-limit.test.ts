@@ -219,7 +219,12 @@ describe("the unlock rate limit", () => {
     // a matter of type rather than of the handler remembering.
     const { limits, spent } = fakeLimits(true);
 
-    expect((await refusalOf(limits, unreported(), post())).status).toBe(429);
+    const refused = await refusalOf(limits, unreported(), post());
+
+    expect(refused.status).toBe(429);
+    // A minute, not the second a spent budget gets: nothing refills here, so a
+    // client told to retry at once retries forever against a fixed answer.
+    expect(refused.headers.get("retry-after")).toBe("60");
     expect(spent).toEqual([]);
   });
 

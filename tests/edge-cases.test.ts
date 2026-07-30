@@ -449,8 +449,22 @@ describe("the health probe", () => {
       }),
     });
 
-    const response = await healthz("node", async () => services);
+    const stray: unknown[] = [];
+    const watch = (reason: unknown) => stray.push(reason);
+    process.on("unhandledRejection", watch);
+    let response: Response;
+    try {
+      response = await healthz("node", async () => services);
+      // The driver rejects after the race has already settled, so nothing is
+      // waiting on it any more. `Promise.race` keeps a handler on both sides,
+      // which is what stops that from surfacing as an unhandled rejection -
+      // and on a Worker an unhandled rejection takes the isolate with it.
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.off("unhandledRejection", watch);
+    }
 
+    expect(stray).toEqual([]);
     expect(response.status).toBe(503);
     const failure = lines.find((line) => line["check"] === "storage");
     expect(failure).toBeDefined();

@@ -21,6 +21,16 @@ import { messageOf } from "./errors.ts";
  */
 export function useWriteLatch(
   setError: (message: string | null) => void,
+  /**
+   * Must not reject.
+   *
+   * Both callers' list calls catch their own failures and render them, which
+   * is why there is no separate handling for one here: a rejection would come
+   * out of the `catch` below wearing the write's fallback - "could not add a
+   * passkey" for a passkey that was added - and the write it misdescribes has
+   * already happened. Keeping that impossible is the caller's job, and cheaper
+   * than a second error channel for a state neither can reach.
+   */
   refresh: () => Promise<void>,
 ): {
   busy: boolean;

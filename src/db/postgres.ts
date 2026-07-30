@@ -30,6 +30,77 @@ const POOL_MAX = 10;
 const CONNECTION_TIMEOUT_MS = 5_000;
 const STATEMENT_TIMEOUT_MS = 15_000;
 
+const ABANDONED = "health probe abandoned; connection discarded";
+
+/**
+ * Asks the database one question, bounded by the caller's deadline rather than
+ * the pool's.
+ *
+ * `PROBE_TIMEOUT_MS` is shorter than `query_timeout`, so an abandoned probe
+ * must not park its client: releasing with an error destroys the connection,
+ * which frees the slot at the abort rather than whenever the server gets
+ * around to answering. Not a shorter `statement_timeout` for this one query -
+ * as above, that needs a server well enough to enforce it, which is not the
+ * case being bounded.
+ */
+async function probeOnce(pool: pg.Pool, signal?: AbortSignal): Promise<void> {
+  // Throwing, not returning: a probe that resolves is a probe that found the
+  // database reachable, and an abandoned one established nothing.
+  if (signal?.aborted) throw signal.reason;
+  /*
+   * Raced, because waiting for a free client is bounded by
+   * `connectionTimeoutMillis` and that outlasts the probe's deadline. The
+   * acquisition itself is not cancelled - `pool.connect` takes no signal - so
+   * a client can still turn up afterwards, and is thrown away rather than
+   * parked.
+   */
+  const pending = pool.connect();
+  if (signal !== undefined) {
+    const abandoned = new Promise<never>((_, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      });
+    });
+    try {
+      await Promise.race([pending, abandoned]);
+    } catch (cause) {
+      void pending.then(
+        (late) => late.release(new Error(ABANDONED)),
+        () => {},
+      );
+      throw cause;
+    }
+  }
+  const client = await pending;
+  let released = false;
+  /*
+   * An argument destroys the connection instead of parking it, which is what
+   * `pool.query` did before this took the client itself: a query that failed
+   * can leave the protocol mid-message, so the connection is not fit to hand
+   * out again.
+   */
+  const release = (broken?: Error) => {
+    if (released) return;
+    released = true;
+    client.release(broken);
+  };
+  const abandon = () => release(new Error(ABANDONED));
+  if (signal?.aborted) {
+    abandon();
+    throw signal.reason;
+  }
+  signal?.addEventListener("abort", abandon, { once: true });
+  try {
+    await client.query("select 1");
+  } catch (cause) {
+    release(cause instanceof Error ? cause : new Error(String(cause)));
+    throw cause;
+  } finally {
+    signal?.removeEventListener("abort", abandon);
+    release();
+  }
+}
+
 export function createPostgresDb(connectionString: string): Db {
   const pool = new pg.Pool({
     connectionString,
@@ -46,50 +117,6 @@ export function createPostgresDb(connectionString: string): Db {
     uploadRateLimits: createPgRateLimitRepo(db),
     unlockRateLimits: createPgUnlockRateLimitRepo(db),
     accountClosing: createPgAccountClosingRepo(db),
-    /*
-     * The caller's deadline is shorter than `query_timeout`, so an abandoned
-     * probe must not park its client: releasing with an error destroys the
-     * connection instead, freeing the slot at the abort rather than whenever
-     * the server gets around to answering. Not a shorter `statement_timeout`
-     * for this query - as above, that needs a server well enough to enforce
-     * it, which is not the case being bounded.
-     */
-    async probe(signal?: AbortSignal) {
-      // Throwing, not returning: a probe that resolves is a probe that found
-      // the database reachable, and an abandoned one established nothing.
-      if (signal?.aborted) throw signal.reason;
-      const client = await pool.connect();
-      let released = false;
-      /*
-       * An argument destroys the connection instead of parking it. Both
-       * callers below pass one, which is what `pool.query` did for us before
-       * this took the client itself: a query that failed can leave the
-       * protocol mid-message, so the connection is not fit to hand out again.
-       */
-      const release = (broken?: Error) => {
-        if (released) return;
-        released = true;
-        client.release(broken);
-      };
-      const abandon = () =>
-        release(new Error("health probe abandoned; connection discarded"));
-      // The wait for a client is itself bounded only by
-      // `connectionTimeoutMillis`, which outlasts the probe: one that arrives
-      // after the caller left is discarded without asking anything of it.
-      if (signal?.aborted) {
-        abandon();
-        throw signal.reason;
-      }
-      signal?.addEventListener("abort", abandon, { once: true });
-      try {
-        await client.query("select 1");
-      } catch (cause) {
-        release(cause instanceof Error ? cause : new Error(String(cause)));
-        throw cause;
-      } finally {
-        signal?.removeEventListener("abort", abandon);
-        release();
-      }
-    },
+    probe: (signal) => probeOnce(pool, signal),
   };
 }

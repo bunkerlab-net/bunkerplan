@@ -164,6 +164,25 @@ export function describeRateLimitRepo(
         expect(verdicts.filter(Boolean)).toHaveLength(MAX);
       });
 
+      test("refunding a key that has no counter yet is a no-op", async () => {
+        /*
+         * Reachable whenever a reservation is given back after its row was
+         * swept, and on any driver that refunds before it has ever consumed.
+         * The update matches nothing, which must mean nothing happened rather
+         * than a row appearing at a negative or a zero count - either would
+         * change what the key's first real window allows.
+         */
+        const key = await account();
+
+        await limits.refund(key, Date.now());
+
+        const verdicts: boolean[] = [];
+        for (let i = 0; i < MAX + 1; i += 1) {
+          verdicts.push((await consume(key)).allowed);
+        }
+        expect(verdicts.filter(Boolean)).toHaveLength(MAX);
+      });
+
       test("a refund for an elapsed window leaves the new one alone", async () => {
         /*
          * The race this exists for: a request reserves, its window rolls while it

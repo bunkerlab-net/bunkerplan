@@ -49,6 +49,13 @@ let registered = false;
  *
  * Register this before any stub arming, so trees come down while their stubs
  * are still standing in.
+ *
+ * TEARDOWN: rendering a tree away removes its DOM but does not run the
+ * subtree's `useEffect` cleanups, so a mounted component's effects outlive its
+ * test. Six shapes were measured and none changed it, including the two that
+ * look obvious - taking a render factory so the element is built inside the
+ * root, and driving the removal through a dispatched click. A suite whose
+ * stubs can notice resets them itself; auth-module.test.tsx does.
  */
 export function useHarness(): void {
   beforeEach(() => {
@@ -122,24 +129,9 @@ export function mount(node: Child): Mounted {
   const host = document.createElement("div");
   document.body.appendChild(host);
 
-  /*
-   * The root exists only so the teardown has something to render the component
-   * away with; it adds no element of its own.
-   *
-   * That render-away removes the DOM but does not run the subtree's
-   * `useEffect` cleanups. Measured, and not for want of trying: wrapping the
-   * node in a stable element, replacing `null` with a string, putting a
-   * component boundary between the root and the node, moving the state off the
-   * root component, and driving the change through a dispatched click all
-   * leave the counter at zero. A component built inside its parent's render
-   * and removed from a live tree does run them - tests/client/auth-module
-   * pins that - so the difference is the caller's pre-built element, which
-   * this harness exists to accept. Not isolated further.
-   *
-   * What it costs: a mounted component's effects outlive its test. A suite
-   * whose stubs can notice resets them itself; see the note on `subscribers`
-   * in auth-module.test.tsx.
-   */
+  // The root exists only so the teardown has something to render the component
+  // away with; it adds no element of its own. That removes the DOM but not the
+  // subtree's effect cleanups - see TEARDOWN below.
   let hide = (): void => {};
   // Returns `Child` rather than an element, which JSX cannot type - the point
   // is to render whatever it was handed, including a bare string.

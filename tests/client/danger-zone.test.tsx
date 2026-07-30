@@ -47,6 +47,23 @@ describe("DangerZone", () => {
     setSession(signedIn(HANDLE, USER_ID));
   });
 
+  /**
+   * Mounts the panel, types the confirmation, and presses Delete.
+   *
+   * The three steps every case needs before the one thing it is about. Takes
+   * the props a case wants to differ on, so what a test spells out is only
+   * what it is testing.
+   */
+  const deleteWith = async (
+    over: { handle?: string; userId?: string | null } = {},
+  ) => {
+    const view = mount(
+      <DangerZone handle={HANDLE} userId={USER_ID} {...over} />,
+    );
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+    return view;
+  };
   /** Cleanup for the one test that replaces `location.assign`. Idempotent. */
   let restoreAssign: (() => void) | null = null;
   afterEach(() => {
@@ -180,9 +197,7 @@ describe("DangerZone", () => {
 
   test("a confirmed delete leaves for the home page and stays held", async () => {
     client.deleteUser = ok({ success: true });
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     // `assign()` is asynchronous: the document is still here and still
     // interactive. Re-enabling now would offer a second delete of an account
@@ -204,9 +219,7 @@ describe("DangerZone", () => {
       options = opts;
       return { data: { success: true }, error: null };
     };
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    await deleteWith();
 
     expect(options).toEqual({ headers: { "x-expected-account": USER_ID } });
   });
@@ -226,9 +239,7 @@ describe("DangerZone", () => {
         },
       };
     };
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     expect(view.text()).toContain("different account");
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
@@ -287,9 +298,7 @@ describe("DangerZone", () => {
     });
 
     try {
-      const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-      await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-      await click(view.find("button"));
+      const view = await deleteWith();
 
       /*
        * The redirect failed but the account is gone, so there is nothing left
@@ -317,9 +326,7 @@ describe("DangerZone", () => {
 
   test("a refusal is shown and the visitor stays put", async () => {
     client.deleteUser = refuse("account has plans pending removal");
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     expect(view.find(".error").textContent).toBe(
       "account has plans pending removal",
@@ -340,9 +347,7 @@ describe("DangerZone", () => {
     // as a literal here would keep passing if `USER_ID` ever changed.
     client.signIn.passkey = ok({ user: { id: USER_ID } });
 
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    await deleteWith();
 
     expect(attempt).toBe(2);
     expect(navigations).toEqual(["/"]);
@@ -365,9 +370,7 @@ describe("DangerZone", () => {
      */
     client.signIn.passkey = ok({ user: { id: "u2", name: "brisk-heron" } });
 
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     // One call: the first, which is what reported the stale session.
     expect(attempt).toBe(1);
@@ -386,9 +389,7 @@ describe("DangerZone", () => {
     };
     client.signIn.passkey = ok({ user: { id: "u2", name: "brisk-heron" } });
 
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
     expect(attempt).toBe(1);
 
     /*
@@ -448,9 +449,7 @@ describe("DangerZone", () => {
     };
     client.signIn.passkey = refuse("the ceremony was cancelled");
 
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     expect(attempt).toBe(1);
     expect(view.find(".error").textContent).toBe("the ceremony was cancelled");
@@ -462,9 +461,7 @@ describe("DangerZone", () => {
       data: null,
       error: { message: "   " },
     });
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     // `?? fallback` only catches an absent message; a blank one rendered an
     // error line with nothing in it, which reads as no error at all.
@@ -483,27 +480,21 @@ describe("DangerZone", () => {
       error: { message: "" },
     });
 
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     expect(view.find(".error").textContent).toBe("re-authentication failed");
   });
 
   test("the button is released again after a refusal, so it can be retried", async () => {
     client.deleteUser = refuse("try again");
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(false);
   });
 
   test("a retry clears the previous refusal rather than leaving it up", async () => {
     client.deleteUser = refuse("account has plans pending removal");
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
     expect(view.find(".error").textContent).toBe(
       "account has plans pending removal",
     );
@@ -561,9 +552,7 @@ describe("DangerZone", () => {
 
   test("a thrown failure is not swallowed into a stuck button", async () => {
     client.deleteUser = explode("network down");
-    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
-    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    const view = await deleteWith();
 
     // Both halves matter: without the click the button is enabled merely
     // because the handle matched, which is what this used to assert.
