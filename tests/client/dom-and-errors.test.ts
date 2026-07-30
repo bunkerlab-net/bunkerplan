@@ -54,8 +54,8 @@ describe("messageOf", () => {
     expect(messageOf({ message: 404 }, FALLBACK)).toBe(FALLBACK);
   });
 
-  test("a value that throws when read falls back rather than escaping", () => {
-    // `unknown` includes this. A getter that throws would otherwise take out the
+  test("a membership test that throws falls back rather than escaping", () => {
+    // `unknown` includes this. A trap that throws would otherwise take out the
     // handler reporting the failure, replacing a message with a blank panel.
     const hostile = new Proxy(
       {},
@@ -65,6 +65,18 @@ describe("messageOf", () => {
         },
       },
     );
+
+    expect(messageOf(hostile, FALLBACK)).toBe(FALLBACK);
+  });
+
+  test("a message getter that throws falls back too", () => {
+    // The other half of the guarded read: `in` succeeds and the property access
+    // is what fails. One `try` covers both, so both are asserted.
+    const hostile = {
+      get message(): string {
+        throw new Error("getter");
+      },
+    };
 
     expect(messageOf(hostile, FALLBACK)).toBe(FALLBACK);
   });

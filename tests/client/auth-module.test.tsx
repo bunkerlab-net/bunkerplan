@@ -27,9 +27,10 @@ interface SessionValue {
   isPending: boolean;
 }
 
-const SIGNED_OUT: SessionValue = { data: null, error: null, isPending: true };
+/** No answer yet - `isPending`, which is not the same as signed out. */
+const UNRESOLVED: SessionValue = { data: null, error: null, isPending: true };
 
-let value: SessionValue = SIGNED_OUT;
+let value: SessionValue = UNRESOLVED;
 const subscribers = new Set<Subscriber>();
 let unsubscribed = 0;
 /** Every `baseURL` a client was constructed with, so laziness is observable. */
@@ -101,7 +102,7 @@ useHarness();
 armWhileFileRuns(arm, () => {});
 
 afterEach(() => {
-  value = SIGNED_OUT;
+  value = UNRESOLVED;
   subscribers.clear();
 });
 

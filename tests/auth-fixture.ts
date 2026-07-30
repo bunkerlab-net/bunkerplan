@@ -10,11 +10,11 @@
  * options object handed to it does not, and that object is what both suites
  * are about.
  */
-export const BASE = {
+export const BASE = Object.freeze({
   database: undefined,
   baseURL: "https://plans.example.test",
   secret: "x".repeat(32),
   rpId: "plans.example.test",
   rpName: "BunkerPlan",
   clientIpHeader: "cf-connecting-ip",
-};
+});

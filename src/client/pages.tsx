@@ -127,7 +127,7 @@ export function DashboardPage({ path }: DashboardProps) {
           )}
         </div>
       ) : (
-        <Dashboard handle={handle} userId={user?.id ?? ""} />
+        <Dashboard handle={handle} userId={user?.id ?? null} />
       )}
     </SiteFrame>
   );

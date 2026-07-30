@@ -314,10 +314,13 @@ describe("PasskeysPanel deleting", () => {
     expect(view.all("tbody tr").length).toBe(1);
   });
 
-  test("a second press while a delete is in flight sends nothing", async () => {
-    // Deleting a passkey is not undoable, and a row's button sits under the
-    // pointer that just pressed it. Two presses in one flight must be one
-    // request: the second would answer 404 or, worse, take the next row.
+  test("two presses in one tick delete once, not twice", async () => {
+    /*
+     * Both dispatched before any re-render, which is the whole window the ref
+     * exists for: `busy` is state, so the second handler would read the value
+     * the first one closed over. Awaiting between the presses would instead be
+     * testing `disabled`, which is a hint to a person and never guarded a call.
+     */
     const removal = deferred<{ data: { success: boolean }; error: null }>();
     let deletions = 0;
     client.passkey.listUserPasskeys = ok([passkey(), passkey({ id: "pk2" })]);
@@ -327,11 +330,14 @@ describe("PasskeysPanel deleting", () => {
     };
     const view = await mountAsync(<PasskeysPanel />);
 
-    await click(rowButton(view, 0));
-    expect(rowButton(view, 0)).toHaveProperty("disabled", true);
+    const button = rowButton(view, 0);
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+    await flush();
 
-    await click(rowButton(view, 0));
     expect(deletions).toBe(1);
+    // And the row is held while that one is out.
+    expect(rowButton(view, 0)).toHaveProperty("disabled", true);
 
     removal.release({ data: { success: true }, error: null });
     await flush();

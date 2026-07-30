@@ -10,8 +10,12 @@ interface DangerZoneProps {
    *
    * A prop rather than a read of the auth client, because that client is
    * browser-only and this would otherwise reach for it during render.
+   *
+   * Null while the session is still resolving. Nothing is deleted in that
+   * state - there is no id to compare a ceremony's answer against, and a
+   * stand-in would be an id that silently cannot match.
    */
-  userId: string;
+  userId: string | null;
 }
 
 /**
@@ -104,7 +108,7 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
  */
 function useAccountDeletion(
   confirmed: boolean,
-  userId: string,
+  userId: string | null,
 ): {
   error: string | null;
   busy: boolean;

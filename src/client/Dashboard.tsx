@@ -5,8 +5,13 @@ import { PlansPanel } from "./PlansPanel.tsx";
 
 interface DashboardProps {
   handle: string;
-  /** Pinned by `DangerZone`: which account a delete is allowed to remove. */
-  userId: string;
+  /**
+   * Pinned by `DangerZone`: which account a delete is allowed to remove.
+   *
+   * Null while the session is still resolving, which `DangerZone` treats as
+   * nothing to compare against rather than as an id that cannot match.
+   */
+  userId: string | null;
 }
 
 export function Dashboard({ handle, userId }: DashboardProps) {
