@@ -1,6 +1,6 @@
 import { eq, lte, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import type { RateLimitRepo } from "../services/types.ts";
+import type { RateLimitRepo, RateLimitResult } from "../services/types.ts";
 import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
 import {
   unlockRateLimit,
@@ -15,6 +15,44 @@ type SqliteDb = BaseSQLiteDatabase<"sync" | "async", unknown, SqliteSchema>;
  * cascades from `user`, neither of which the statements below can see.
  */
 export type RateLimitTable = typeof uploadRateLimit | typeof unlockRateLimit;
+
+/**
+ * The budget left on `key`, read rather than spent.
+ *
+ * Not the upsert: this must not write, because the unlock route calls it on
+ * every attempt including the ones about to succeed. Its own function so the
+ * factory below stays one statement per method.
+ *
+ * The two conditions are the same ones `consume` decides on, read rather than
+ * applied - a missing row or a rolled window is a full budget - and taken from
+ * the stored window rather than a stored verdict, so the two cannot disagree
+ * about where that window ended.
+ */
+async function peekBudget(
+  db: SqliteDb,
+  t: RateLimitTable,
+  key: string,
+  max: number,
+  windowSeconds: number,
+): Promise<RateLimitResult> {
+  const windowMs = windowSeconds * 1000;
+  const now = Date.now();
+
+  const current = await db
+    .select({ count: t.count, windowStart: t.windowStart })
+    .from(t)
+    .where(eq(t.key, key))
+    .limit(1);
+
+  const row = current[0];
+  if (row === undefined || row.windowStart <= now - windowMs) {
+    return { allowed: true, retryAfter: 0 };
+  }
+  return {
+    allowed: row.count < max,
+    retryAfter: retryAfterSeconds(row.windowStart, now, windowMs),
+  };
+}
 
 /**
  * One implementation for both counter tables: the decision is identical, only
@@ -78,6 +116,9 @@ export function createSqliteRateLimitRepo(
             : retryAfterSeconds(start, now, windowMs),
       };
     },
+
+    peek: (key, max, windowSeconds) =>
+      peekBudget(db, t, key, max, windowSeconds),
   };
 }
 
@@ -109,5 +150,10 @@ export function createSqliteUnlockRateLimitRepo(
       }
       return await counter.consume(key, max, windowSeconds);
     },
+
+    // No sweep here: this runs on every attempt, including the ones about to
+    // succeed, and the sweep belongs on the spending path whose cost already
+    // accounts for it.
+    peek: counter.peek,
   };
 }

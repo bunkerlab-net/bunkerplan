@@ -62,6 +62,28 @@ export interface RateLimitRepo {
     max: number,
     windowSeconds: number,
   ): Promise<RateLimitResult>;
+
+  /**
+   * Whether `key` has budget left, without spending any.
+   *
+   * For a limiter that should charge only the requests it means to discourage:
+   * the caller gates on this, does the work, and calls `consume` only when the
+   * outcome was the kind being rationed. `POST /api/plans/{id}/unlock` is the
+   * one - see src/http/unlock-rate-limit.ts - because a correct code spent from
+   * the same budget as a guess, and a link shared with a room full of people
+   * behind one address then locked them out of a plan they were given.
+   *
+   * Not atomic with the work that follows, and cannot be: concurrent callers
+   * all see the same budget and all proceed. That bounds a parallel burst to
+   * one round trip's worth of over-spend rather than to `max`, which is
+   * immaterial for the thing this rations - guessing a 16-character base62
+   * code - and is why `consume` stays the atomic one.
+   */
+  peek(
+    key: string,
+    max: number,
+    windowSeconds: number,
+  ): Promise<RateLimitResult>;
 }
 
 export type PlanVisibility = "public" | "private";

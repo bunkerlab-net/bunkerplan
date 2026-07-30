@@ -1,6 +1,6 @@
 import { eq, lte, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import type { RateLimitRepo } from "../services/types.ts";
+import type { RateLimitRepo, RateLimitResult } from "../services/types.ts";
 import type { PgSchema } from "./pg-shared.ts";
 import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
 import { unlockRateLimit, uploadRateLimit } from "./schema/rate-limit.pg.ts";
@@ -10,6 +10,41 @@ import { unlockRateLimit, uploadRateLimit } from "./schema/rate-limit.pg.ts";
  * both.
  */
 export type PgRateLimitTable = typeof uploadRateLimit | typeof unlockRateLimit;
+
+/**
+ * The budget left on `key`, read rather than spent.
+ *
+ * Its own function so the factory below stays one statement per method. See the
+ * sqlite twin, whose reasoning this mirrors exactly.
+ */
+async function peekBudget(
+  db: NodePgDatabase<PgSchema>,
+  t: PgRateLimitTable,
+  key: string,
+  max: number,
+  windowSeconds: number,
+): Promise<RateLimitResult> {
+  const windowMs = windowSeconds * 1000;
+  const now = Date.now();
+
+  const current = await db
+    .select({ count: t.count, windowStart: t.windowStart })
+    .from(t)
+    .where(eq(t.key, key))
+    .limit(1);
+
+  const row = current[0];
+  // No row, or one whose window has rolled, is a full budget. Reads the same
+  // two conditions `consume` decides on rather than a stored verdict, so the
+  // two cannot disagree about where the window ended.
+  if (row === undefined || row.windowStart <= now - windowMs) {
+    return { allowed: true, retryAfter: 0 };
+  }
+  return {
+    allowed: row.count < max,
+    retryAfter: retryAfterSeconds(row.windowStart, now, windowMs),
+  };
+}
 
 /** See src/db/rate-limits.sqlite.ts for why this is a single statement. */
 export function createPgRateLimitRepo(
@@ -57,6 +92,9 @@ export function createPgRateLimitRepo(
             : retryAfterSeconds(start, now, windowMs),
       };
     },
+
+    peek: (key, max, windowSeconds) =>
+      peekBudget(db, t, key, max, windowSeconds),
   };
 }
 
@@ -80,5 +118,10 @@ export function createPgUnlockRateLimitRepo(
       }
       return await counter.consume(key, max, windowSeconds);
     },
+
+    // No sweep here: this runs on every attempt including the ones that are
+    // about to succeed, and the sweep belongs on the spending path where its
+    // cost is already accounted for.
+    peek: counter.peek,
   };
 }

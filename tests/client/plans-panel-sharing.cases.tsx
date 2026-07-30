@@ -351,8 +351,10 @@ export function registerSharingCases(): void {
 
         await click(view.byText("button", "Create code"));
 
+        // `#code=`, not `?code=`: a fragment is never sent to a server, so the
+        // link people paste keeps the code out of access logs and proxies.
         expect(view.find(".snippet code").textContent).toBe(
-          `https://plans.test/p/${PLAN_ID}?code=abcd1234efgh5678`,
+          `https://plans.test/p/${PLAN_ID}#code=abcd1234efgh5678`,
         );
         expect(view.text()).toContain(
           "This is the only time the code is shown.",
@@ -374,7 +376,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Create code"));
 
         expect(view.find(".snippet code").textContent).toBe(
-          `https://plans.test/p/${PLAN_ID}?code=a%20b%26c%3Dd`,
+          `https://plans.test/p/${PLAN_ID}#code=a%20b%26c%3Dd`,
         );
       });
 
@@ -387,7 +389,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Copy"));
 
         expect(written).toEqual([
-          `https://plans.test/p/${PLAN_ID}?code=abcd1234efgh5678`,
+          `https://plans.test/p/${PLAN_ID}#code=abcd1234efgh5678`,
         ]);
         expect(view.maybe('.sharing [role="alert"]')).toBeNull();
       });

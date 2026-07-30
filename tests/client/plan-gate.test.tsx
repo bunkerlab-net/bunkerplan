@@ -449,3 +449,102 @@ describe("signing in from the gate", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * The link the dashboard hands out carries the code as `#code=`, because a
+ * fragment is never sent to a server: no access log, no proxy, no `Referer`.
+ * What is left is this browser's own history, so the gate takes it out of the
+ * address bar before it spends it rather than after - a wrong code or a dropped
+ * connection would otherwise leave it sitting there.
+ *
+ * `?code=` still exists for a reader without a DOM and is covered above.
+ */
+describe("a link that brought its own code", () => {
+  const standOn = (url: string): void => {
+    history.replaceState(null, "", url);
+  };
+
+  afterEach(() => {
+    standOn("/");
+  });
+
+  test("spends it on arrival, with nothing to press", async () => {
+    standOn(`/p/${PLAN_ID}#code=abcd1234`);
+    api.unlockPlan = async () => undefined;
+
+    await mountAsync(gate());
+
+    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args).toEqual([
+      PLAN_ID,
+      "abcd1234",
+    ]);
+    expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+  });
+
+  test("decodes it, matching what the dashboard encoded", async () => {
+    standOn(`/p/${PLAN_ID}#code=a%20b%26c%3Dd`);
+    api.unlockPlan = async () => undefined;
+
+    await mountAsync(gate());
+
+    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args[1]).toBe(
+      "a b&c=d",
+    );
+  });
+
+  test("takes it out of the address bar before spending it", async () => {
+    standOn(`/p/${PLAN_ID}#code=abcd1234`);
+    api.unlockPlan = async () => {
+      throw new Error("wrong code");
+    };
+
+    const view = await mountAsync(gate());
+
+    // The refusal is the point: the code is already gone from the URL, so a
+    // reader whose code was wrong has not left it in their history.
+    expect(window.location.hash).toBe("");
+    expect(view.find('[role="alert"]').textContent).toBe("wrong code");
+    expect(replacements).toEqual([]);
+    // And it is in the box, so the next press is a retry rather than a hunt for
+    // the link again.
+    expect(view.find<HTMLInputElement>('input[type="text"]').value).toBe(
+      "abcd1234",
+    );
+  });
+
+  test("does not spend one the plan no longer has, and still strips it", async () => {
+    // A link outlives the sharing it was made under: the owner can revoke the
+    // code and leave the plan private. Posting a stale one would fail into a
+    // form this page does not render for a plan with no code, so the reader
+    // would see nothing while the attempt spent from a rate-limit bucket keyed
+    // on their address.
+    standOn(`/p/${PLAN_ID}#code=revoked1234`);
+
+    await mountAsync(gate({ hasCode: false }));
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(window.location.hash).toBe("");
+  });
+
+  test("leaves an ordinary fragment alone", async () => {
+    standOn(`/p/${PLAN_ID}#section-3`);
+
+    await mountAsync(gate());
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(window.location.hash).toBe("#section-3");
+  });
+
+  test("a malformed escape is not a code", async () => {
+    // `decodeURIComponent` throws on a stray `%`. Treated as no code at all -
+    // the box is offered - rather than posting the raw text or showing an error
+    // about an encoding the reader cannot do anything about.
+    standOn(`/p/${PLAN_ID}#code=%`);
+
+    const view = await mountAsync(gate());
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(view.maybe('[role="alert"]')).toBeNull();
+    expect(view.find<HTMLInputElement>('input[type="text"]').value).toBe("");
+  });
+});

@@ -72,6 +72,7 @@ function deps(over: Partial<PlanRepo> = {}): {
       accountClosing: { open: async () => {}, isOpen: async () => false },
       uploadRateLimits: {
         consume: async () => ({ allowed: true, retryAfter: 60 }),
+        peek: async () => ({ allowed: true, retryAfter: 60 }),
       },
       storage,
       logger,
@@ -171,6 +172,7 @@ describe("createPlan when the upload budget is spent", () => {
     const { deps: d, stored } = deps();
     d.uploadRateLimits = {
       consume: async () => ({ allowed: false, retryAfter: 30 }),
+      peek: async () => ({ allowed: false, retryAfter: 30 }),
     };
 
     /*

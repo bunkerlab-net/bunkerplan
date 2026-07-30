@@ -223,8 +223,13 @@ function createPlanOperation(
     description:
       "`?visibility=code` stores the plan private and mints a share code, " +
       `returned once as \`code\` in the response body (${codeFormat}) ` +
-      "and never readable afterwards. Compose the share link by appending " +
-      "`?code=` to `url`.",
+      "and never readable afterwards.\n\n" +
+      "For a link a person will open, append `#code=` to `url`. A fragment is " +
+      "never sent to a server, so the code stays out of access logs and out " +
+      "of every `Referer`, and the gate page spends it on arrival and strips " +
+      "it from the address bar. For a reader without a browser, append " +
+      "`?code=` instead - a fragment cannot be sent by one - or redeem the " +
+      "code through `POST /api/plans/{id}/unlock` and keep the cookie.",
     parameters: [LABEL_QUERY_PARAM, VISIBILITY_QUERY_PARAM, GRANTS_QUERY_PARAM],
     requestBody: UPLOAD_BODY,
     responses: {
@@ -474,21 +479,27 @@ const MIN_CODE_BITS = Math.round(
   MIN_SHARE_CODE_LENGTH * Math.log2(SHARE_CODE_ALPHABET_LENGTH),
 );
 
+/** Lifted out so `unlockPlanOperation` stays a shape rather than an essay. */
+const unlockDescription = (codeFormat: string): string =>
+  "Unauthenticated: this is what the gate page calls. A correct code " +
+  "sets a path-scoped, HttpOnly cookie for this one plan, after which " +
+  "`/p/{id}` serves it with no parameter and no session. " +
+  `${codeFormat} Throttled per client address, set by UNLOCK_RATE_MAX ` +
+  "and UNLOCK_RATE_WINDOW_SEC.\n\n" +
+  "Only a refused redemption is charged. A correct code costs nothing, " +
+  "because a share link is opened by everyone it was sent to and charging " +
+  "those would refuse a room of colleagues behind one egress address. What " +
+  "is rationed is guessing, and the budget bounds that rather than deciding " +
+  `it: the shortest redeemable code carries about ${MIN_CODE_BITS} bits, ` +
+  "which no reachable rate would improve on. The bucket is the address " +
+  "rather than the plan, because the plan id is in the share link and a " +
+  "per-plan bucket would let anyone holding it lock the other readers out.";
+
 function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
   return {
     operationId: "unlockPlan",
     summary: "Redeem a share code",
-    description:
-      "Unauthenticated: this is what the gate page calls. A correct code " +
-      "sets a path-scoped, HttpOnly cookie for this one plan, after which " +
-      "`/p/{id}` serves it with no parameter and no session. " +
-      `${codeFormat} Throttled per client address, set by UNLOCK_RATE_MAX ` +
-      "and UNLOCK_RATE_WINDOW_SEC. That bounds what an anonymous caller can " +
-      "spend, not what it can guess: the shortest redeemable code carries " +
-      `about ${MIN_CODE_BITS} bits, which no reachable rate would improve ` +
-      "on. The bucket is the address rather than the plan, because the plan " +
-      "id is in the share link and a per-plan bucket would let anyone " +
-      "holding it lock the other readers out.",
+    description: unlockDescription(codeFormat),
     tags: ["Sharing"],
     security: [],
     requestBody: {

@@ -277,10 +277,16 @@ function ShareCodeBlock(
  * this app shows exactly once.
  */
 function ShareLink({ url, code }: { url: string; code: string }) {
+  // A fragment, not `?code=`: a fragment is never sent to a server, so the code
+  // in the link people paste into chat reaches no access log and no proxy on
+  // the way. The gate page spends it on arrival. `?code=` remains for a reader
+  // without a DOM, which cannot send a fragment - SECURITY.md records why the
+  // two exist.
+  //
   // Encoded even though the alphabet is base62 and needs none: the link is
   // built here, and a future alphabet change must not silently start
   // producing broken URLs.
-  const link = `${url}?code=${encodeURIComponent(code)}`;
+  const link = `${url}#code=${encodeURIComponent(code)}`;
   const [copyFailed, setCopyFailed] = useState(false);
 
   // `writeText` rejects on a denied permission or an insecure context, and

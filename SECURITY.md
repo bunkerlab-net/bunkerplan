@@ -52,8 +52,21 @@ Known and accepted, so please do not report these as new:
   script by design and CSS escapes such as `u\72l(...)` parse in a browser
   while defeating any token scan. Bypasses of it are worth reporting as bugs;
   they are not sandbox escapes.
-- **Plan ids are unguessable, not secret.** A plan URL is public and unlisted.
-  Anyone holding the URL can read it, by design.
+- **Plan ids are identifiers, not credentials.** They are unguessable and
+  unlisted, and that is all they are. A public plan is readable by anyone
+  holding its URL, by design. A private one is not: it still needs its share
+  code, the cookie a redemption left, an API key whose owner may read it, or a
+  session for the owner or a granted account.
+- **`?code=` is visible wherever a URL is, and still exists.** The share link
+  the dashboard hands out carries the code as `#code=`, and a fragment is never
+  sent to a server: it reaches no access log, no proxy, and no `Referer`. The
+  gate page redeems it and strips it from the address bar before it can fail, so
+  a wrong code does not leave it in history either. The `?code=` parameter is
+  kept because a reader without a DOM cannot send a fragment, and one used that
+  way does reach the deployment's logs and that browser's history. Rotating the
+  code (`POST /api/plans/{id}/share-code`) is the remedy: the cookie is signed
+  over a digest of the code current when it was minted, so rotation invalidates
+  every cookie issued under the old one.
 
 ## Supported versions
 

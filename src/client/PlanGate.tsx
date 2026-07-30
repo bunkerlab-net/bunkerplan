@@ -1,4 +1,4 @@
-import { useRef, useState } from "hono/jsx";
+import { useEffect, useRef, useState } from "hono/jsx";
 import { unlockPlan } from "./api.ts";
 import { useSession } from "./auth.ts";
 import { SiteFrame } from "./Chrome.tsx";
@@ -22,8 +22,72 @@ const ERROR_ID = "share-code-error";
  */
 const NO_SPELLCHECK: Record<string, string> = { spellcheck: "false" };
 
+/**
+ * The share code a link people paste carries.
+ *
+ * A fragment, because a fragment is never sent to a server: it reaches no
+ * access log and no proxy, and cannot end up in the `Referer` of anything this
+ * page loads. `?code=` still works and is what a reader without a DOM uses -
+ * `curl` cannot send a fragment - so this is the transport for shared links
+ * rather than a replacement for the parameter. SECURITY.md records the split.
+ *
+ * Matched only in the exact shape the dashboard emits. An ordinary `#section`
+ * is left alone rather than parsed as parameters, which would rewrite it.
+ */
+function codeInFragment(hash: string): string | null {
+  const match = /^#code=(.+)$/.exec(hash);
+  if (match === null) return null;
+  try {
+    const code = decodeURIComponent(match[1] ?? "");
+    return code === "" ? null : code;
+  } catch {
+    // A malformed escape is not a code. Treated as no fragment at all, so the
+    // box is offered instead of an error nobody can act on.
+    return null;
+  }
+}
+
+/**
+ * Takes a code out of the fragment on mount and spends it once.
+ *
+ * A link that brought its own code spends it without asking: the reader already
+ * clicked the thing that carried it, so a box pre-filled with the answer and a
+ * button to press is a step that means nothing.
+ *
+ * Out of the address bar first, before anything can fail. A fragment reaches no
+ * server and no `Referer`, but it is in this browser's history, and stripping it
+ * only after a successful redemption would leave it there for every reader whose
+ * code was wrong or whose connection dropped - which is the surface the fragment
+ * was chosen to avoid. `replaceState`, so the entry is amended rather than added
+ * to. It goes into the box on the way past, so a retry is a button press rather
+ * than a hunt for the link.
+ *
+ * Spent only if the plan has a code to redeem. A link outlives the sharing it
+ * was made under - the owner can revoke the code and leave the plan private -
+ * and posting a stale one would fail into a form this page does not render for
+ * such a plan, so the reader would see nothing happen while the attempt spent
+ * from a bucket keyed on their address. Stripped either way: a dead code is
+ * still a secret that was.
+ *
+ * Once, on mount. `redeem` latches, so a re-render cannot spend it twice.
+ */
+function useLinkCode(
+  hasCode: boolean,
+  onCode: (code: string) => void,
+  redeem: (code: string) => void,
+): void {
+  useEffect(() => {
+    const fromLink = codeInFragment(window.location.hash);
+    if (fromLink === null) return;
+
+    onCode(fromLink);
+    window.history.replaceState(null, "", window.location.pathname);
+    if (hasCode) redeem(fromLink);
+  }, []);
+}
+
 /** The code box, and the unlock it performs. */
-function useUnlock(planId: string) {
+function useUnlock(planId: string, hasCode: boolean) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,9 +116,13 @@ function useUnlock(planId: string) {
   // forgive one.
   const trimmed = code.trim();
 
-  const submit = (event: Event) => {
-    event.preventDefault();
-    if (inFlight.current || busy || trimmed === "") return;
+  /**
+   * One redemption path for both ways in: the box below, and a code the link
+   * itself carried. They differ only in where the string came from, and having
+   * two copies of the latch and the navigation is how those drift apart.
+   */
+  const redeem = (value: string) => {
+    if (inFlight.current || busy || value === "") return;
     inFlight.current = true;
     setBusy(true);
     // The previous attempt's message must go now, or a second try appears to
@@ -62,18 +130,19 @@ function useUnlock(planId: string) {
     setError(null);
     void (async () => {
       try {
-        await unlockPlan(planId, trimmed);
+        await unlockPlan(planId, value);
         // A full navigation rather than a fetch of the document: the unlock
         // response set the cookie, so the plan is now an ordinary request - and
         // it must be one, because the plan renders under its own sandboxed CSP.
         //
-        // To the bare path, and replacing this entry rather than adding one:
-        // whatever got here may carry `?code=`, and reloading would keep that
-        // code in history and in the `Referer` of everything the document goes
-        // on to load. The cookie is what grants access from here. Taken from
+        // To the bare path, and replacing this entry rather than adding one: a
+        // `?code=` got here in the address bar, and reloading would keep it in
+        // history and in the `Referer` of everything the document goes on to
+        // load. The cookie is what grants access from here. Taken from
         // `pathname` rather than rebuilt from `planId`, so there is no string to
-        // get wrong; the hash is kept because it is not a secret and may mean
-        // something to the document.
+        // get wrong; the fragment is kept, because by this point it holds no
+        // code - the effect below removed that before spending it - and what is
+        // left is not secret and may mean something to the document.
         window.location.replace(
           window.location.pathname + window.location.hash,
         );
@@ -84,6 +153,13 @@ function useUnlock(planId: string) {
       }
     })();
   };
+
+  const submit = (event: Event) => {
+    event.preventDefault();
+    redeem(trimmed);
+  };
+
+  useLinkCode(hasCode, setCode, redeem);
 
   return { code, setCode, submittable: trimmed !== "", error, busy, submit };
 }
@@ -104,7 +180,10 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
   // came for.
   const passkey = usePasskeyAction(`/p/${planId}`);
   const handle = session?.user.name ?? null;
-  const { code, setCode, submittable, error, busy, submit } = useUnlock(planId);
+  const { code, setCode, submittable, error, busy, submit } = useUnlock(
+    planId,
+    hasCode,
+  );
 
   return (
     <SiteFrame

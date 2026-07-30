@@ -29,6 +29,7 @@ export function describeRateLimitRepo(
     const account = () => fixture.seedUser();
     const consume = (key: string, max = MAX) =>
       limits.consume(key, max, WINDOW);
+    const peek = (key: string, max = MAX) => limits.peek(key, max, WINDOW);
 
     /** Puts the stored window far enough back that the next call rolls it. */
     const ageOut = (key: string) =>
@@ -115,6 +116,56 @@ export function describeRateLimitRepo(
         expect((await consume(key)).allowed).toBe(true);
         expect((await consume(key)).allowed).toBe(true);
         expect((await consume(key)).allowed).toBe(false);
+      });
+    });
+
+    /**
+     * `peek` is the same decision without the spend, and the unlock route leans
+     * on both halves being the same decision: it gates on this and charges only
+     * a refused attempt, so a `peek` that disagreed with `consume` about where
+     * the window ended would either ration nothing or refuse a reader whose
+     * budget was intact.
+     */
+    describe("reading the budget without spending it", () => {
+      test("an untouched key has its whole budget", async () => {
+        const key = await account();
+
+        expect((await peek(key)).allowed).toBe(true);
+        // And still does: asking is not spending, which is the entire point.
+        for (let i = 0; i < MAX + 2; i += 1) {
+          expect((await peek(key)).allowed).toBe(true);
+        }
+        expect((await consume(key)).allowed).toBe(true);
+      });
+
+      test("it refuses exactly when the next spend would", async () => {
+        const key = await account();
+        for (let i = 0; i < MAX - 1; i += 1) {
+          expect((await peek(key)).allowed).toBe(true);
+          await consume(key);
+        }
+
+        // One left: still allowed, and spending it is what closes the bucket.
+        expect((await peek(key)).allowed).toBe(true);
+        expect((await consume(key)).allowed).toBe(true);
+        expect((await peek(key)).allowed).toBe(false);
+        expect((await consume(key)).allowed).toBe(false);
+      });
+
+      test("a refusal carries the wait, and a rollover clears it", async () => {
+        const key = await account();
+        for (let i = 0; i < MAX; i += 1) await consume(key);
+
+        const refused = await peek(key);
+        expect(refused.allowed).toBe(false);
+        // Zero would tell a client to retry immediately, forever.
+        expect(refused.retryAfter).toBeGreaterThanOrEqual(1);
+        expect(refused.retryAfter).toBeLessThanOrEqual(WINDOW);
+
+        await ageOut(key);
+        // Read from the stored window rather than a stored verdict, so this
+        // rolls over without anything having to spend first.
+        expect((await peek(key)).allowed).toBe(true);
       });
     });
 

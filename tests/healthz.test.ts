@@ -52,9 +52,11 @@ function fakes(fails: string[] = []): Fakes {
     },
     uploadRateLimits: {
       consume: async () => ({ allowed: true, retryAfter: 60 }),
+      peek: async () => ({ allowed: true, retryAfter: 60 }),
     },
     unlockRateLimits: {
       consume: async () => ({ allowed: true, retryAfter: 60 }),
+      peek: async () => ({ allowed: true, retryAfter: 60 }),
     },
     accountClosing: {
       open: async () => {},

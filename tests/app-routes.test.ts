@@ -575,8 +575,76 @@ describe("redeeming a code", () => {
     expect(response.headers.get("retry-after")).toBe("30");
   });
 
+  /**
+   * A counter that actually spends, rather than a fake reporting a verdict.
+   *
+   * The two tests below are about the difference between spending and asking,
+   * so a limiter that always answered the same thing could not show it.
+   */
+  const countingLimits = (max: number) => {
+    const counts = new Map<string, number>();
+    return {
+      consume: async (key: string) => {
+        const spent = (counts.get(key) ?? 0) + 1;
+        counts.set(key, spent);
+        return { allowed: spent <= max, retryAfter: 30 };
+      },
+      peek: async (key: string) => ({
+        allowed: (counts.get(key) ?? 0) < max,
+        retryAfter: 30,
+      }),
+    };
+  };
+
+  test("a correct code costs nothing, however many readers open the link", async () => {
+    const app = buildApp({
+      plans: memoryPlans([
+        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
+      ]),
+      unlockRateLimits: countingLimits(3),
+    });
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      const response = await app.fetch(
+        `/api/plans/${PLAN_ID}/unlock`,
+        unlockInit(CODE),
+      );
+      statuses.push(response.status);
+    }
+
+    // Eight openings against a budget of three. A share link is opened by
+    // everyone it was sent to, and charging those meant a link pasted into one
+    // channel refused the colleagues behind the same egress address from the
+    // fourth onwards - locked out of a plan they had been given.
+    expect(statuses).toEqual([204, 204, 204, 204, 204, 204, 204, 204]);
+  });
+
+  test("wrong codes still run out, which is what the budget is for", async () => {
+    const app = buildApp({
+      plans: memoryPlans([
+        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
+      ]),
+      unlockRateLimits: countingLimits(3),
+    });
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const response = await app.fetch(
+        `/api/plans/${PLAN_ID}/unlock`,
+        unlockInit("wrongcode1234567"),
+      );
+      statuses.push(response.status);
+    }
+
+    // Three guesses, then the gate closes. Guessing is the thing rationed, and
+    // a correct code being free must not make a wrong one free too.
+    expect(statuses).toEqual([401, 401, 401, 429, 429]);
+  });
+
   test("a caller the proxy did not identify is refused, not counted", async () => {
     let consumed = 0;
+    let peeked = 0;
     const app = buildApp({
       plans: memoryPlans([
         storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
@@ -584,6 +652,10 @@ describe("redeeming a code", () => {
       unlockRateLimits: {
         consume: async () => {
           consumed += 1;
+          return { allowed: true, retryAfter: 0 };
+        },
+        peek: async () => {
+          peeked += 1;
           return { allowed: true, retryAfter: 0 };
         },
       },
@@ -598,10 +670,11 @@ describe("redeeming a code", () => {
     // is exactly the lockout the per-address keying exists to prevent.
     expect(response.status).toBe(429);
     // A flat one second from the handler's own unidentified-caller branch, not
-    // the limiter's window: `consumed` staying 0 is what says the limiter was
-    // never reached to be asked.
+    // the limiter's window: neither half of the limiter having been called is
+    // what says it was never reached to be asked.
     expect(response.headers.get("retry-after")).toBe("1");
     expect(consumed).toBe(0);
+    expect(peeked).toBe(0);
   });
 
   test("the bucket is keyed on the address, never on the plan", async () => {
@@ -620,6 +693,12 @@ describe("redeeming a code", () => {
       plans,
       unlockRateLimits: {
         consume: async (key) => {
+          keys.push(key);
+          return { allowed: true, retryAfter: 0 };
+        },
+        // Recorded from the gate rather than the spend: these three redemptions
+        // all succeed, and a correct code is exactly what no longer spends.
+        peek: async (key) => {
           keys.push(key);
           return { allowed: true, retryAfter: 0 };
         },

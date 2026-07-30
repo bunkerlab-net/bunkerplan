@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { unlockPlan } from "../src/client/api.ts";
-import { checkUnlockRate } from "../src/http/unlock-rate-limit.ts";
+import {
+  chargeUnlockAttempt,
+  checkUnlockRate,
+} from "../src/http/unlock-rate-limit.ts";
 import type { RateLimitRepo } from "../src/services/types.ts";
 
 const CONFIG = {
@@ -11,16 +14,28 @@ const CONFIG = {
   unlockRateWindowSec: 60,
 };
 
-/** Records what bucket was charged, so the keying is asserted and not assumed. */
+/**
+ * Records what bucket was touched, and separately what was spent.
+ *
+ * Both halves record a key: the gate reads the budget through `peek` and only a
+ * refused attempt reaches `consume`. Every claim below - the digest, the
+ * ceiling, one bucket per address - is meant to hold of either.
+ */
 function fakeLimits(allowed: boolean, retryAfter = 42) {
   const keys: string[] = [];
+  const spent: string[] = [];
   const limits: RateLimitRepo = {
     consume: async (key) => {
+      keys.push(key);
+      spent.push(key);
+      return { allowed, retryAfter };
+    },
+    peek: async (key) => {
       keys.push(key);
       return { allowed, retryAfter };
     },
   };
-  return { limits, keys };
+  return { limits, keys, spent };
 }
 
 const post = (headers: Record<string, string> = {}) =>
@@ -50,15 +65,64 @@ describe("the unlock rate limit", () => {
 
   test("passes the configured ceiling and window through", async () => {
     const seen: Array<[number, number]> = [];
-    const limits: RateLimitRepo = {
-      consume: async (_key, max, window) => {
-        seen.push([max, window]);
-        return { allowed: true, retryAfter: 0 };
-      },
+    const answer = async (_key: string, max: number, window: number) => {
+      seen.push([max, window]);
+      return { allowed: true, retryAfter: 0 };
     };
+    const limits: RateLimitRepo = { consume: answer, peek: answer };
 
     await checkUnlockRate(limits, CONFIG, post({ "cf-connecting-ip": "a" }));
     expect(seen).toEqual([[3, 60]]);
+
+    // The charge reads the same two, or a refusal would be rationed against a
+    // window the gate never used.
+    await chargeUnlockAttempt(
+      limits,
+      CONFIG,
+      post({ "cf-connecting-ip": "a" }),
+    );
+    expect(seen).toEqual([
+      [3, 60],
+      [3, 60],
+    ]);
+  });
+
+  test("the gate spends nothing, which is what makes a correct code free", async () => {
+    const { limits, keys, spent } = fakeLimits(true);
+
+    expect(
+      await checkUnlockRate(limits, CONFIG, post({ "cf-connecting-ip": "a" })),
+    ).toBeNull();
+
+    // Asked, and not charged. A link opened by everyone it was sent to is the
+    // normal case, and charging those locked out a room behind one address.
+    expect(keys).toHaveLength(1);
+    expect(spent).toEqual([]);
+  });
+
+  test("a refused attempt spends, against the bucket the gate read", async () => {
+    const { limits, keys, spent } = fakeLimits(true);
+    const request = post({ "cf-connecting-ip": "203.0.113.9" });
+
+    await checkUnlockRate(limits, CONFIG, request);
+    await chargeUnlockAttempt(limits, CONFIG, request);
+
+    // The same bucket, or guessing would be rationed separately from the gate
+    // that is supposed to stop it. Two touches, one spend.
+    expect(keys).toHaveLength(2);
+    expect(spent).toHaveLength(1);
+    expect(spent[0]).toBe(keys[0]);
+  });
+
+  test("an unidentified caller has nothing to charge", async () => {
+    // The gate already refused it with a flat second; there is no address to
+    // key a bucket on, and inventing one would be the shared bucket that keying
+    // per address exists to avoid.
+    const { limits, spent } = fakeLimits(true);
+
+    await chargeUnlockAttempt(limits, CONFIG, post());
+
+    expect(spent).toEqual([]);
   });
 
   test("buckets one address together and two apart", async () => {

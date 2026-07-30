@@ -328,10 +328,17 @@ export function memoryKv(): KvStore {
 /** Allows everything; the limiters have suites of their own. */
 export const openRateLimits: RateLimitRepo = {
   consume: async () => ({ allowed: true, retryAfter: 0 }),
+  peek: async () => ({ allowed: true, retryAfter: 0 }),
 };
 
+/**
+ * Refuses everything. Both halves, because the unlock route gates on `peek`
+ * and only spends on `consume`: a fake that refused just the spend would let
+ * every request through the gate it is here to close.
+ */
 export const closedRateLimits: RateLimitRepo = {
   consume: async () => ({ allowed: false, retryAfter: 30 }),
+  peek: async () => ({ allowed: false, retryAfter: 30 }),
 };
 
 export const openAccounts: AccountClosingRepo = {

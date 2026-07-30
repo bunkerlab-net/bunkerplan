@@ -20,7 +20,10 @@ import { replacePlan } from "./http/replace-plan.ts";
 import { resolveSessionUserId, resolveUserId } from "./http/require-user.ts";
 import { applySecurityHeaders } from "./http/security-headers.ts";
 import { servePlan } from "./http/serve-plan.ts";
-import { checkUnlockRate } from "./http/unlock-rate-limit.ts";
+import {
+  chargeUnlockAttempt,
+  checkUnlockRate,
+} from "./http/unlock-rate-limit.ts";
 import { checkUploadRate } from "./http/upload-rate-limit.ts";
 import type { AssetManifest } from "./server/assets.ts";
 import {
@@ -182,6 +185,12 @@ function registerPlanSharing(app: Hono, getServices: GetServices): void {
  * let anyone holding that link lock the real readers out. Its own counter
  * table, because `upload_rate_limit.key` is a foreign key onto `user.id` and
  * there is no user here.
+ *
+ * The budget is checked before the attempt and spent only after one that
+ * failed. A correct code costs nothing, because what is being rationed is
+ * guessing: the share link is opened by everyone it was sent to, and charging
+ * those meant a link pasted into one channel locked out the colleagues behind
+ * the same egress address. See src/http/unlock-rate-limit.ts.
  */
 function registerPlanUnlock(app: Hono, getServices: GetServices): void {
   app.post("/api/plans/:id/unlock", async (c) => {
@@ -192,7 +201,20 @@ function registerPlanUnlock(app: Hono, getServices: GetServices): void {
       c.req.raw,
     );
     if (limited !== null) return limited;
-    return await unlockPlan(db.plans, config, c.req.raw, c.req.param("id"));
+
+    const response = await unlockPlan(
+      db.plans,
+      config,
+      c.req.raw,
+      c.req.param("id"),
+    );
+    // Anything that did not grant access: a wrong code, a plan with none, a
+    // body that was not a code at all. `ok` rather than a status list, so a
+    // refusal added later is charged without this line being remembered.
+    if (!response.ok) {
+      await chargeUnlockAttempt(db.unlockRateLimits, config, c.req.raw);
+    }
+    return response;
   });
 }
 
