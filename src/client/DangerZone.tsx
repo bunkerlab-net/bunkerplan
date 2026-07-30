@@ -8,18 +8,57 @@ interface DangerZoneProps {
 }
 
 /**
- * Deletes the account, re-authenticating once if the session is too old.
+ * What an attempt did, rather than a message-or-null.
+ *
+ * `blocked` is separate from `refused` because it is terminal: the client is
+ * no longer holding the session this panel was mounted for, and no further
+ * press may reach `deleteUser`.
+ */
+type DeleteOutcome =
+  | { kind: "deleted" }
+  | { kind: "refused"; message: string }
+  | { kind: "blocked"; message: string };
+
+const WRONG_ACCOUNT =
+  "This page is signed in as a different account now. Reload before deleting anything.";
+
+/** The signed-in account's id, or null while the session is unresolved. */
+const currentUserId = (): string | null =>
+  authClient().useSession.get().data?.user?.id ?? null;
+
+/**
+ * Deletes the account this panel was mounted for, re-authenticating once if
+ * the session is too old.
  *
  * Deleting requires a FRESH session (Better Auth's default `freshAge` is 24h)
  * and there is no password to re-enter, so a returning visitor routinely hits
  * `SESSION_EXPIRED`. Re-running the WebAuthn ceremony mints a new session,
  * after which the delete is retried exactly once.
  *
- * Returns the message to show, or `null` when the account is gone. Lifted out
- * of the component because the handler around it is about latches and
- * navigation, and this is about Better Auth's freshness rule.
+ * `intended` is checked on both sides of that ceremony. `signIn.passkey()`
+ * names no account: it is a discoverable-credential ceremony, so the browser
+ * offers every passkey registered for this site and the visitor picks one. On
+ * a shared machine, or by simple misclick, that can be another account - and
+ * the session it mints is that account's. Retrying against it would destroy an
+ * account whose handle was never typed into the box, and because the client
+ * session has genuinely changed, the check has to run before the first call
+ * too: otherwise the next press deletes the wrong account with nothing left to
+ * compare.
  */
-async function deleteAccount(): Promise<string | null> {
+async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
+  /*
+   * A client that already knows it is holding somebody else stops here. This
+   * is not a cross-tab guarantee and is not written as one: the store is a
+   * cache, and even reading the server first would leave a window before the
+   * delete lands. Closing that properly needs an endpoint that takes the
+   * expected account and decides in one request, which Better Auth's
+   * `deleteUser` does not offer. The ceremony check below is the sound one -
+   * it compares the answer the ceremony itself returned.
+   */
+  if (intended === null || currentUserId() !== intended) {
+    return { kind: "blocked", message: WRONG_ACCOUNT };
+  }
+
   let result = await authClient().deleteUser();
   if (result.error?.code === "SESSION_EXPIRED") {
     const reauth = await authClient().signIn.passkey();
@@ -27,14 +66,25 @@ async function deleteAccount(): Promise<string | null> {
       // `messageOf`, not `?? fallback`: Better Auth can hand back an empty or
       // whitespace-only message, and `??` only catches the absent one - the
       // rest render as a blank error line.
-      return messageOf(reauth.error, "re-authentication failed");
+      return {
+        kind: "refused",
+        message: messageOf(reauth.error, "re-authentication failed"),
+      };
+    }
+    // The ceremony's own answer, not the store: the store may not have caught
+    // up, and this is the authoritative record of who was just signed in.
+    if ((reauth?.data?.user?.id ?? null) !== intended) {
+      return { kind: "blocked", message: WRONG_ACCOUNT };
     }
     result = await authClient().deleteUser();
   }
   if (result.error) {
-    return messageOf(result.error, "could not delete the account");
+    return {
+      kind: "refused",
+      message: messageOf(result.error, "could not delete the account"),
+    };
   }
-  return null;
+  return { kind: "deleted" };
 }
 
 /**
@@ -64,10 +114,21 @@ function useAccountDeletion(confirmed: boolean): {
    * Released in the `finally` below rather than on individual paths: both
    * refusal returns leave the `try` without entering `catch`, and a latch they
    * skipped would ignore every retry afterwards while the button looked live.
-   * The one thing that keeps it closed is a delete that succeeded - see
-   * `deleted`.
+   * The one thing that keeps it closed is an attempt that must not be made
+   * again - see `settled`.
    */
   const inFlight = useRef(false);
+  /**
+   * The account this panel was mounted for, frozen at that moment.
+   *
+   * `useRef`'s initial value is kept from the first render and never replaced,
+   * which is the point: not the `handle` prop and not a fresh read per
+   * attempt, because both track the live session that a passkey ceremony can
+   * swap for another account's. A comparison against something that moves with
+   * the session is no comparison at all. Null stays null, and `deleteAccount`
+   * treats that as reason to refuse rather than to proceed.
+   */
+  const intended = useRef(currentUserId());
 
   const onDelete = async () => {
     /*
@@ -83,18 +144,21 @@ function useAccountDeletion(confirmed: boolean): {
     setError(null);
     setBusy(true);
     /*
-     * Whether the account is gone, which is the thing that must hold the
-     * latch - not whether the page moved. Once this is set there is nothing
-     * left to delete, so no path below may re-enable the control: a second
-     * press would run the ceremony against an account that no longer exists.
+     * Whether this attempt must be the last one. Set when the account is gone,
+     * and when the session turned out to belong to somebody else - in both
+     * cases a second press can only do harm, so no path below re-enables the
+     * control. Navigation is a separate matter: `deleted` drives that.
      */
+    let settled = false;
     let deleted = false;
     try {
-      const refusal = await deleteAccount();
-      if (refusal !== null) {
-        setError(refusal);
+      const outcome = await deleteAccount(intended.current);
+      if (outcome.kind !== "deleted") {
+        settled = outcome.kind === "blocked";
+        setError(outcome.message);
         return;
       }
+      settled = true;
       deleted = true;
       window.location.assign("/");
     } catch (cause) {
@@ -112,7 +176,7 @@ function useAccountDeletion(confirmed: boolean): {
       // Every refusal returns out of the `try` without reaching the `catch`,
       // so the release belongs here: a latch cleared only on the thrown path
       // would ignore each retry afterwards while the button looked live.
-      if (!deleted) {
+      if (!settled) {
         inFlight.current = false;
         setBusy(false);
       }

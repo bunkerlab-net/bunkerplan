@@ -45,6 +45,15 @@ describe("messageOf", () => {
     expect(messageOf({ message: 404 }, FALLBACK)).toBe(FALLBACK);
   });
 
+  test("an Error whose message is not a string falls back rather than throwing", () => {
+    // `Error.message` is writable. Calling `trim()` on a replaced one would
+    // throw from inside the catch handler that was reporting the failure.
+    const mutated = new Error("original");
+    (mutated as { message: unknown }).message = 500;
+
+    expect(messageOf(mutated, FALLBACK)).toBe(FALLBACK);
+  });
+
   test("an object with no message would be [object Object], so it falls back", () => {
     expect(messageOf({ code: "NOPE" }, FALLBACK)).toBe(FALLBACK);
   });

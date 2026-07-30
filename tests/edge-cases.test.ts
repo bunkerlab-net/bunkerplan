@@ -299,15 +299,20 @@ describe("the health probe", () => {
     const body = await (await healthz("node", async () => services)).text();
 
     // `/healthz` is unauthenticated and a driver error can embed the
-    // connection string.
+    // connection string, so nothing from it may reach the response.
     expect(body).not.toContain("hunter2");
-    expect(JSON.stringify(lines)).toContain("hunter2");
-    // Located by `check` rather than by position: only the db probe fails
-    // here, but a log gaining any other line would silently move this read
-    // onto it.
+
+    /*
+     * The log has to identify the failure well enough to act on. Not asserted:
+     * that the credential itself appears there. Requiring it would pin the
+     * opposite of what src/log.ts's redacting destination is for, and would
+     * turn adding redaction into a test failure.
+     */
     const failure = lines.find((line) => line["check"] === "db");
     expect(failure).toBeDefined();
     expect(failure).toMatchObject({ check: "db", msg: "probe failed" });
+    // And it carries the error, whatever a destination later does with it.
+    expect(failure?.["err"]).toBeDefined();
   });
 
   test("every failing backend is reported, not just the first", async () => {
@@ -382,6 +387,10 @@ describe("the health probe", () => {
     // The S3 client ships no request timeout, so a blackholed endpoint would
     // hold a socket and a pool client per call until both ran out. With no
     // deadline this call never returns and the test times out.
+    //
+    // There is no authorization step to check first: `/healthz` is
+    // deliberately unauthenticated (src/http/healthz.ts), so the probe result
+    // is the only thing this route produces.
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
       checks: { storage: "error" },

@@ -1,5 +1,5 @@
 import "./dom-env.ts";
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { DangerZone } from "../../src/client/DangerZone.tsx";
 import {
   client,
@@ -7,6 +7,8 @@ import {
   navigations,
   ok,
   refuse,
+  setSession,
+  signedIn,
   useAuthStub,
 } from "./auth-stub.ts";
 import { click, flush, mount, type, useHarness } from "./harness.tsx";
@@ -19,10 +21,17 @@ const HANDLE = "swift-otter-42";
 
 /**
  * The one control in the app that destroys data with no undo. Its whole
- * safety story is the typed confirmation and the disabled button, so both are
- * pinned here rather than assumed.
+ * safety story is the typed confirmation, the disabled button, and the
+ * identity the panel was mounted for, so all three are pinned here rather
+ * than assumed.
  */
 describe("DangerZone", () => {
+  // The panel freezes the signed-in account at mount and refuses to delete
+  // anything it cannot match against, so every test needs a session.
+  beforeEach(() => {
+    setSession(signedIn(HANDLE));
+  });
+
   test("names the handle that has to be typed", () => {
     const view = mount(<DangerZone handle={HANDLE} />);
     expect(view.find("code").textContent).toBe(HANDLE);
@@ -152,6 +161,89 @@ describe("DangerZone", () => {
 
     expect(attempt).toBe(2);
     expect(navigations).toEqual(["/"]);
+  });
+
+  test("a ceremony that signs in another account deletes nothing", async () => {
+    let attempt = 0;
+    client.deleteUser = async () => {
+      attempt += 1;
+      return {
+        data: null,
+        error: { message: "stale", code: "SESSION_EXPIRED" },
+      };
+    };
+    /*
+     * `signIn.passkey()` names no account: the browser offers every passkey on
+     * the device and the visitor picks. Picking another account's here must
+     * not turn into a delete of that account - the handle in the box is still
+     * this one's.
+     */
+    client.signIn.passkey = ok({ user: { id: "u2", name: "brisk-heron" } });
+
+    const view = mount(<DangerZone handle={HANDLE} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+
+    // One call: the first, which is what reported the stale session.
+    expect(attempt).toBe(1);
+    expect(view.find(".error").textContent).toContain("different account");
+    expect(navigations).toEqual([]);
+  });
+
+  test("after a wrong-account ceremony the control stays dead", async () => {
+    let attempt = 0;
+    client.deleteUser = async () => {
+      attempt += 1;
+      return {
+        data: null,
+        error: { message: "stale", code: "SESSION_EXPIRED" },
+      };
+    };
+    client.signIn.passkey = ok({ user: { id: "u2", name: "brisk-heron" } });
+
+    const view = mount(<DangerZone handle={HANDLE} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+    expect(attempt).toBe(1);
+
+    /*
+     * The ceremony really did change who this client is signed in as, and the
+     * panel re-renders with that account's handle. Releasing the button here
+     * would let the next press delete the account the visitor never named,
+     * with a fresh session and nothing left to compare it against.
+     */
+    setSession(signedIn("brisk-heron", "u2"));
+    await flush();
+    expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
+
+    view.find("button").dispatchEvent(new Event("click", { bubbles: true }));
+    await flush();
+    expect(attempt).toBe(1);
+    expect(navigations).toEqual([]);
+  });
+
+  test("a client already holding another account is refused", async () => {
+    let attempt = 0;
+    client.deleteUser = async () => {
+      attempt += 1;
+      return { data: { success: true }, error: null };
+    };
+    const view = mount(<DangerZone handle={HANDLE} />);
+
+    /*
+     * The store now reports a different account than the one frozen at mount.
+     * No claim here about a session changed elsewhere and not yet observed -
+     * the client cannot see that, and two requests cannot be made atomic from
+     * here. What is pinned is narrower and real: once the client does know it
+     * is holding somebody else, this panel stops.
+     */
+    setSession(signedIn("brisk-heron", "u2"));
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+
+    expect(attempt).toBe(0);
+    expect(view.find(".error").textContent).toContain("different account");
+    expect(navigations).toEqual([]);
   });
 
   test("a failed re-authentication stops before deleting anything", async () => {

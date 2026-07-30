@@ -130,6 +130,9 @@ export function useApiStub(): void {
   armWhileFileRuns(arm, () => {
     Object.assign(api, blank());
     calls.length = 0;
+    // Reset with the rest: left running, the ids a test sees depend on how
+    // many plans every test before it happened to build.
+    nextId = 0;
   });
 }
 
@@ -141,7 +144,9 @@ export function countOf(method: keyof Api): number {
 let nextId = 0;
 
 export function plan(over: Partial<PlanSummary> = {}): PlanSummary {
-  nextId += 1;
+  // Spent only when one is needed. Advancing it for an explicit id would make
+  // the generated sequence depend on how many named plans a test also made.
+  if (over.id === undefined) nextId += 1;
   const id = over.id ?? `plan${nextId}`;
   return {
     id,

@@ -33,9 +33,9 @@ export const SIGNED_OUT: SessionState = {
   isPending: false,
 };
 
-export function signedIn(handle = "swift-otter-42"): SessionState {
+export function signedIn(handle = "swift-otter-42", id = "u1"): SessionState {
   return {
-    data: { user: { id: "u1", name: handle } },
+    data: { user: { id, name: handle } },
     error: null,
     isPending: false,
   };
@@ -71,6 +71,14 @@ interface Client {
   signIn: { passkey: Fn };
   signOut: Fn;
   deleteUser: Fn;
+  /**
+   * The nanostore the real client exposes, not the hook.
+   *
+   * `DangerZone` reads the signed-in account's id straight off it to pin which
+   * account a delete is for, so a stub without it would make that panel throw
+   * rather than exercise the check.
+   */
+  useSession: { get: () => SessionState };
 }
 
 const unset = (name: string) => () => {
@@ -92,6 +100,7 @@ function blank(): Client {
     signIn: { passkey: unset("signIn.passkey") },
     signOut: unset("signOut"),
     deleteUser: unset("deleteUser"),
+    useSession: { get: () => session },
   };
 }
 

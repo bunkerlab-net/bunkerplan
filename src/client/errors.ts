@@ -10,18 +10,21 @@
  * instances, so those are read too.
  */
 export function messageOf(cause: unknown, fallback: string): string {
+  /*
+   * One read, as `unknown`, before anything is called on it. `Error.message`
+   * is writable, so a runtime-mutated one can be a number - and `trim()` on
+   * that throws, from inside the catch handler that was trying to report a
+   * failure. An `Error` is an object carrying `message`, so this covers both
+   * shapes rather than testing them separately.
+   */
+  const message: unknown =
+    typeof cause === "object" && cause !== null && "message" in cause
+      ? cause.message
+      : undefined;
+
   // Trimmed, not merely compared to "": a message of spaces renders as a blank
   // line, which is the same nothing an empty one gives.
-  if (cause instanceof Error && cause.message.trim() !== "")
-    return cause.message;
-  if (
-    typeof cause === "object" &&
-    cause !== null &&
-    "message" in cause &&
-    typeof cause.message === "string" &&
-    cause.message.trim() !== ""
-  ) {
-    return cause.message;
-  }
-  return fallback;
+  return typeof message === "string" && message.trim() !== ""
+    ? message
+    : fallback;
 }

@@ -165,11 +165,15 @@ describe.each(generated)("every %s auth table", (dialect) => {
   test.each(OWNED_BY_USER)(
     "%s.%s cascades from the account",
     (table, column) => {
-      expect(keysOf(table)).toContainEqual({
-        columns: [column],
-        references: ["user.id"],
-        onDelete: "cascade",
-      });
+      // The whole list, not merely containing it: a second foreign key added
+      // to one of these tables is a second cascade path nobody described.
+      expect(keysOf(table)).toEqual([
+        {
+          columns: [column],
+          references: ["user.id"],
+          onDelete: "cascade",
+        },
+      ]);
     },
   );
 

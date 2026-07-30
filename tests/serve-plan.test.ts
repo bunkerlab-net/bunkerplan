@@ -211,6 +211,14 @@ describe("a code-shared plan", () => {
     expect(response.headers.get("set-cookie")).toContain(
       shareCookieName(PLAN_ID),
     );
+    /*
+     * A code-authenticated read is still a private read of untrusted HTML.
+     * `no-store` because a shared cache holding it would serve the document to
+     * the next caller with no code at all, and the sandbox because the bytes
+     * came from a stranger either way.
+     */
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-security-policy")).toBe(PLAN_CSP);
   });
 
   test("a conditional request carrying ?code= still leaves the cookie", async () => {
@@ -225,6 +233,9 @@ describe("a code-shared plan", () => {
     expect(second.headers.get("set-cookie")).toContain(
       shareCookieName(PLAN_ID),
     );
+    // A 304 is a cacheable answer, so it carries the same rules as the 200.
+    expect(second.headers.get("cache-control")).toBe("private, no-store");
+    expect(second.headers.get("content-security-policy")).toBe(PLAN_CSP);
   });
 
   test("the cookie alone opens it next time", async () => {
@@ -258,9 +269,24 @@ describe("a code-shared plan", () => {
       storage: memoryStorage({ [PLAN_ID]: DOCUMENT, [other]: DOCUMENT }),
     });
     const opened = await app.fetch(`/p/${other}?code=${CODE}`);
-    const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    const minted = (opened.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    const value = minted.slice(minted.indexOf("=") + 1);
 
-    const response = await app.fetch(`/p/${PLAN_ID}`, { headers: { cookie } });
+    // The source unlock has to have produced a real cookie: an empty value
+    // would earn the same 401 below without testing anything.
+    expect(opened.status).toBe(200);
+    expect(minted.startsWith(`${shareCookieName(other)}=`)).toBe(true);
+    expect(value.length).toBeGreaterThan(0);
+
+    /*
+     * Renamed onto this plan's cookie, value untouched. Sending it under its
+     * own name only proves the two names differ, and the name is the one part
+     * a holder can choose freely - so the refusal has to come from the value
+     * being bound to the plan it was minted for.
+     */
+    const response = await app.fetch(`/p/${PLAN_ID}`, {
+      headers: { cookie: `${shareCookieName(PLAN_ID)}=${value}` },
+    });
 
     expect(response.status).toBe(401);
   });

@@ -82,7 +82,7 @@ describe("the plan collection", () => {
     expect(body.errors).toBeUndefined();
   });
 
-  test("an exhausted upload budget is refused before the document is read", async () => {
+  test("an exhausted upload budget is refused and stores nothing", async () => {
     const app = buildApp({
       sessionUser: OWNER,
       uploadRateLimits: closedRateLimits,
@@ -93,6 +93,8 @@ describe("the plan collection", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("30");
     expect(app.storage.objects.size).toBe(0);
+    // That the refusal comes *before* the body is read is pinned in
+    // tests/create-plan.test.ts, which can watch the reader itself.
   });
 
   test("listing is session-only, because enumerating is not a per-plan act", async () => {
@@ -627,15 +629,31 @@ describe("redeeming a code", () => {
     for (const id of ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"]) {
       await app.fetch(`/api/plans/${id}/unlock`, unlockInit(CODE));
     }
+    // A third caller, same plan as the first, different address.
+    await app.fetch("/api/plans/aaaaaaaaaaaaaaaa/unlock", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [CLIENT_IP_HEADER]: "203.0.113.9",
+      },
+      body: JSON.stringify({ code: CODE }),
+    });
 
     // Without the count this passes on an empty list: two undefined reads are
     // equal, and the handler producing no keys at all is the failure mode.
-    expect(keys).toHaveLength(2);
+    expect(keys).toHaveLength(3);
     // Per-plan would let anyone holding a share link spend the allowance and
     // lock the real readers out of a plan they do not own.
     expect(keys[0]).toBe(keys[1]);
-    // And the address itself is not what is stored.
+    /*
+     * And per-address really is per-address. Equality alone is satisfiable by
+     * a handler that returns one constant for everybody, which would share a
+     * single allowance across the whole internet.
+     */
+    expect(keys[2]).not.toBe(keys[0]);
+    // The address itself is not what is stored, in either bucket.
     expect(keys[0]).not.toContain(CLIENT_IP);
+    expect(keys[2]).not.toContain("203.0.113.9");
   });
 });
 
