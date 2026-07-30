@@ -96,19 +96,22 @@ project (`bunkerplan-test`), separate from the self-hosting stack below, so
 volumes with it. Postgres then works in a scratch schema and MinIO in a bucket
 created for the run, both dropped afterwards.
 
-`bun run test` is `bun test --parallel`, one process per file, and that is not
-a speed choice: Miniflare runs a workerd child process, and sharing a process
-with the AWS SDK intermittently wedges a concurrent S3 request that then never
-settles.
+`bun run test` is `bun test --isolate`: one process, a fresh global object per
+file. It was `--parallel` (one process per file, which implies `--isolate`),
+and the reason for the change is coverage. Bun's parallel reporter registers
+lines that are not statements - comments, blank lines, the continuation lines
+of a multi-line string - as coverable and unhit in workers that loaded a module
+without exercising it. On this repo that invents 1583 such lines and reports
+86% where the same run measures 99.5% in one process, with
+`src/client/errors.ts` at 44% and every branch in it covered. No real line is
+found by one topology and missed by the other; only the denominator moves.
 
-That is also why the coverage figure from `bun run test` reads low. Bun
-instruments per worker and the merged report credits each file only with the
-lines its own worker executed, so a module exercised from several files is
-undercounted - `src/client/errors.ts` reports 44% of lines with every branch
-in it covered. A plain `bun test` runs the suite in one process and the report
-adds up, but one process is the arrangement `--parallel` exists to avoid, so
-that is a thing to reach for deliberately when a number is in question, not a
-second way to run the suite. CI runs `bun run test`.
+What `--parallel` was buying is real and is now given up: Miniflare runs a
+workerd child process, and sharing a process with the AWS SDK intermittently
+wedges a concurrent S3 request that then never settles - see
+tests/drivers/plan-storage.r2.test.ts. A run that hangs rather than fails is
+that, and the answer is to re-run with `--parallel` to confirm before hunting
+it in the suite.
 
 ## Self-hosting
 

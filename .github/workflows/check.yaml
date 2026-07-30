@@ -99,11 +99,17 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      # `bun run test` is `bun test --parallel`: one process per file. That is
-      # not a speed choice. Miniflare runs a workerd child process, and holding
+      # `bun run test` is `bun test --isolate`: one process, a fresh global per
+      # file. It was `--parallel` (one process per file); that was changed
+      # because Bun's parallel coverage reporter counts comments, blank lines
+      # and multi-line-string continuations as uncovered, reporting 86% where
+      # the same suite measures 99.5% in one process. See README.md.
+      #
+      # What that gives up: Miniflare runs a workerd child process, and holding
       # one open in the same process as the AWS SDK intermittently wedges a
       # concurrent S3 request that then never settles - see
-      # tests/drivers/plan-storage.r2.test.ts.
+      # tests/drivers/plan-storage.r2.test.ts. A job that hangs here rather
+      # than failing is that; re-run with `--parallel` to confirm.
       #
       # The suite also serves the real Workers bundle on Miniflare, so it
       # builds one first. That covers what a separate build step used to: a

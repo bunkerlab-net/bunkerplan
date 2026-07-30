@@ -20,7 +20,7 @@
     "dev:node": "bun run scripts/dev.ts node",
     "postinstall": "bun run scripts/vendor-scalar.ts",
     "start": "bun dist/server/index.js",
-    "test": "bun run build && BUNKERPLAN_PREBUILT=1 bun test --parallel",
+    "test": "bun run build && BUNKERPLAN_PREBUILT=1 bun test --isolate",
     "test:backends": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml up -d --wait postgres valkey minio",
     "test:backends:down": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml down -v",
     "typecheck": "bun run build && tsc --noEmit"
