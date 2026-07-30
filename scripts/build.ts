@@ -16,7 +16,6 @@
  * targets serve them from; nothing else does it now.
  */
 import { mkdir, readdir, rm } from "node:fs/promises";
-import { MANIFEST_FILENAME } from "../src/server/assets.ts";
 
 const OUT = "dist";
 const CLIENT_OUT = `${OUT}/client`;
@@ -24,6 +23,13 @@ const SERVER_OUT = `${OUT}/server`;
 /** Where src/node.ts serves the client bundle from, relative to the CWD. */
 const CLIENT_DIR = `./${CLIENT_OUT}`;
 const GENERATED = "src/server/manifest.generated.ts";
+/**
+ * Spelled here rather than imported from src/server/assets.ts: this script
+ * generates into `src/server/`, and importing out of it first makes the build
+ * depend on a directory it has not finished writing. tests/assets.test.ts
+ * holds this name, the generated module, and the file on disk to each other.
+ */
+const MANIFEST_FILENAME = "manifest.json";
 
 const minify = process.env["BUILD_DEBUG"] !== "1";
 
