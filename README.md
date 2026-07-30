@@ -106,11 +106,12 @@ The run is `--isolate`, which gives each file its own module registry. That is
 the topology that measures coverage correctly. `--parallel` does not: its
 reporter registers lines that are not statements - comments, blank lines, the
 continuation lines of a multi-line string - as coverable and unhit in workers
-that loaded a module without exercising it. On this repo that invents 1583
-such lines and reports 86% where the same run measures 99.5% in one process,
-with `src/client/errors.ts` at 44% and every branch in it covered. No real
-line is found by one topology and missed by the other; only the denominator
-moves.
+that loaded a module without exercising it. Measured on this repo under Bun
+1.3.14, that invents 1583 such lines and reports 86% where the same run
+measures 99.5% in one process, with `src/client/errors.ts` at 44% and every
+branch in it covered. That is one observation of one toolchain: in it, no real
+line was found by one topology and missed by the other, and only the
+denominator moved. A later Bun may report differently.
 
 What `--isolate` costs is intermittent failures. What is observed: several
 tests in one file failing together at almost exactly 5000ms, Bun's per-test

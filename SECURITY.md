@@ -57,13 +57,15 @@ Known and accepted, so please do not report these as new:
   holding its URL, by design. A private one is not: it still needs its share
   code, the cookie a redemption left, an API key whose owner may read it, or a
   session for the owner or a granted account.
-- **Anyone who can see a share link can read the code in it, so no URL carries
-  the code to a server.** The dashboard hands out `/s/{id}#code=…`. A fragment
-  is never sent with the request, so opening that link puts the code in no
-  request line, no access log and no `Referer`. The code itself does reach this
-  deployment when it is redeemed, in the body of `POST /api/plans/{id}/unlock` -
-  a code has to be presented to be checked - so a proxy that logs request bodies
-  sees it there; what the fragment buys is that no URL carries it. `/s/{id}` is
+- **Anyone who can see a share link can read the code in it, so the link the
+  dashboard hands out keeps the code out of the request that opens it.** That
+  link is `/s/{id}#code=…`, and a fragment is never sent to a server, so
+  following it puts the code in no request line, no access log and no
+  `Referer`. Both halves of that are narrow: the `?code=` fallback below is a
+  URL that does carry the code, and redemption sends it deliberately, in the
+  body of `POST /api/plans/{id}/unlock` - a code has to be presented to be
+  checked - where a proxy that logs request bodies sees it. What the fragment
+  buys is that getting to the page costs nothing. `/s/{id}` is
   the app's own page, under the app policy, and it strips the code from the
   address bar before it tries to redeem it - so a wrong code or a dropped connection
   does not leave it in history either. It is deliberately not `/p/{id}#code=`:

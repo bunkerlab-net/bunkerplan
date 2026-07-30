@@ -30,6 +30,13 @@ describe("the /api/docs page", () => {
    * exception. Scalar's defaults break that twice: the theme fetches fonts
    * from fonts.scalar.com, and the AI chat fetches the document registry from
    * api.scalar.com before anyone has asked it for anything.
+   *
+   * A source check, deliberately. Observing it instead means booting a server,
+   * a browser and a 3.5 MB bundle to watch what it requests - and the thing
+   * that would break here is a config flag flipping back, which is exactly
+   * what reading the config catches. The runtime half is covered where it can
+   * be cheap: tests/app-routes.test.ts pins the `script-src 'self'` policy
+   * that refuses an off-origin script whatever the page asks for.
    */
   test("loads the spec by URL and reaches nothing off-origin", async () => {
     const boot = await Bun.file(BOOT).text();
@@ -70,18 +77,26 @@ describe("the /api/docs page", () => {
   /**
    * And so is the bootstrap, which is committed rather than vendored.
    *
-   * The page has to ask for it too. Existence alone would pass for a document
-   * that dropped the tag or misspelled the path - which is the same dead page
-   * the inline `<script>` produced, and the test above only requires that
-   * every tag have some `src`.
+   * Three things have to agree: the page asks for a path, that path exists in
+   * `public/`, and the build copies it to where the server serves from.
+   * Existence in the source tree alone would pass for a document that dropped
+   * the tag, and for a build that stopped copying `public/` - both of which
+   * ship the same dead page the inline `<script>` did.
    */
-  test("the bootstrap is present, and the page asks for it", async () => {
+  test("the bootstrap is asked for, committed, and built", async () => {
     const srcs = [...DOCS_PAGE.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map(
       (match) => match[1],
     );
 
     expect(srcs).toEqual([SCALAR_SCRIPT_PATH, DOCS_BOOT_PATH]);
     expect(await Bun.file(BOOT).exists()).toBe(true);
+    // Same dependency on a build as tests/assets.test.ts, which `bun run test`
+    // satisfies by building first.
+    expect(
+      await Bun.file(
+        `${import.meta.dir}/../dist/client${DOCS_BOOT_PATH}`,
+      ).exists(),
+    ).toBe(true);
   });
 
   /**

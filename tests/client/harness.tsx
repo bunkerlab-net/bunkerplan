@@ -238,8 +238,8 @@ export function deferred<T>(): {
  * The value is assigned before the event so the handler's `event.target.value`
  * reads what was typed, which is how the panels' `controlValue` works.
  */
-export async function type(
-  node: HTMLInputElement | HTMLTextAreaElement,
+async function setValue(
+  node: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
   value: string,
 ): Promise<void> {
   node.value = value;
@@ -248,15 +248,14 @@ export async function type(
   await flush();
 }
 
-export async function choose(
-  node: HTMLSelectElement,
+export const type = (
+  node: HTMLInputElement | HTMLTextAreaElement,
   value: string,
-): Promise<void> {
-  node.value = value;
-  node.dispatchEvent(new Event("input", { bubbles: true }));
-  node.dispatchEvent(new Event("change", { bubbles: true }));
-  await flush();
-}
+): Promise<void> => setValue(node, value);
+
+/** The same, for a `<select>`, where `type` would read as keyboard input. */
+export const choose = (node: HTMLSelectElement, value: string): Promise<void> =>
+  setValue(node, value);
 
 /**
  * Fires a file-picker change with `files` populated.

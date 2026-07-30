@@ -23,6 +23,17 @@ function usePasskeyWrite(
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
 
+  /*
+   * `operation` resolves an object, never `undefined`. `addPasskey` is
+   * @better-auth/passkey's own `registerPasskey`, whose declared return
+   * (dist/client.d.mts) is a union of objects and whose every path returns
+   * one; `deletePasskey` has no client-side function at all - it is generated
+   * from the endpoint, and resolves the `{ data, error }` envelope every
+   * generated action does. Both satisfy this signature, which is what tsc
+   * checks at the two call sites below. Widening it back to `| undefined`
+   * would put a nullish branch here that nothing can reach, and the panel
+   * would have to decide whether a result it cannot get counts as success.
+   */
   const run = async (
     operation: () => Promise<{ error?: { message?: string } | null }>,
     fallback: string,

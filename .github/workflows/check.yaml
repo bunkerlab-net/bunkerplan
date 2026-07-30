@@ -103,6 +103,12 @@ jobs:
       # bunfig.toml. That is the topology that measures coverage correctly and
       # the one that flakes; see README.md for the shape a real failure has.
       #
+      # Run once, on purpose. Bun's `--rerun-each` repeats every test rather
+      # than retrying the failures, so it multiplies the run time of a
+      # container-backed suite to hide a fault nobody has isolated - and a
+      # green second attempt is the exact evidence README.md says not to
+      # accept. A red run here is a thing to read, not a thing to re-roll.
+      #
       # The suite also serves the real Workers bundle on Miniflare, so it
       # builds one first. That covers what a separate build step used to: a
       # bundle that does not build fails here, before anything is published.

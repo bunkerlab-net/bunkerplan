@@ -439,7 +439,11 @@ export function buildApp(
   const storage = options.storage ?? memoryStorage();
   const db: Db = {
     adapter: {},
-    provider: "sqlite",
+    // Matches `CONFIG.dbDriver`. Nothing here reads it - `fakeAuth` stands in
+    // for the auth instance, and the drizzle adapter in src/auth/instance.ts
+    // is its only consumer - but a fixture naming two different databases is
+    // a state no deployment can be in, and one a future reader could branch on.
+    provider: "pg",
     plans,
     uploadRateLimits: options.uploadRateLimits ?? openRateLimits,
     unlockRateLimits: options.unlockRateLimits ?? openRateLimits,

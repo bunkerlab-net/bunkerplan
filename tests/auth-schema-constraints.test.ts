@@ -115,10 +115,8 @@ const OWNED_BY_USER: ReadonlyArray<[table: string, column: string]> = [
 
 type Dialect = "pg" | "sqlite";
 
-// `[Dialect]`, not `readonly [Dialect]`: `satisfies` accepts the `as const`
-// rows against either, and both reject a misspelled dialect at this line.
 const generated = [["pg"], ["sqlite"]] as const satisfies ReadonlyArray<
-  [Dialect]
+  readonly [Dialect]
 >;
 
 /**

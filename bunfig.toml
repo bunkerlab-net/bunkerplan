@@ -6,4 +6,6 @@ minimumReleaseAge = 86400
 frozenLockfile = false
 
 [test]
+# Enables coverage reporting.
+# Default `false`. Use `--coverage` to override.
 coverage = true

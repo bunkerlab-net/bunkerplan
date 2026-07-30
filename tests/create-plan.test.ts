@@ -174,6 +174,10 @@ describe("createPlan with ?grants=", () => {
 describe("createPlan when the upload budget is spent", () => {
   test("refuses before the body is read, not after", async () => {
     const { deps: d, stored } = deps();
+    // No `windowStart`: `RateLimitResult` is a union, and the refused arm is
+    // `{ allowed: false; retryAfter }`. There is no window to refund a count
+    // to when no count was taken, so the field does not exist on this side -
+    // adding one would not typecheck.
     d.uploadRateLimits = {
       consume: async () => ({ allowed: false, retryAfter: 30 }),
       refund: async () => {},
