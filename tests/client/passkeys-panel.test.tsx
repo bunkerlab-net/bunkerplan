@@ -211,7 +211,7 @@ describe("PasskeysPanel adding", () => {
     expect(view.find(".error").textContent).toBe("could not add a passkey");
   });
 
-  test("an undefined outcome counts as success, and the list is re-read", async () => {
+  test("a success re-reads the list rather than appending the row", async () => {
     // The refresh is the only thing that puts the new key on the page - the
     // panel never appends the row itself - so a success that skipped it would
     // leave the visitor looking at a list without the passkey they just made.
@@ -222,7 +222,9 @@ describe("PasskeysPanel adding", () => {
     });
     client.passkey.addPasskey = async () => {
       listed = [passkey({ id: "pk9", name: "Fresh" })];
-      return undefined;
+      // The shape the plugin actually resolves; every path in
+      // @better-auth/passkey's `registerPasskey` returns one of these.
+      return { data: { id: "pk9" }, error: null };
     };
     const view = await mountAsync(<PasskeysPanel />);
     expect(view.all("tbody tr").length).toBe(0);

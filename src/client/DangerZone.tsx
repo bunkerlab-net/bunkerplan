@@ -87,7 +87,7 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
   let result = await authClient().deleteUser();
   if (result.error?.code === "SESSION_EXPIRED") {
     const reauth = await authClient().signIn.passkey();
-    if (reauth?.error) {
+    if (reauth.error) {
       // `messageOf`, not `?? fallback`: Better Auth can hand back an empty or
       // whitespace-only message, and `??` only catches the absent one - the
       // rest render as a blank error line.
@@ -96,9 +96,19 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
         message: messageOf(reauth.error, "re-authentication failed"),
       };
     }
-    // The ceremony's own answer, not the store: the store may not have caught
-    // up, and this is the authoritative record of who was just signed in.
-    if ((reauth?.data?.user?.id ?? null) !== intended) {
+    /*
+     * The ceremony's own answer, not the store: the store may not have caught
+     * up, and this is the authoritative record of who was just signed in.
+     *
+     * Read straight - no `?.`, no `?? null` standing in for an absent id.
+     * @better-auth/passkey declares `signIn.passkey` as a union of objects
+     * with no `undefined` member (dist/client.d.mts), and every path through
+     * its `signInPasskey` returns one of them, so past the error above the id
+     * is a `string`. A branch for a missing one would be handling a state the
+     * dependency cannot produce, and would have to guess whether to call it a
+     * refusal or the wrong account.
+     */
+    if (reauth.data.user.id !== intended) {
       return { kind: "blocked", message: WRONG_ACCOUNT };
     }
     result = await authClient().deleteUser();

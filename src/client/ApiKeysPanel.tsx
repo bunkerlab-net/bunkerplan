@@ -284,6 +284,12 @@ function KeysTable(props: {
   onRevoke: (keyId: string) => Promise<void>;
 }) {
   return (
+    /*
+     * No `role="region"`: a `<section>` with an accessible name already has
+     * that role implicitly (ARIA in HTML), so spelling it out adds nothing an
+     * assistive technology can tell apart. The `aria-label` is what supplies
+     * the name, and without one the element would fall back to `generic`.
+     */
     <section
       className="table-scroll"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).

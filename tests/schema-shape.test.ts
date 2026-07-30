@@ -241,17 +241,24 @@ const tables = [
 ] as const;
 
 describe.each(tables)("%s", (name, pg, sqlite) => {
-  const shapes = [
-    ["pg", shapeOf("pg", pg)],
-    ["sqlite", shapeOf("sqlite", sqlite)],
-  ] as const;
+  /*
+   * Lazy, not a value computed in the `describe` body: `shapeOf` reads a
+   * dialect's table config, and one that threw during collection would take
+   * the whole file down with a stack pointing at no test in particular.
+   * Called inside each test, the failure lands on the case that provoked it.
+   */
+  const shapeFor = (dialect: "pg" | "sqlite") =>
+    dialect === "pg" ? shapeOf("pg", pg) : shapeOf("sqlite", sqlite);
 
   test("is named the same in both dialects", () => {
-    expect(shapes.map(([, shape]) => shape.name)).toEqual([name, name]);
+    expect((["pg", "sqlite"] as const).map((d) => shapeFor(d).name)).toEqual([
+      name,
+      name,
+    ]);
   });
 
   test("the two dialects have not drifted", () => {
-    const [[, fromPg], [, fromSqlite]] = shapes;
+    const [fromPg, fromSqlite] = [shapeFor("pg"), shapeFor("sqlite")];
     // Whole records, not just names: `notNull`, `primary`, the SQL type and the
     // default are all rules the database enforces, and any of them holding on
     // one dialect and not the other is the drift this file exists to catch.
@@ -265,9 +272,10 @@ describe.each(tables)("%s", (name, pg, sqlite) => {
     expect(fromSqlite.uniqueConstraints).toEqual(fromPg.uniqueConstraints);
   });
 
-  test.each(shapes)(
+  test.each(["pg", "sqlite"] as const)(
     "%s marks every column that cannot be null",
-    (_d, shape) => {
+    (dialect) => {
+      const shape = shapeFor(dialect);
       const nullable = shape.columns
         .filter((column) => !column.notNull && !column.primary)
         .map((column) => column.name);

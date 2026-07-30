@@ -57,9 +57,9 @@ Known and accepted, so please do not report these as new:
   holding its URL, by design. A private one is not: it still needs its share
   code, the cookie a redemption left, an API key whose owner may read it, or a
   session for the owner or a granted account.
-- **A share code in a URL is visible wherever that URL is, so the link people
-  paste does not put it in one a server sees.** The dashboard hands out
-  `/s/{id}#code=…`. A fragment is never sent to a server, so it reaches no
+- **Anyone who can see a share link can read the code in it, so no URL carries
+  the code to a server.** The dashboard hands out `/s/{id}#code=…`. A fragment
+  is never sent with the request, so opening that link puts the code in no
   request line, no access log and no `Referer`. The code itself does reach this
   deployment when it is redeemed, in the body of `POST /api/plans/{id}/unlock` -
   a code has to be presented to be checked - so a proxy that logs request bodies

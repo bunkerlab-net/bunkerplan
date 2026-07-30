@@ -24,9 +24,7 @@ function usePasskeyWrite(
   const inFlight = useRef(false);
 
   const run = async (
-    operation: () => Promise<
-      { error?: { message?: string } | null } | undefined
-    >,
+    operation: () => Promise<{ error?: { message?: string } | null }>,
     fallback: string,
   ) => {
     if (inFlight.current) return;
@@ -34,7 +32,7 @@ function usePasskeyWrite(
     setBusy(true);
     try {
       const result = await operation();
-      if (result?.error) {
+      if (result.error) {
         // `messageOf`, not `?? fallback`: an empty or whitespace-only message
         // renders a blank error line, and `??` only catches the absent one. The
         // thrown path below already reads it this way.
@@ -165,6 +163,10 @@ function PasskeysTable(props: {
   onDelete: (id: string) => Promise<void>;
 }) {
   return (
+    /*
+     * No `role="region"`: a named `<section>` already has it implicitly - see
+     * the same note in ApiKeysPanel.tsx.
+     */
     <section
       className="table-scroll"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).

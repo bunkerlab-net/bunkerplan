@@ -363,6 +363,16 @@ export const closedRateLimits: RateLimitRepo = {
   refund: async () => {},
 };
 
+/**
+ * Nothing is closing.
+ *
+ * Deliberately stateless: no HTTP route calls `open` - only Better Auth's
+ * `onBeforeDeleteUser` does - so nothing reachable through `buildApp` can
+ * make `isOpen` answer differently. A fake that remembered would be
+ * flexibility no test can drive. The suite that does drive the transition,
+ * tests/upload-delete-race.test.ts, carries its own stateful one; a route test
+ * wanting the closing branch passes `isOpen: async () => true`.
+ */
 export const openAccounts: AccountClosingRepo = {
   open: async () => {},
   isOpen: async () => false,

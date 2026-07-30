@@ -2,14 +2,15 @@ import { r2Storage } from "./backends.ts";
 import { describePlanStorage } from "./contract/plan-storage.ts";
 
 /**
- * Its own file because Miniflare runs a workerd child process, and holding one
- * open in the same test process as the AWS SDK intermittently wedges a
- * concurrent S3 request that then never settles - no socket, so no SDK timeout
- * fires either.
+ * One backend per file. Under `bun run test` that is `--isolate`, which gives
+ * each file its own module registry inside one shared process - so what this
+ * buys is that the two storage backends cannot reach each other's modules, and
+ * nothing more.
  *
- * A file is no longer a process, though: `bun run test` is `--isolate`, which
- * gives each file its own module registry inside one shared process. So this
- * separation keeps the two backends out of each other's modules, and nothing
- * more.
+ * It bought process separation under the `--parallel` runs this file was split
+ * for, when holding a Miniflare workerd child open alongside the AWS SDK could
+ * wedge a concurrent S3 request that then never settled. Whether that is still
+ * reachable in one shared process is untested either way; the split is kept
+ * because one backend per file is how every driver file here is organised.
  */
 describePlanStorage("R2 (Miniflare)", r2Storage, { skip: false });

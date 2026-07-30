@@ -197,6 +197,12 @@ describe("the dashboard", () => {
  * string-valued one does. Every ARIA state and enumerated attribute in this
  * app has to be written as a string for that reason, and this is what says
  * why.
+ *
+ * These record what the pinned hono actually does; they are not a wish. The
+ * mismatch below is the bug the string workaround exists for, so asserting
+ * that the two renderers agree would fail today and delete the only warning
+ * anyone gets if the workaround is dropped. If hono fixes this, these fail -
+ * which is the point, and the moment to reconsider the workaround.
  */
 describe("attributes across the two renderers", () => {
   test("a false boolean is dropped, and a string is kept", async () => {

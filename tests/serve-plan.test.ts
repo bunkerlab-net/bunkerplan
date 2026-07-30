@@ -381,7 +381,7 @@ describe("a plan that is not there", () => {
     await app.fetch(`/api/plans/${PLAN_ID}`, { method: "DELETE" });
 
     const gone = await app.fetch(`/p/${PLAN_ID}`);
-    const never = await app.fetch("/p/neverissued1234");
+    const never = await app.fetch("/p/neverissued12345");
 
     expect(gone.status).toBe(never.status);
     expect(await gone.text()).toBe(await never.text());

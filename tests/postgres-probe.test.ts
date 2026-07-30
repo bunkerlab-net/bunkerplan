@@ -177,7 +177,10 @@ describe("the Postgres health probe", () => {
     // At the abort, not whenever `query_timeout` eventually fires and hands a
     // still-live connection back to the pool.
     expect(released).toEqual([{ destroyed: true }]);
-    await expect(probing).rejects.toThrow("health probe abandoned");
+    // That it rejects, not with what: a destroyed connection takes its query
+    // down with whatever error the driver raises, and pinning this stub's
+    // wording would assert the stub rather than the probe.
+    await expect(probing).rejects.toThrow();
     // And once: the `finally` still runs, and releasing the same client twice
     // is an error `pg` throws.
     expect(released).toEqual([{ destroyed: true }]);

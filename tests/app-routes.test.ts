@@ -162,7 +162,7 @@ describe("the plan collection", () => {
       plans: memoryPlans(
         [
           storedPlan({ id: "aaaaaaaaaaaaaaaa", grants: [GRANTEE] }),
-          storedPlan({ id: "bbbbbbbbbbbbbbbb" }),
+          storedPlan({ id: "bbbbbbbbbbbbbbbb", shareCodeHash: "d".repeat(64) }),
         ],
         { "brisk-heron": GRANTEE },
       ),
@@ -173,8 +173,16 @@ describe("the plan collection", () => {
     };
     const flags = (id: string) => body.plans.find((row) => row.id === id);
 
-    expect(flags("aaaaaaaaaaaaaaaa")).toMatchObject({ hasGrants: true });
-    expect(flags("bbbbbbbbbbbbbbbb")).toMatchObject({ hasGrants: false });
+    // Crossed on purpose: one row has grants and no code, the other a code and
+    // no grants, so a route reporting one field for both fails here.
+    expect(flags("aaaaaaaaaaaaaaaa")).toMatchObject({
+      hasGrants: true,
+      hasShareCode: false,
+    });
+    expect(flags("bbbbbbbbbbbbbbbb")).toMatchObject({
+      hasGrants: false,
+      hasShareCode: true,
+    });
   });
 
   test("a full page says so rather than silently returning a short list", async () => {

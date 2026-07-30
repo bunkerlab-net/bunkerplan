@@ -42,7 +42,19 @@ let queued: Response[] = [];
 beforeEach(() => {
   sent.length = 0;
   queued = [];
-  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+  // `Object.assign` for `preconnect`, which Bun's `fetch` type carries and a
+  // bare function does not: casting instead would stop checking the call
+  // signature, which is the half that matters here.
+  const stub = async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (input instanceof Request) {
+      /*
+       * Nothing in src/client/api.ts builds one, and reading a Request's
+       * method, headers and body back out here would be a second copy of the
+       * capture below - one that could disagree with it. Saying so is what
+       * stops a caller that starts using one from being recorded wrongly.
+       */
+      throw new Error("the fetch stub takes a url and init, not a Request");
+    }
     // Through `Headers` rather than `Object.entries`: that yields nothing for a
     // `Headers` instance or an array of pairs, so a capture would come back
     // empty and take the assertions with it. `Headers` also lower-cases keys.
@@ -59,7 +71,8 @@ beforeEach(() => {
     const next = queued.shift();
     if (next === undefined) throw new Error("no response was queued");
     return next;
-  }) as typeof fetch;
+  };
+  globalThis.fetch = Object.assign(stub, { preconnect: realFetch.preconnect });
 });
 
 afterEach(() => {
