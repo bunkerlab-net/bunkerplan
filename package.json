@@ -23,7 +23,6 @@
     "test": "bun run build && BUNKERPLAN_PREBUILT=1 bun test --parallel",
     "test:backends": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml up -d --wait postgres valkey minio",
     "test:backends:down": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml down -v",
-    "test:coverage": "bun run build && BUNKERPLAN_PREBUILT=1 bun test --isolate",
     "typecheck": "bun run build && tsc --noEmit"
   },
   "dependencies": {

@@ -166,9 +166,10 @@ describe("the dashboard", () => {
 
 /**
  * The general rule, stated once against the renderer rather than against any
- * one page: a boolean-valued attribute does not survive, and a string-valued
- * one does. Every ARIA state and enumerated attribute in this app has to be
- * written as a string for that reason, and this is what says why.
+ * one page: a boolean-valued attribute does not survive as one, and a
+ * string-valued one does. Every ARIA state and enumerated attribute in this
+ * app has to be written as a string for that reason, and this is what says
+ * why.
  */
 describe("attributes across the two renderers", () => {
   test("a false boolean is dropped, and a string is kept", async () => {
@@ -201,5 +202,26 @@ describe("attributes across the two renderers", () => {
     expect(host.querySelector("input")?.getAttribute("data-kept")).toBe(
       "false",
     );
+  });
+
+  test("a true boolean becomes empty, which is not what it rendered as", async () => {
+    const host = document.createElement("div");
+    host.innerHTML = '<input type="text" spellcheck="true" aria-busy="true">';
+    document.body.appendChild(host);
+    hosts.push(host);
+
+    const Box = () => <input type="text" spellcheck={true} aria-busy={true} />;
+    roots.push(hydrateRoot(host, <Box />));
+    await flush();
+
+    /*
+     * The other half of the rule, and the worse half. `false` at least
+     * disappears visibly; `true` survives as the empty string, so the server's
+     * `aria-busy="true"` becomes `aria-busy=""` on hydration - which is not a
+     * valid ARIA state value at all, where the boolean it came from was fine.
+     */
+    const input = host.querySelector("input");
+    expect(input?.getAttribute("spellcheck")).toBe("");
+    expect(input?.getAttribute("aria-busy")).toBe("");
   });
 });

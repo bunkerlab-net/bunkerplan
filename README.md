@@ -105,10 +105,10 @@ That is also why the coverage figure from `bun run test` reads low. Bun
 instruments per worker and the merged report credits each file only with the
 lines its own worker executed, so a module exercised from several files is
 undercounted - `src/client/errors.ts` reports 44% of lines with every branch
-in it covered. `bun run test:coverage` runs the same suite in one process for
-an accurate number (99.5% of lines at the time of writing). It is a
-measurement, not the gate: it is the process-sharing arrangement the flag
-exists to avoid, so CI runs `bun run test`.
+in it covered. A plain `bun test` runs the suite in one process and the report
+adds up, but one process is the arrangement `--parallel` exists to avoid, so
+that is a thing to reach for deliberately when a number is in question, not a
+second way to run the suite. CI runs `bun run test`.
 
 ## Self-hosting
 
