@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
+import { EmptyOrLoading } from "./EmptyOrLoading.tsx";
 import { messageOf } from "./errors.ts";
 import { useWriteLatch } from "./write-latch.ts";
 
@@ -167,9 +168,7 @@ export function ApiKeysPanel() {
         // at all when it failed: the error line above is the whole story
         // then, and "No API keys." beside it would be a second, wrong one.
         error === null && (
-          <p className="empty" style={{ marginTop: "24px" }}>
-            {loaded ? "No API keys." : "Loading…"}
-          </p>
+          <EmptyOrLoading loaded={loaded} empty="No API keys." />
         )
       ) : (
         <KeysTable keys={keys} busy={busy} onRevoke={revoke} />

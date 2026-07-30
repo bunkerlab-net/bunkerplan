@@ -136,10 +136,15 @@ export async function reserveUnlockAttempt(
 /**
  * Gives the reservation back, for an attempt that turned out to be a redemption.
  *
- * A failure here is swallowed by the caller rather than surfaced: the count was
- * already taken, so losing the refund only leaves the budget one lower than it
- * should be. That errs towards refusing, which is the safe direction, and it
- * must not turn a redemption the reader completed into a 500.
+ * Rejects rather than swallowing, and the one caller catches it. That is on
+ * purpose: losing a refund only leaves the budget one lower than it should be
+ * - erring towards refusing, which is the safe direction - but it is also the
+ * only sign that refunds are failing at all, and the caller is where the
+ * logger is. Swallowing here would make the symptom silent and hand the reader
+ * the same 200 either way.
+ *
+ * What must not happen is a redemption the reader completed turning into a
+ * 500, and that is what the caller's `catch` in src/app.ts prevents.
  */
 export async function refundUnlockAttempt(
   limits: RateLimitRepo,

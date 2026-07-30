@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
+import { EmptyOrLoading } from "./EmptyOrLoading.tsx";
 import { messageOf } from "./errors.ts";
 import { useWriteLatch } from "./write-latch.ts";
 
@@ -100,9 +101,7 @@ export function PasskeysPanel() {
         // at all when it failed: the error line above is the whole story
         // then, and "No passkeys" beside it would be a second, wrong one.
         error === null && (
-          <p className="empty" style={{ marginTop: "24px" }}>
-            {loaded ? "No passkeys." : "Loading…"}
-          </p>
+          <EmptyOrLoading loaded={loaded} empty="No passkeys." />
         )
       ) : (
         <PasskeysTable

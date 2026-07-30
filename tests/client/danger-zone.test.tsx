@@ -171,6 +171,10 @@ describe("DangerZone", () => {
 
     // The session is still the account this mounted for, so the delete goes
     // through - which is only true if the swap did not take.
+    //
+    // A prop that changed cannot block on its own, and that is the point: what
+    // blocks is the session disagreeing with the latch, which "a client
+    // already holding another account is refused" covers.
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
     await click(view.byText("button", "Delete account"));
 

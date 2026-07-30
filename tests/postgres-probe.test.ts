@@ -199,15 +199,16 @@ describe("the Postgres health probe", () => {
     // The query is in flight, which is the state the abort has to interrupt.
     await reaches(() => asked.length === 1);
 
-    controller.abort();
+    const reason = new Error("probe timed out after 2000ms");
+    controller.abort(reason);
 
     // At the abort, not whenever `query_timeout` eventually fires and hands a
     // still-live connection back to the pool.
     expect(released).toEqual([{ destroyed: true }]);
-    // That it rejects, not with what: a destroyed connection takes its query
-    // down with whatever error the driver raises, and pinning this stub's
-    // wording would assert the stub rather than the probe.
-    await expect(probing).rejects.toThrow();
+    // The caller's own reason, the same answer the other two abort paths give.
+    // Destroying the connection is what makes the query reject, so without
+    // that the driver's socket error would surface here instead.
+    await expect(probing).rejects.toBe(reason);
     // And once: the `finally` still runs, and releasing the same client twice
     // is an error `pg` throws.
     expect(released).toEqual([{ destroyed: true }]);

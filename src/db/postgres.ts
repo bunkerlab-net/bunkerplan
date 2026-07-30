@@ -94,6 +94,13 @@ async function probeOnce(pool: pg.Pool, signal?: AbortSignal): Promise<void> {
     await client.query("select 1");
   } catch (cause) {
     release(cause instanceof Error ? cause : new Error(String(cause)));
+    /*
+     * The caller's reason when the caller is why this failed. Destroying the
+     * connection is what makes the in-flight query reject, so an abandoned
+     * probe would otherwise report the driver's socket error - a different
+     * answer from the two abort paths above, for the same event.
+     */
+    if (signal?.aborted) throw signal.reason;
     throw cause;
   } finally {
     signal?.removeEventListener("abort", abandon);
