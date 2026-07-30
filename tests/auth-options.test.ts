@@ -246,12 +246,17 @@ describe("deleting an account", () => {
       },
     });
 
+    // The code, not only the wording: the client reads `WRONG_ACCOUNT` to
+    // decide this refusal is terminal, so a rename here would silently turn a
+    // blocked delete back into a retryable one.
     await expect(
       withHook.user.deleteUser.beforeDelete?.(
         { id: "user-b" },
         asking("user-a"),
       ),
-    ).rejects.toThrow("not the account you meant");
+    ).rejects.toMatchObject({
+      body: { code: "WRONG_ACCOUNT" },
+    });
     // Refused before the sweep, so nothing of `user-b`'s was touched either.
     expect(swept).toEqual([]);
   });

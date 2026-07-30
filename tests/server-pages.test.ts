@@ -284,6 +284,11 @@ describe("the plan gate", () => {
       origin: ORIGIN,
       relay: true,
     });
+    // The same page, so the same refusal to be indexed - and this one is
+    // reached by a URL people paste, which is exactly the one a crawler is
+    // most likely to find. Social tags here would put a plan id in a preview.
+    expect(metaOf(markup, "robots")).toBe("noindex");
+    expect(metaOf(markup, "og:url")).toBeNull();
   });
 });
 

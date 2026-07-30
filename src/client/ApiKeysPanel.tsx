@@ -16,13 +16,15 @@ interface KeyRow {
 const DAY_SECONDS = 86_400;
 
 /** Values are `expiresIn` in SECONDS; the plugin's min/max are in days. */
-const EXPIRY_CHOICES: ReadonlyArray<{ label: string; seconds: number | null }> =
-  [
-    { label: "Never expires", seconds: null },
-    { label: "30 days", seconds: 30 * DAY_SECONDS },
-    { label: "90 days", seconds: 90 * DAY_SECONDS },
-    { label: "365 days", seconds: 365 * DAY_SECONDS },
-  ];
+export const EXPIRY_CHOICES: ReadonlyArray<{
+  label: string;
+  seconds: number | null;
+}> = [
+  { label: "Never expires", seconds: null },
+  { label: "30 days", seconds: 30 * DAY_SECONDS },
+  { label: "90 days", seconds: 90 * DAY_SECONDS },
+  { label: "365 days", seconds: 365 * DAY_SECONDS },
+];
 
 function Reveal({
   value,

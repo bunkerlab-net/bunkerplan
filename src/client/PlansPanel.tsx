@@ -319,9 +319,14 @@ function ShareLink({
    */
   const relay = new URL(url);
   relay.pathname = `/s/${id}`;
-  // Through `hash` rather than concatenation. `planUrl` cannot produce a
-  // fragment today, so this changes no output - it is the API that keeps that
-  // true if the plan URL ever grows one.
+  /*
+   * Both of these go through the URL object rather than concatenation, and for
+   * the same reason: `planUrl` produces neither a query nor a fragment today,
+   * so neither line changes what is emitted - they are what keeps the relay
+   * link free of both if the plan URL ever grows one. A query inherited here
+   * would ride along beside a share code.
+   */
+  relay.search = "";
   relay.hash = `code=${encodeURIComponent(code)}`;
   const link = relay.toString();
   const [copyFailed, setCopyFailed] = useState(false);

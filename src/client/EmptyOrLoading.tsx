@@ -18,7 +18,11 @@ export function EmptyOrLoading(props: {
   empty: string;
 }) {
   return (
-    <p className="empty" style={{ marginTop: "24px" }}>
+    // `aria-live`, because this line replaces itself without anything moving
+    // focus: a reader who asked for their keys and got "Loading…" is told when
+    // that becomes "No API keys.", rather than being left to go and look.
+    // Polite, not assertive - it is a status, and nothing waits on it.
+    <p className="empty" style={{ marginTop: "24px" }} aria-live="polite">
       {props.loaded ? props.empty : "Loading…"}
     </p>
   );

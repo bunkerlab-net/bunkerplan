@@ -452,6 +452,9 @@ describe("the health probe", () => {
     const stray: unknown[] = [];
     const watch = (reason: unknown) => stray.push(reason);
     process.on("unhandledRejection", watch);
+    // Declared before the `try` rather than assigned in one `const`: the
+    // listener is a process-wide global, so every path out of here - including
+    // a `healthz` that rejects - has to reach the `finally` that removes it.
     let response: Response;
     try {
       response = await healthz("node", async () => services);

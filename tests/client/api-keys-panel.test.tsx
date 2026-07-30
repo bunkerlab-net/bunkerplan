@@ -1,6 +1,9 @@
 import "./dom-env.ts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ApiKeysPanel } from "../../src/client/ApiKeysPanel.tsx";
+import {
+  ApiKeysPanel,
+  EXPIRY_CHOICES,
+} from "../../src/client/ApiKeysPanel.tsx";
 import { client, explode, ok, refuse, useAuthStub } from "./auth-stub.ts";
 import {
   choose,
@@ -27,8 +30,6 @@ useAuthStub();
  * returning `{ error }` has to land on the error line - an unhandled rejection
  * would leave the panel looking like nothing happened.
  */
-
-const DAY = 86_400;
 
 /** The row shape the panel renders, so a misspelled override is a type error. */
 interface KeyRow {
@@ -226,16 +227,23 @@ describe("ApiKeysPanel creating", () => {
     expect("expiresIn" in created.options).toBe(false);
   });
 
-  // Typed tuples, not a widened array: `choose` takes the option value and the
-  // assertion takes seconds, so a swapped pair should be a type error here.
-  const EXPIRY_CHOICES: ReadonlyArray<readonly [string, number]> = [
-    ["1", 30 * DAY],
-    ["2", 90 * DAY],
-    ["3", 365 * DAY],
-  ];
+  /*
+   * Derived from the panel's own table, not restated. The option's value is
+   * its index, so a reordered or newly added choice is covered here the moment
+   * it ships - where a hand-written pairing would keep asserting the old
+   * order and pass while the dropdown sent something else.
+   *
+   * `Never expires` is dropped: it sends no `expiresIn` at all, which the case
+   * above pins.
+   */
+  const expiries = EXPIRY_CHOICES.flatMap((choice, index) =>
+    choice.seconds === null
+      ? []
+      : [[String(index), choice.seconds, choice.label] as const],
+  );
 
-  test.each(EXPIRY_CHOICES)(
-    "expiry choice %s sends %i seconds",
+  test.each(expiries)(
+    "expiry choice %s (%i seconds) sends what its label says",
     async (index, seconds) => {
       const created = recordCreate();
       const view = await mountAsync(<ApiKeysPanel />);

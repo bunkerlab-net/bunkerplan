@@ -55,6 +55,7 @@ export function useHarness(): void {
     registered = true;
   });
   afterEach(async () => {
+    const failures: unknown[] = [];
     try {
       const entries = mounted.splice(0);
       if (entries.length > 0) {
@@ -63,7 +64,17 @@ export function useHarness(): void {
         // those would otherwise run *after* the tree came down - subscribing to
         // something with no cleanup left to cancel it.
         await flush();
-        for (const entry of entries) entry.unmount();
+        // Each tree on its own. One component throwing from a cleanup must not
+        // leave the rest mounted into the next test, which is the failure this
+        // hook exists to prevent - so every unmount is attempted and every host
+        // removed, and what went wrong is raised once that is done.
+        for (const entry of entries) {
+          try {
+            entry.unmount();
+          } catch (cause) {
+            failures.push(cause);
+          }
+        }
         // `root.unmount()` is what runs the subtree's effect cleanups.
         // Dropping the host element does not, and neither does rendering the
         // tree away through a parent's own state - measured, both.
@@ -73,6 +84,7 @@ export function useHarness(): void {
     } finally {
       registered = false;
     }
+    if (failures.length > 0) throw failures[0];
   });
 }
 
