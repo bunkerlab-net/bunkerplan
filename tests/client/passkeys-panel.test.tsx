@@ -447,11 +447,13 @@ describe("PasskeysPanel deleting", () => {
   });
 });
 
-test("the scrolling table is reachable by keyboard", async () => {
-  client.passkey.listUserPasskeys = ok([passkey()]);
-  const view = await mountAsync(<PasskeysPanel />);
-  const region = view.find(".table-scroll");
+describe("PasskeysPanel accessibility", () => {
+  test("the scrolling table is reachable by keyboard", async () => {
+    client.passkey.listUserPasskeys = ok([passkey()]);
+    const view = await mountAsync(<PasskeysPanel />);
+    const region = view.find(".table-scroll");
 
-  expect(region.getAttribute("tabindex")).toBe("0");
-  expect(region.getAttribute("aria-label")).toBe("Passkeys");
+    expect(region.getAttribute("tabindex")).toBe("0");
+    expect(region.getAttribute("aria-label")).toBe("Passkeys");
+  });
 });

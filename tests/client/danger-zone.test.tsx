@@ -48,6 +48,22 @@ describe("DangerZone", () => {
     expect(view.text()).toContain("It cannot be undone.");
   });
 
+  /**
+   * A panel whose `userId` starts unresolved and arrives when `#resolve` is
+   * pressed, which is what the session does on a real first paint.
+   */
+  function Resolving() {
+    const [userId, setUserId] = useState<string | null>(null);
+    return (
+      <>
+        <button id="resolve" type="button" onClick={() => setUserId(USER_ID)}>
+          resolve
+        </button>
+        <DangerZone handle={HANDLE} userId={userId} />
+      </>
+    );
+  }
+
   test("a panel mounted before the session resolves can still delete", async () => {
     /*
      * The account is latched on the first render that has one, not on the first
@@ -56,18 +72,6 @@ describe("DangerZone", () => {
      * `deleteAccount` refuses when there is no id to compare against.
      */
     client.deleteUser = ok({ success: true });
-
-    function Resolving() {
-      const [userId, setUserId] = useState<string | null>(null);
-      return (
-        <>
-          <button id="resolve" type="button" onClick={() => setUserId(USER_ID)}>
-            resolve
-          </button>
-          <DangerZone handle={HANDLE} userId={userId} />
-        </>
-      );
-    }
 
     const view = mount(<Resolving />);
     await click(view.find("#resolve"));
@@ -90,18 +94,6 @@ describe("DangerZone", () => {
       deletes += 1;
       return { data: { success: true }, error: null };
     };
-
-    function Resolving() {
-      const [userId, setUserId] = useState<string | null>(null);
-      return (
-        <>
-          <button id="resolve" type="button" onClick={() => setUserId(USER_ID)}>
-            resolve
-          </button>
-          <DangerZone handle={HANDLE} userId={userId} />
-        </>
-      );
-    }
 
     const view = mount(<Resolving />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
@@ -185,6 +177,53 @@ describe("DangerZone", () => {
     // that is already gone.
     expect(navigations).toEqual(["/"]);
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
+  });
+
+  test("names the account it means, so the server can refuse a swap", async () => {
+    /*
+     * The local check above compares a cached session. This is what makes the
+     * comparison sound: the id travels with the request, and Better Auth
+     * checks it against the account that same request authenticated - see
+     * src/http/expected-account.ts. Without it the delete lands on whoever
+     * the session names by the time it arrives.
+     */
+    let options: unknown;
+    client.deleteUser = async (_body: unknown, opts: unknown) => {
+      options = opts;
+      return { data: { success: true }, error: null };
+    };
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+
+    expect(options).toEqual({ headers: { "x-expected-account": USER_ID } });
+  });
+
+  test("a server refusal naming the wrong account holds the button down", async () => {
+    // The case the local check cannot see: the session changed after it ran.
+    // Its answer is terminal for the same reason the local mismatch is, so a
+    // second press must not reach the network.
+    let attempts = 0;
+    client.deleteUser = async () => {
+      attempts += 1;
+      return {
+        data: null,
+        error: {
+          code: "WRONG_ACCOUNT",
+          message: "this session is not the account you meant to delete",
+        },
+      };
+    };
+    const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.find("button"));
+
+    expect(view.text()).toContain("different account");
+    expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
+
+    await click(view.find("button"));
+    expect(attempts).toBe(1);
+    expect(navigations).toEqual([]);
   });
 
   test("a click dispatched without the typed handle deletes nothing", async () => {
@@ -372,11 +411,13 @@ describe("DangerZone", () => {
     const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
 
     /*
-     * The store now reports a different account than the one frozen at mount.
-     * No claim here about a session changed elsewhere and not yet observed -
-     * the client cannot see that, and two requests cannot be made atomic from
-     * here. What is pinned is narrower and real: once the client does know it
-     * is holding somebody else, this panel stops.
+     * The store now reports a different account than the one frozen at mount,
+     * and the panel refuses without asking - no request is made at all.
+     *
+     * This is the local half. A session changed elsewhere and not yet observed
+     * gets past it, which is what the expected-account header is for: the
+     * server compares the named account against the one the request
+     * authenticated, and the test above pins that refusal.
      */
     setSession(signedIn("brisk-heron", "u2"));
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);

@@ -138,6 +138,20 @@ const canonical = (
     return { ...column, type: "(recorded)", default: "(recorded)" };
   });
 
+/**
+ * A total order over whole records.
+ *
+ * Sorting on the columns alone leaves siblings that share them - a plain index
+ * and a unique one over the same pair, two foreign keys from the same column
+ * with different `onDelete` - in whatever order they were declared. The
+ * comparison below pairs the two dialects positionally, so that is enough to
+ * pair one dialect's entry against the other's sibling and call a match a
+ * drift, or the reverse. Every field is in the key because every field is one
+ * the comparison reads.
+ */
+const byRecord = (a: unknown, b: unknown): number =>
+  JSON.stringify(a).localeCompare(JSON.stringify(b));
+
 /** One comparable description per table, from either dialect's config. */
 function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
   const config =
@@ -190,7 +204,7 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
           (column) => column.name ?? renderSql(dialect, column),
         ),
       }))
-      .sort((a, b) => a.columns.join().localeCompare(b.columns.join())),
+      .sort(byRecord),
     foreignKeys: config.foreignKeys
       .map((key) => {
         const reference = key.reference();
@@ -202,7 +216,7 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
           onDelete: key.onDelete,
         };
       })
-      .sort((a, b) => a.columns.join().localeCompare(b.columns.join())),
+      .sort(byRecord),
     // Name and expression both: two dialects can agree on what a constraint is
     // called while disagreeing on what it permits.
     checks: config.checks
@@ -210,13 +224,13 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
         name: check.name,
         value: renderSql(dialect, check.value),
       }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+      .sort(byRecord),
     uniqueConstraints: config.uniqueConstraints
       .map((unique) => ({
         name: unique.name,
         columns: unique.columns.map((column) => column.name),
       }))
-      .sort((a, b) => a.columns.join().localeCompare(b.columns.join())),
+      .sort(byRecord),
   };
 }
 

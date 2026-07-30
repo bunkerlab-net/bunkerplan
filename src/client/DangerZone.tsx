@@ -1,4 +1,5 @@
 import { useRef, useState } from "hono/jsx";
+import { EXPECTED_ACCOUNT_HEADER } from "../http/expected-account.ts";
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
 import { messageOf } from "./errors.ts";
@@ -41,6 +42,18 @@ const currentUserId = (): string | null =>
   authClient().useSession.get().data?.user?.id ?? null;
 
 /**
+ * Deletes, saying which account it means.
+ *
+ * The header is what makes the check atomic: the server refuses outright if
+ * the session it authenticates is not this account.
+ */
+const deleteFor = (intended: string) =>
+  authClient().deleteUser(
+    {},
+    { headers: { [EXPECTED_ACCOUNT_HEADER]: intended } },
+  );
+
+/**
  * Deletes the account this panel was mounted for, re-authenticating once if
  * the session is too old.
  *
@@ -61,13 +74,16 @@ const currentUserId = (): string | null =>
  */
 async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
   /*
-   * A client that already knows it is holding somebody else stops here. This
-   * is not a cross-tab guarantee and is not written as one: the store is a
-   * cache, and even reading the server first would leave a window before the
-   * delete lands. Closing that properly needs an endpoint that takes the
-   * expected account and decides in one request, which Better Auth's
-   * `deleteUser` does not offer. The ceremony check below is the sound one -
-   * it compares the answer the ceremony itself returned.
+   * A client that already knows it is holding somebody else stops here, so a
+   * doomed request is not made at all. It is not the guarantee, and is not
+   * written as one: the store is a cache, and a sign-in in another tab can
+   * still swap the session between this line and the request below.
+   *
+   * What closes that is `deleteFor`, which names the intended account in the
+   * request itself. Better Auth compares it against the account that same
+   * request authenticated, before anything is deleted - see
+   * src/http/expected-account.ts. This check is the fast, local half; that
+   * one is the sound half.
    *
    * An unresolved session is a different answer from a mismatched one. Either
    * id being absent means there is nothing to compare yet, and calling that
@@ -84,7 +100,7 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
     return { kind: "blocked", message: WRONG_ACCOUNT };
   }
 
-  let result = await authClient().deleteUser();
+  let result = await deleteFor(intended);
   if (result.error?.code === "SESSION_EXPIRED") {
     const reauth = await authClient().signIn.passkey();
     if (reauth.error) {
@@ -111,9 +127,18 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
     if (reauth.data.user.id !== intended) {
       return { kind: "blocked", message: WRONG_ACCOUNT };
     }
-    result = await authClient().deleteUser();
+    result = await deleteFor(intended);
   }
   if (result.error) {
+    /*
+     * The authoritative answer to the question the local check only guesses
+     * at: the server compared the named account against the session that made
+     * this request. Terminal for the same reason that check's mismatch is -
+     * this client is holding somebody else, and pressing again cannot help.
+     */
+    if (result.error.code === "WRONG_ACCOUNT") {
+      return { kind: "blocked", message: WRONG_ACCOUNT };
+    }
     return {
       kind: "refused",
       message: messageOf(result.error, "could not delete the account"),

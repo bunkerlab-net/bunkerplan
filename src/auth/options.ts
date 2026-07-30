@@ -1,8 +1,10 @@
 import { apiKey } from "@better-auth/api-key";
 import type { SecondaryStorage } from "@better-auth/core/db";
+import { APIError } from "@better-auth/core/error";
 import { passkey } from "@better-auth/passkey";
 import type { BetterAuthOptions } from "better-auth";
 import { setSessionCookie } from "better-auth/cookies";
+import { EXPECTED_ACCOUNT_HEADER } from "../http/expected-account.ts";
 import { handleEmail, newUserHandle } from "../ids.ts";
 import type { Logger } from "../log.ts";
 
@@ -222,13 +224,36 @@ export function buildAuthOptions(input: AuthOptionsInput) {
     user: {
       deleteUser: {
         enabled: true,
-        ...(input.onBeforeDeleteUser
-          ? {
-              beforeDelete: async (user: { id: string }) => {
-                await input.onBeforeDeleteUser?.(user.id);
-              },
-            }
-          : {}),
+        /*
+         * Two jobs, in this order.
+         *
+         * The first is the only place the intended account can be confirmed
+         * safely. Better Auth resolves the session and calls this inside one
+         * request, so `user` is who this request authenticated as and the
+         * header is who the caller meant - nothing can swap the session
+         * between them, the way it can between a client's own check and the
+         * request that follows it. See src/http/expected-account.ts.
+         *
+         * Required, not merely honoured when present: a check that a caller
+         * can skip is one a client regression silently drops, and what it is
+         * guarding is the deletion of the wrong account.
+         *
+         * The second job is the caller's cleanup, which needs the rows that
+         * are about to go. Throwing from either aborts the deletion.
+         */
+        beforeDelete: async (user: { id: string }, request?: Request) => {
+          const expected = request?.headers.get(EXPECTED_ACCOUNT_HEADER);
+          if (expected !== user.id) {
+            throw new APIError("BAD_REQUEST", {
+              code: "WRONG_ACCOUNT",
+              message:
+                expected == null
+                  ? `deleting an account requires the ${EXPECTED_ACCOUNT_HEADER} header`
+                  : "this session is not the account you meant to delete",
+            });
+          }
+          await input.onBeforeDeleteUser?.(user.id);
+        },
       },
     },
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildAuthOptions } from "../src/auth/options.ts";
+import { EXPECTED_ACCOUNT_HEADER } from "../src/http/expected-account.ts";
 import type { Logger } from "../src/log.ts";
 import { BASE } from "./auth-fixture.ts";
 
@@ -157,8 +158,16 @@ describe("logging", () => {
 });
 
 describe("deleting an account", () => {
-  test("no hook is registered when none is supplied", () => {
-    expect("beforeDelete" in options.user.deleteUser).toBe(false);
+  const asking = (expected: string | null) =>
+    new Request("https://plans.example.test/api/auth/delete-user", {
+      method: "POST",
+      ...(expected === null
+        ? {}
+        : { headers: { [EXPECTED_ACCOUNT_HEADER]: expected } }),
+    });
+
+  test("the hook is always registered, because it is what guards the delete", () => {
+    expect(typeof options.user.deleteUser.beforeDelete).toBe("function");
   });
 
   test("the hook runs with the id, before Better Auth deletes anything", async () => {
@@ -170,7 +179,10 @@ describe("deleting an account", () => {
       },
     });
 
-    await withHook.user.deleteUser.beforeDelete?.({ id: "user-a" });
+    await withHook.user.deleteUser.beforeDelete?.(
+      { id: "user-a" },
+      asking("user-a"),
+    );
 
     // Objects live outside the database, so no foreign key can clean them up.
     expect(swept).toEqual(["user-a"]);
@@ -185,7 +197,52 @@ describe("deleting an account", () => {
     });
 
     await expect(
-      withHook.user.deleteUser.beforeDelete?.({ id: "user-a" }),
+      withHook.user.deleteUser.beforeDelete?.(
+        { id: "user-a" },
+        asking("user-a"),
+      ),
     ).rejects.toThrow("storage is unreachable");
+  });
+
+  test("a session that is not the named account is refused", async () => {
+    /*
+     * The whole point of the header. The session belongs to `user-b` - a
+     * sign-in in another tab landed between the client's own check and this
+     * request - and `user-a` is the account the reader typed a handle for.
+     */
+    const swept: string[] = [];
+    const withHook = buildAuthOptions({
+      ...BASE,
+      onBeforeDeleteUser: async (userId) => {
+        swept.push(userId);
+      },
+    });
+
+    await expect(
+      withHook.user.deleteUser.beforeDelete?.(
+        { id: "user-b" },
+        asking("user-a"),
+      ),
+    ).rejects.toThrow("not the account you meant");
+    // Refused before the sweep, so nothing of `user-b`'s was touched either.
+    expect(swept).toEqual([]);
+  });
+
+  test("a request that names no account is refused rather than assumed", async () => {
+    // Failing closed: a caller that skipped the header has not said which
+    // account it means, and defaulting to the session is the guess this
+    // exists to prevent.
+    await expect(
+      options.user.deleteUser.beforeDelete?.({ id: "user-a" }, asking(null)),
+    ).rejects.toThrow(EXPECTED_ACCOUNT_HEADER);
+  });
+
+  test("a call with no request at all is refused too", async () => {
+    // `beforeDelete` takes the request as optional. Nothing in Better Auth's
+    // delete route omits it, but a check that reads a header cannot pass
+    // something it never saw.
+    await expect(
+      options.user.deleteUser.beforeDelete?.({ id: "user-a" }),
+    ).rejects.toThrow(EXPECTED_ACCOUNT_HEADER);
   });
 });

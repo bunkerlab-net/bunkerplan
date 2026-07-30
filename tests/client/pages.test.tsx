@@ -119,7 +119,9 @@ describe("the landing page", () => {
 
   test("one busy flag and one error line serve the nav and the card alike", async () => {
     const ceremony = deferred<unknown>();
-    client.passkey.addPasskey = ceremony.answer;
+    // A thunk, not `ceremony.answer` itself: the panel calls this with its own
+    // options argument, and the deferred takes none.
+    client.passkey.addPasskey = () => ceremony.answer();
     const view = await mountAsync(landing());
 
     view

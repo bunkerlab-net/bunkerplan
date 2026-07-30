@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import realPg from "pg";
 import { type Arm, armWhileFileRuns } from "./armed-mock.ts";
 
@@ -121,16 +121,23 @@ const { createPostgresDb } = await import("../src/db/postgres.ts");
 
 const DSN = "postgres://stub@127.0.0.1:1/stub";
 
-/** Lets the queued continuations run, without advancing the clock. */
-const settle = async () => {
-  for (let turn = 0; turn < 4; turn += 1) await Promise.resolve();
+/**
+ * Waits for the probe to reach an observable point, without advancing a clock.
+ *
+ * A fixed number of microtask turns would be a guess about how many `await`s
+ * the driver happens to have between the call and the query - it passes until
+ * someone adds one. Bounded so a probe that never gets there fails here rather
+ * than hanging the file.
+ */
+const reaches = async (ready: () => boolean) => {
+  for (let turn = 0; turn < 1000; turn += 1) {
+    if (ready()) return;
+    await Promise.resolve();
+  }
+  throw new Error("the probe never reached the expected point");
 };
 
 describe("the Postgres health probe", () => {
-  afterEach(() => {
-    connect = async () => stubClient();
-  });
-
   test("returns its connection to the pool on the answering path", async () => {
     await createPostgresDb(DSN).probe(new AbortController().signal);
 
@@ -170,7 +177,8 @@ describe("the Postgres health probe", () => {
     respond = () => new Promise(() => {});
     const controller = new AbortController();
     const probing = createPostgresDb(DSN).probe(controller.signal);
-    await settle();
+    // The query is in flight, which is the state the abort has to interrupt.
+    await reaches(() => asked.length === 1);
 
     controller.abort();
 
@@ -197,7 +205,8 @@ describe("the Postgres health probe", () => {
       });
     const controller = new AbortController();
     const probing = createPostgresDb(DSN).probe(controller.signal);
-    await settle();
+    // Waiting on the client, which is the state this test is about.
+    await reaches(() => connects === 1);
 
     const reason = new Error("probe timed out after 2000ms");
     controller.abort(reason);

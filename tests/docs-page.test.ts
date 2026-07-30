@@ -40,12 +40,19 @@ describe("the /api/docs page", () => {
    */
   test("loads the spec by URL and reaches nothing off-origin", async () => {
     const boot = await Bun.file(BOOT).text();
+    // Whitespace-normalised, so re-indenting the file or wrapping a line does
+    // not read as the setting having changed.
+    const code = boot
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "")
+      .replace(/\s+/g, " ");
 
-    expect(boot).toContain('url: "/api/openapi.json"');
-    expect(boot).toContain("withDefaultFonts: false");
-    expect(boot).toContain("agent: { disabled: true }");
-    // Comments name the hosts this turns off, so only code is searched.
-    expect(boot.replace(/\/\*[\s\S]*?\*\//g, "")).not.toContain("scalar.com");
+    expect(code).toContain('url: "/api/openapi.json"');
+    expect(code).toContain("withDefaultFonts: false");
+    expect(code).toContain("agent: { disabled: true }");
+    // Both comment forms are stripped above, so the hosts those comments name
+    // do not answer for the code.
+    expect(code).not.toContain("scalar.com");
     expect(DOCS_PAGE).not.toContain("scalar.com");
   });
 
