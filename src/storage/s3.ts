@@ -103,8 +103,12 @@ export function createS3Storage(config: Config): PlanStorage {
       );
     },
 
-    async probe() {
-      await client.send(new HeadBucketCommand({ Bucket: bucket }));
+    async probe(signal) {
+      // The SDK cancels the in-flight request on abort, which is what releases
+      // the socket when the health deadline gives up on a blackholed endpoint.
+      await client.send(new HeadBucketCommand({ Bucket: bucket }), {
+        abortSignal: signal,
+      });
     },
   };
 }

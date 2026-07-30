@@ -267,6 +267,9 @@ describe("replacePlan", () => {
 
     const request = only();
     expect(request).toMatchObject({ url: "/api/plans/abc", method: "PUT" });
+    // The route refuses a body that does not declare itself as HTML, so the
+    // header is part of the request rather than decoration on it.
+    expect(request.headers["content-type"]).toBe("text/html");
     expect(new TextDecoder().decode(request.body as ArrayBuffer)).toBe(
       "<p>new</p>",
     );
@@ -314,6 +317,7 @@ describe("setVisibility", () => {
       url: "/api/plans/abc/sharing",
       method: "PUT",
       body: '{"visibility":"public"}',
+      headers: { "content-type": "application/json" },
     });
   });
 
@@ -370,6 +374,7 @@ describe("addGrants", () => {
       url: "/api/plans/abc/grants",
       method: "POST",
       body: '{"accounts":" a , b "}',
+      headers: { "content-type": "application/json" },
     });
   });
 

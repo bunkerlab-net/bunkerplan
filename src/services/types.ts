@@ -23,15 +23,23 @@ export interface PlanStorage {
   put(id: string, body: Uint8Array): Promise<void>;
   get(id: string): Promise<PlanObject | null>;
   delete(id: string): Promise<void>;
-  /** Throws if the backing store is unreachable. */
-  probe(): Promise<void>;
+  /**
+   * Throws if the backing store is unreachable.
+   *
+   * `signal` is aborted when the health probe gives up. A driver whose client
+   * can carry it MUST pass it down: `/healthz` is unauthenticated, so a
+   * blackholed endpoint that keeps its socket after the deadline is a socket
+   * and a pool client per call. Ignoring it is allowed - not every client API
+   * takes one - and costs only that release.
+   */
+  probe(signal?: AbortSignal): Promise<void>;
 }
 
 export interface KvStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttlSeconds?: number): Promise<void>;
   delete(key: string): Promise<void>;
-  probe(): Promise<void>;
+  probe(signal?: AbortSignal): Promise<void>;
 }
 
 export interface RateLimitResult {
@@ -220,7 +228,7 @@ export interface Db {
    */
   unlockRateLimits: RateLimitRepo;
   accountClosing: AccountClosingRepo;
-  probe(): Promise<void>;
+  probe(signal?: AbortSignal): Promise<void>;
 }
 
 export interface Services {

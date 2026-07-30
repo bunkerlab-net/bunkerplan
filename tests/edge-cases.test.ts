@@ -240,7 +240,7 @@ describe("replacing a plan whose row vanishes underneath", () => {
 });
 
 describe("the health probe", () => {
-  type Probe = () => Promise<void>;
+  type Probe = (signal?: AbortSignal) => Promise<void>;
 
   /**
    * A backend that answers the probe and nothing else.
@@ -377,24 +377,39 @@ describe("the health probe", () => {
     expect(PROBE_TIMEOUT_MS).toBe(2_000);
   });
 
-  test("a probe that never answers fails rather than pinning a socket", async () => {
+  test("a probe that never answers is cancelled, and the route still answers", async () => {
+    let seen: AbortSignal | undefined;
     const { services } = probed({
-      storage: backend(() => new Promise<void>(() => {})),
+      storage: backend((signal?: AbortSignal) => {
+        seen = signal;
+        return new Promise<void>(() => {});
+      }),
     });
 
     const response = await healthz("node", async () => services);
 
-    // The S3 client ships no request timeout, so a blackholed endpoint would
-    // hold a socket and a pool client per call until both ran out. With no
-    // deadline this call never returns and the test times out.
-    //
-    // There is no authorization step to check first: `/healthz` is
-    // deliberately unauthenticated (src/http/healthz.ts), so the probe result
-    // is the only thing this route produces.
+    // With no deadline this call never returns and the test times out. There is
+    // no authorization step to check first: `/healthz` is deliberately
+    // unauthenticated (src/http/healthz.ts), so the probe result is the only
+    // thing this route produces.
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
       checks: { storage: "error" },
     });
+
+    // The half a bare `Promise.race` leaves out. Answering the request is not
+    // the same as releasing the socket behind it, and the signal is the only
+    // thing that reaches the driver: without this the S3 client holds its
+    // connection and a pool client for as long as the endpoint stays silent.
+    //
+    // The reason, not just the flag: `withTimeout` also aborts in its `finally`
+    // once nothing reads the answer, so `aborted` alone is true even if the
+    // deadline itself never fired. This is what says the deadline is what
+    // cancelled it.
+    expect(seen?.aborted).toBe(true);
+    expect((seen?.reason as Error | undefined)?.message).toBe(
+      `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
+    );
   }, 10_000);
 });
 

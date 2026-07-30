@@ -105,11 +105,13 @@ jobs:
       # and multi-line-string continuations as uncovered, reporting 86% where
       # the same suite measures 99.5% in one process. See README.md.
       #
-      # What that gives up: Miniflare runs a workerd child process, and holding
-      # one open in the same process as the AWS SDK intermittently wedges a
-      # concurrent S3 request that then never settles - see
-      # tests/drivers/plan-storage.r2.test.ts. A job that hangs here rather
-      # than failing is that; re-run with `--parallel` to confirm.
+      # What that gives up: intermittent failures from running in one process.
+      # Observed as several tests in one file timing out together at almost
+      # exactly 5000ms - Bun's per-test timeout - most often the Valkey expiry
+      # suite, which waits on real TTLs. The cause is suspected, not
+      # established: the workerd child Miniflare runs is the candidate. A job
+      # that fails that way is a re-run before it is a regression; a real one
+      # fails the same way every time rather than at the deadline.
       #
       # The suite also serves the real Workers bundle on Miniflare, so it
       # builds one first. That covers what a separate build step used to: a

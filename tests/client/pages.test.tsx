@@ -87,10 +87,14 @@ describe("the landing page", () => {
     // session is always unresolved, which is what makes the two renders match.
     const view = mount(landing());
 
+    // Named one at a time rather than swept up by a selector: `every` over an
+    // empty list is true, so a markup change that stopped matching would leave
+    // this green while nothing on the page was held at all.
     expect(
-      view
-        .all<HTMLButtonElement>(".card-feature button")
-        .every((n) => n.disabled),
+      view.byText<HTMLButtonElement>("button", "Create an account").disabled,
+    ).toBe(true);
+    expect(
+      view.byText<HTMLButtonElement>("button", "I already have one").disabled,
     ).toBe(true);
   });
 

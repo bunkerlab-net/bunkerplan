@@ -236,12 +236,28 @@ describe.each(generated)("the %s relational graph", (dialect) => {
   };
 
   test("a user has many of each thing it owns", () => {
-    expect(Object.keys(configOf("userRelations")).sort()).toEqual([
-      "accounts",
-      "apikeys",
-      "passkeys",
-      "sessions",
-    ]);
+    // The destination table, not merely the key: a relation named `passkeys`
+    // that points at `account` reads correctly here and joins the wrong rows.
+    const relations = configOf("userRelations") as Record<
+      string,
+      { referencedTable: object }
+    >;
+
+    expect(
+      Object.fromEntries(
+        Object.entries(relations).map(([key, relation]) => [
+          key,
+          getTableName(
+            relation.referencedTable as Parameters<typeof getTableName>[0],
+          ),
+        ]),
+      ),
+    ).toEqual({
+      accounts: "account",
+      apikeys: "apikey",
+      passkeys: "passkey",
+      sessions: "session",
+    });
   });
 
   test.each([

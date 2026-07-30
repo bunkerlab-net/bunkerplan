@@ -8,8 +8,9 @@ const CHECKS = ["storage", "db", "kv"] as const;
 
 /**
  * A probe that never returns is worse than one that fails: the endpoint is
- * unauthenticated, and the S3 client ships no request timeout, so a blackholed
- * endpoint would pin a socket and a pool client per call until both ran out.
+ * unauthenticated, and the S3 client ships no request timeout of its own, so a
+ * blackholed endpoint would pin a socket and a pool client per call until both
+ * ran out.
  */
 export const PROBE_TIMEOUT_MS = 2_000;
 
@@ -27,16 +28,38 @@ const CACHE_MS = 5_000;
  */
 const cache = new WeakMap<Probed, { at: number; response: () => Response }>();
 
-function withTimeout(probe: Promise<void>): Promise<void> {
-  return Promise.race([
-    probe,
-    new Promise<void>((_, reject) => {
-      setTimeout(
-        () => reject(new Error(`probe timed out after ${PROBE_TIMEOUT_MS}ms`)),
-        PROBE_TIMEOUT_MS,
-      );
-    }),
-  ]);
+/**
+ * Bounds the probe and then cancels it.
+ *
+ * A bare `Promise.race` settles the response and leaves the request running,
+ * which is the half that does not release the socket the deadline exists for.
+ * The signal is what carries the deadline to the driver; one whose client API
+ * cannot take it keeps the old behaviour rather than blocking the rest.
+ */
+async function withTimeout(
+  run: (signal: AbortSignal) => Promise<void>,
+): Promise<void> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      run(controller.signal),
+      new Promise<void>((_, reject) => {
+        timer = setTimeout(() => {
+          const expired = new Error(
+            `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
+          );
+          controller.abort(expired);
+          reject(expired);
+        }, PROBE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    // Only the timer. Aborting here as well would be dead: the race has
+    // settled, so the probe has either answered already or been aborted by the
+    // deadline in the race above.
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -75,9 +98,9 @@ export async function healthz(
   }
 
   const settled = await Promise.allSettled([
-    withTimeout(storage.probe()),
-    withTimeout(db.probe()),
-    withTimeout(kv.probe()),
+    withTimeout((signal) => storage.probe(signal)),
+    withTimeout((signal) => db.probe(signal)),
+    withTimeout((signal) => kv.probe(signal)),
   ]);
 
   const checks: Health["checks"] = {};

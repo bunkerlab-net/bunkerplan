@@ -37,7 +37,14 @@ import * as sqliteRateLimit from "../src/db/schema/rate-limit.sqlite.ts";
 
 interface Shape {
   name: string;
-  columns: Array<{ name: string; notNull: boolean; primary: boolean }>;
+  columns: Array<{
+    name: string;
+    notNull: boolean;
+    primary: boolean;
+    type: string;
+    /** Rendered default, or "-" for a column that has none. */
+    default: string;
+  }>;
   primaryKey: string[];
   indexes: Array<{ unique: boolean; columns: string[] }>;
   foreignKeys: Array<{
@@ -67,6 +74,71 @@ const renderSql = (dialect: "pg" | "sqlite", value: unknown): string =>
     ? new PgDialect().sqlToQuery(value as never).sql
     : new SQLiteSyncDialect().sqlToQuery(value as never).sql;
 
+/** A drizzle `SQL` default, as opposed to a literal one. */
+const isSqlDefault = (value: unknown): boolean =>
+  typeof value === "object" && value !== null && "queryChunks" in value;
+
+/**
+ * Where the two dialects are meant to disagree, both sides written out.
+ *
+ * An instant is a `timestamp` defaulting to `now()` on Postgres and epoch
+ * millis in an `integer` on SQLite; a millisecond count is `bigint` against
+ * `integer`. Recorded as pairs rather than folded into a normaliser, because a
+ * normaliser loose enough to call these equal also calls `text` equal to
+ * `integer`. A difference not written here fails the comparison, and one
+ * written here that no longer holds fails on the way in.
+ */
+const DIALECT_DIFFERENCES: Record<
+  string,
+  Record<"pg" | "sqlite", { type: string; default: string }>
+> = {
+  "plan.created_at": {
+    pg: { type: "timestamp", default: "now()" },
+    sqlite: {
+      type: "integer",
+      default: "(cast(unixepoch('subsecond') * 1000 as integer))",
+    },
+  },
+  "plan_grant.created_at": {
+    pg: { type: "timestamp", default: "now()" },
+    sqlite: {
+      type: "integer",
+      default: "(cast(unixepoch('subsecond') * 1000 as integer))",
+    },
+  },
+  "upload_rate_limit.window_start": {
+    pg: { type: "bigint", default: "-" },
+    sqlite: { type: "integer", default: "-" },
+  },
+  "unlock_rate_limit.window_start": {
+    pg: { type: "bigint", default: "-" },
+    sqlite: { type: "integer", default: "-" },
+  },
+  "account_closing.started_at": {
+    pg: { type: "bigint", default: "-" },
+    sqlite: { type: "integer", default: "-" },
+  },
+};
+
+/**
+ * Collapses a recorded difference to one token, having first checked it is
+ * still the difference that was recorded.
+ */
+const canonical = (
+  table: string,
+  dialect: "pg" | "sqlite",
+  columns: Shape["columns"],
+): Shape["columns"] =>
+  columns.map((column) => {
+    const recorded = DIALECT_DIFFERENCES[`${table}.${column.name}`];
+    if (recorded === undefined) return column;
+
+    expect({ type: column.type, default: column.default }).toEqual(
+      recorded[dialect],
+    );
+    return { ...column, type: "(recorded)", default: "(recorded)" };
+  });
+
 /** One comparable description per table, from either dialect's config. */
 function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
   const config =
@@ -88,6 +160,14 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
         name: column.name,
         notNull: column.notNull,
         primary: column.primary,
+        // A column retyped on one dialect stores something the other cannot,
+        // and a default present on one side is a row the two write differently.
+        type: column.getSQLType(),
+        default: column.hasDefault
+          ? isSqlDefault(column.default)
+            ? renderSql(dialect, column.default)
+            : JSON.stringify(column.default)
+          : "-",
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     primaryKey: [...composite, ...inline].sort(),
@@ -165,10 +245,12 @@ describe.each(tables)("%s", (name, pg, sqlite) => {
 
   test("the two dialects have not drifted", () => {
     const [[, fromPg], [, fromSqlite]] = shapes;
-    // Whole records, not just names: `notNull` and `primary` are the rule the
-    // database enforces, and a column required on one dialect and optional on
-    // the other is exactly the drift this file exists to catch.
-    expect(fromSqlite.columns).toEqual(fromPg.columns);
+    // Whole records, not just names: `notNull`, `primary`, the SQL type and the
+    // default are all rules the database enforces, and any of them holding on
+    // one dialect and not the other is the drift this file exists to catch.
+    expect(canonical(name, "sqlite", fromSqlite.columns)).toEqual(
+      canonical(name, "pg", fromPg.columns),
+    );
     expect(fromSqlite.primaryKey).toEqual(fromPg.primaryKey);
     expect(fromSqlite.foreignKeys).toEqual(fromPg.foreignKeys);
     expect(fromSqlite.indexes).toEqual(fromPg.indexes);

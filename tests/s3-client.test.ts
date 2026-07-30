@@ -23,6 +23,11 @@ interface Sent {
 }
 
 const sent: Sent[] = [];
+/**
+ * The second argument of each `send`, kept beside `sent` rather than folded
+ * into it so the exact-shape assertions on that array stay exact.
+ */
+const sendOptions: Array<Record<string, unknown> | undefined> = [];
 const constructed: Array<Record<string, unknown>> = [];
 
 /** The next `send` outcome, replaced per test. */
@@ -69,8 +74,9 @@ mock.module("@aws-sdk/client-s3", () => ({
       if (!arm.on) return new Target(...(args as unknown as [never]));
       constructed.push(args[0]);
       return {
-        async send(item: Sent) {
+        async send(item: Sent, options?: Record<string, unknown>) {
           sent.push({ command: item.command, input: item.input });
+          sendOptions.push(options);
           return await answer();
         },
       };
@@ -100,6 +106,7 @@ const storage = (over: Record<string, unknown> = {}) =>
 // Arms the stub above for this file; unarmed, the real SDK answers.
 armWhileFileRuns(arm, () => {
   sent.length = 0;
+  sendOptions.length = 0;
   constructed.length = 0;
   answer = async () => ({});
 });
@@ -137,9 +144,16 @@ describe("construction", () => {
     // that named its own endpoint - MinIO and friends.
     storage();
     storage({ s3Endpoint: "https://minio.internal:9000" });
+    // Passed through as configured rather than implied by the endpoint: an
+    // endpoint that addresses buckets by virtual host has to be able to say so.
+    storage({
+      s3Endpoint: "https://minio.internal:9000",
+      s3ForcePathStyle: false,
+    });
 
     expect("forcePathStyle" in optionsAt(0)).toBe(false);
     expect(constructed[1]).toMatchObject({ forcePathStyle: true });
+    expect(optionsAt(2)["forcePathStyle"]).toBe(false);
   });
 
   test("omits credentials entirely when neither key is configured", () => {
@@ -211,6 +225,17 @@ describe("the requests it composes", () => {
     expect(sent[0]).toEqual({ command: "head", input: { Bucket: "plans" } });
   });
 
+  test("the probe hands its cancellation signal to the SDK", async () => {
+    const controller = new AbortController();
+
+    await storage().probe(controller.signal);
+
+    // Asserted at the driver, not only at the route: `/healthz` aborts its own
+    // controller either way, so a probe that quietly dropped this argument
+    // would leave that test green while the socket stayed held.
+    expect(sendOptions[0]?.["abortSignal"]).toBe(controller.signal);
+  });
+
   test("a probe failure surfaces, which is what makes it a probe", async () => {
     answer = async () => {
       throw new Error("bucket is unreachable");
@@ -246,10 +271,17 @@ describe("reading an object", () => {
 
   test("a response missing its metadata still answers", async () => {
     answer = async () => ({
-      Body: { transformToWebStream: () => null },
+      Body: { transformToWebStream: () => new Response("<p>hi</p>").body },
     });
 
-    expect(await storage().get("abc123")).toMatchObject({ size: 0, etag: "" });
+    const object = await storage().get("abc123");
+
+    // A response can arrive with neither ContentLength nor ETag, and the
+    // caller still has to be handed readable bytes rather than the defaults
+    // that stood in for the missing metadata. Consumed rather than compared by
+    // identity: handing back the same object proves nothing about serving it.
+    expect(object).toMatchObject({ size: 0, etag: "" });
+    expect(await new Response(object?.body).text()).toBe("<p>hi</p>");
   });
 
   test("a NoSuchKey error reads as absent", async () => {

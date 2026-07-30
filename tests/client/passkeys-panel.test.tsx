@@ -199,13 +199,27 @@ describe("PasskeysPanel adding", () => {
     expect(view.find(".error").textContent).toBe("could not add a passkey");
   });
 
-  test("an undefined outcome counts as success", async () => {
-    client.passkey.addPasskey = async () => undefined;
+  test("an undefined outcome counts as success, and the list is re-read", async () => {
+    // The refresh is the only thing that puts the new key on the page - the
+    // panel never appends the row itself - so a success that skipped it would
+    // leave the visitor looking at a list without the passkey they just made.
+    let listed: Array<Record<string, unknown>> = [];
+    client.passkey.listUserPasskeys = async () => ({
+      data: listed,
+      error: null,
+    });
+    client.passkey.addPasskey = async () => {
+      listed = [passkey({ id: "pk9", name: "Fresh" })];
+      return undefined;
+    };
     const view = await mountAsync(<PasskeysPanel />);
+    expect(view.all("tbody tr").length).toBe(0);
 
     await click(view.byText("button", "Add a passkey"));
 
     expect(view.maybe(".error")).toBeNull();
+    expect(view.all("tbody tr").length).toBe(1);
+    expect(view.text()).toContain("Fresh");
   });
 
   test("the button is held while the ceremony runs and released after", async () => {

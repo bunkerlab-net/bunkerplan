@@ -106,12 +106,17 @@ without exercising it. On this repo that invents 1583 such lines and reports
 `src/client/errors.ts` at 44% and every branch in it covered. No real line is
 found by one topology and missed by the other; only the denominator moves.
 
-What `--parallel` was buying is real and is now given up: Miniflare runs a
-workerd child process, and sharing a process with the AWS SDK intermittently
-wedges a concurrent S3 request that then never settles - see
-tests/drivers/plan-storage.r2.test.ts. A run that hangs rather than fails is
-that, and the answer is to re-run with `--parallel` to confirm before hunting
-it in the suite.
+What `--parallel` was buying is given up, and what that costs shows up as
+intermittent failures in one process. Observed: several tests in the same file
+failing together at almost exactly 5000ms - Bun's per-test timeout - most often
+the Valkey expiry suite, which waits on real TTLs. It does not hang the run.
+
+The cause is suspected rather than established. Sharing one process with the
+workerd child Miniflare runs is the candidate, and `tests/drivers` is where the
+backends and that child meet, but nothing here has isolated it. What is
+reliable is the shape: re-run before believing a failure, `bun test --parallel`
+is the diagnostic, and a genuine regression fails the same way every time
+rather than at the deadline.
 
 ## Self-hosting
 
