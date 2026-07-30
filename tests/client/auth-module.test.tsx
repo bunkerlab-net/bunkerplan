@@ -107,15 +107,16 @@ useHarness();
 armWhileFileRuns(arm, () => {});
 
 /*
- * The check sits in `beforeEach`, not `afterEach`: Bun runs `afterEach` hooks
- * in reverse registration order, so this one would run before the harness's
- * teardown and read a tree that is still mounted. Here the previous test's
- * teardown has finished.
+ * No `subscribers.clear()`. The harness unmounts through hono's own root,
+ * which runs each subtree's effect cleanups, so a subscription still in the
+ * set is one that leaked - and clearing would tidy it away before the next
+ * test could see it.
  *
- * And there is no `subscribers.clear()`. The harness unmounts through hono's
- * own root, which runs each subtree's effect cleanups, so a subscription still
- * in the set is one that leaked - and clearing would tidy it away before the
- * next test could see it.
+ * In `beforeEach` rather than `afterEach` so the check reads a settled state:
+ * Bun runs `afterEach` hooks in registration order, so the harness's teardown
+ * (registered above) has finished by then either way, but the unmount's own
+ * effects flush across the boundary and this side of it is where the set is
+ * quiet. `afterAll` covers the last test, which has no `beforeEach` after it.
  */
 beforeEach(() => {
   expect(subscribers.size).toBe(0);
@@ -123,7 +124,6 @@ beforeEach(() => {
 });
 
 afterAll(() => {
-  // The last test has no `beforeEach` after it to check its own cleanup.
   expect(subscribers.size).toBe(0);
 });
 

@@ -263,6 +263,23 @@ describe("ApiKeysPanel creating", () => {
     },
   );
 
+  test("a failed create clears the key the last one revealed", async () => {
+    // Shown once, so what is on screen is the only copy its owner has - and
+    // beside a failure it reads as the key that attempt produced.
+    client.apiKey.create = ok({ key: "bkp_the_first_one" });
+    const view = await mountAsync(<ApiKeysPanel />);
+    await click(view.byText("button", "Create key"));
+    expect(view.text()).toContain("bkp_the_first_one");
+
+    client.apiKey.create = refuse("the key store is unreachable");
+    await click(view.byText("button", "Create key"));
+
+    expect(view.text()).not.toContain("bkp_the_first_one");
+    expect(view.find(".error").textContent).toBe(
+      "the key store is unreachable",
+    );
+  });
+
   test("the plaintext is revealed once and the name field is cleared", async () => {
     client.apiKey.create = ok({ key: "bkp_the_only_time" });
     const view = await mountAsync(<ApiKeysPanel />);

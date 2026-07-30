@@ -744,6 +744,7 @@ describe("redeeming a code", () => {
      * ever having guessed once.
      */
     const refunded: Array<[string, number]> = [];
+    let reserved = "";
     const app = await gated({
       plans: {
         ...memoryPlans(),
@@ -752,11 +753,10 @@ describe("redeeming a code", () => {
         },
       },
       unlockRateLimits: {
-        consume: async () => ({
-          allowed: true,
-          retryAfter: 0,
-          windowStart: WINDOW_START,
-        }),
+        consume: async (key) => {
+          reserved = key;
+          return { allowed: true, retryAfter: 0, windowStart: WINDOW_START };
+        },
         refund: async (key, windowStart) => {
           refunded.push([key, windowStart]);
         },
@@ -769,9 +769,12 @@ describe("redeeming a code", () => {
     );
 
     expect(response.status).toBe(500);
-    // To the window that charged it, which is the only window it may go back
-    // to - see the note on `windowStart` in src/services/types.ts.
-    expect(refunded).toEqual([[refunded[0]?.[0] ?? "", WINDOW_START]]);
+    // The bucket that was charged, and the window that charged it - the only
+    // pair it may go back to; see the note on `windowStart` in
+    // src/services/types.ts. Read from `consume`, not from `refunded` itself,
+    // which would compare the value against itself.
+    expect(reserved).not.toBe("");
+    expect(refunded).toEqual([[reserved, WINDOW_START]]);
   });
 
   test("the bucket is keyed on the address, never on the plan", async () => {

@@ -107,6 +107,14 @@ function useApiKeys() {
 
   const create = (name: string, expiryIndex: number) => {
     const seconds = EXPIRY_CHOICES[expiryIndex]?.seconds ?? null;
+    /*
+     * The last key's plaintext goes before this one is asked for, not when the
+     * answer arrives. A create that fails would otherwise leave the previous
+     * secret on screen beside the error, reading as though it belonged to the
+     * attempt that just failed - and it is shown once, so what is on screen is
+     * the only copy its owner has.
+     */
+    setPlaintext(null);
     return run(
       () =>
         authClient().apiKey.create({
