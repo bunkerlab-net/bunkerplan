@@ -124,8 +124,17 @@ suite that waits on the real clock. The cause is not established. One shared
 process holds every other file's handles and the workerd child Miniflare runs,
 and `tests/drivers` is where those meet, but nothing here has isolated it.
 
-So: a red `test:coverage` is worth a re-run before it is worth believing, and a
-genuine regression fails the same way every time rather than at the deadline.
+A red `test:coverage` is therefore not evidence on its own - but neither is one
+green re-run, which is the trap. A single pass says nothing about a failure that
+happens some of the time. Repeat it instead:
+
+```sh
+BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
+```
+
+A genuine regression fails every repetition, and fails on its own assertion. The
+flake fails a minority of them, at the deadline, in a whole block at once. If a
+failure does not fit that shape, treat it as real.
 
 ## Self-hosting
 

@@ -48,19 +48,26 @@ function codeInFragment(hash: string): string | null {
 }
 
 /**
- * This URL without either half of a share code.
+ * This URL without the share code it carries, or null if it carries none.
  *
- * The fragment goes because that is what the link carried. `?code=` goes with
- * it: it is the same secret by the other route - the one a reader without a
- * browser uses - and a document that arrived by it should not leave the value
- * sitting in the address bar and this browser's history. Any other query is
- * kept, because nothing here has a reason to drop it.
+ * Both routes are covered. The fragment is what the share link uses, and
+ * `?code=` is the same secret by the other one - the form a reader without a
+ * browser needs - so a document that arrived by it should not leave the value in
+ * the address bar and this browser's history. A browser can land there too: it
+ * is a URL, and people paste URLs.
+ *
+ * `hadLinkCode` rather than a test on the hash, because only the caller knows
+ * whether the fragment held a code: `#section-3` is somebody's anchor and stays.
+ * Any other query is kept for the same reason. Null when there was nothing to
+ * take, so history is not rewritten for a URL that held no secret.
  */
-function scrubbed(): string {
+function scrubbed(hadLinkCode: boolean): string | null {
   const url = new URL(window.location.href);
+  if (!hadLinkCode && !url.searchParams.has("code")) return null;
+
   url.searchParams.delete("code");
-  url.hash = "";
-  return `${url.pathname}${url.search}`;
+  if (hadLinkCode) url.hash = "";
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 /**
@@ -97,10 +104,12 @@ function useLinkCode(
   useEffect(() => {
     const fromLink = codeInFragment(window.location.hash);
 
-    if (fromLink !== null) {
-      onCode(fromLink);
-      window.history.replaceState(null, "", scrubbed());
-    }
+    if (fromLink !== null) onCode(fromLink);
+
+    // Whichever route brought it. A `?code=` arrival never reaches the box -
+    // the server already spent it - but it is still in the bar to be taken out.
+    const cleaned = scrubbed(fromLink !== null);
+    if (cleaned !== null) window.history.replaceState(null, "", cleaned);
 
     /*
      * Spent only when there is a code to spend and a code on the plan to match

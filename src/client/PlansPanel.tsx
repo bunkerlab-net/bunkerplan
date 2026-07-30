@@ -307,7 +307,11 @@ function ShareLink({
    */
   const relay = new URL(url);
   relay.pathname = `/s/${id}`;
-  const link = `${relay.toString()}#code=${encodeURIComponent(code)}`;
+  // Through `hash` rather than concatenation. `planUrl` cannot produce a
+  // fragment today, so this changes no output - it is the API that keeps that
+  // true if the plan URL ever grows one.
+  relay.hash = `code=${encodeURIComponent(code)}`;
+  const link = relay.toString();
   const [copyFailed, setCopyFailed] = useState(false);
 
   // `writeText` rejects on a denied permission or an insecure context, and

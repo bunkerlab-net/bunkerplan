@@ -35,7 +35,10 @@ function usePasskeyWrite(
     try {
       const result = await operation();
       if (result?.error) {
-        setError(result.error.message ?? fallback);
+        // `messageOf`, not `?? fallback`: an empty or whitespace-only message
+        // renders a blank error line, and `??` only catches the absent one. The
+        // thrown path below already reads it this way.
+        setError(messageOf(result.error, fallback));
         return;
       }
       setError(null);

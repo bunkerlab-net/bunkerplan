@@ -351,6 +351,23 @@ describe("PasskeysPanel deleting", () => {
     expect(view.all("tbody tr").length).toBe(2);
   });
 
+  test("a blank refusal reads as the fallback, not an empty line", async () => {
+    // `?? fallback` only catches an absent message; a whitespace-only one
+    // rendered an error line with nothing in it, which reads as no error.
+    client.passkey.listUserPasskeys = ok([passkey(), passkey({ id: "pk2" })]);
+    client.passkey.deletePasskey = async () => ({
+      data: null,
+      error: { message: "   " },
+    });
+    const view = await mountAsync(<PasskeysPanel />);
+
+    await click(rowButton(view, 0));
+
+    expect(view.find(".error").textContent).toBe(
+      "could not delete the passkey",
+    );
+  });
+
   test("a delete that throws is caught", async () => {
     client.passkey.listUserPasskeys = ok([passkey(), passkey({ id: "pk2" })]);
     client.passkey.deletePasskey = explode("network is down");

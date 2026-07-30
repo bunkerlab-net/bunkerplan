@@ -21,6 +21,11 @@ import {
  * errors. Failing after a few seconds lets a request return 5xx and free
  * itself. `statement_timeout` is the matching server-side bound: without it a
  * single pathological query holds its connection for as long as it likes.
+ *
+ * `query_timeout` is the client-side half of that. `statement_timeout` needs a
+ * server well enough to enforce it; one that accepts a connection and then
+ * stops answering is bounded only from this end. Set to the same value, so the
+ * two agree on how long a query may take rather than racing each other.
  */
 const POOL_MAX = 10;
 const CONNECTION_TIMEOUT_MS = 5_000;
@@ -32,6 +37,7 @@ export function createPostgresDb(connectionString: string): Db {
     max: POOL_MAX,
     connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
     statement_timeout: STATEMENT_TIMEOUT_MS,
+    query_timeout: STATEMENT_TIMEOUT_MS,
   });
   const db = drizzle(pool, { schema: pgSchema });
   return {

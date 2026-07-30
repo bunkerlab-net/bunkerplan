@@ -496,6 +496,29 @@ describe("a link that brought its own code", () => {
     expect(argsOf("unlockPlan")).toEqual([PLAN_ID, "abcd1234"]);
   });
 
+  test("a query code is taken out of the bar even with no fragment", async () => {
+    // The route a reader without a DOM uses. The server already spent it, so
+    // there is nothing to redeem here - but it is still a secret sitting in this
+    // browser's address bar and history.
+    standOn(`/p/${PLAN_ID}?code=by-the-other-route`);
+
+    await mountAsync(gate());
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(window.location.search).toBe("");
+  });
+
+  test("an ordinary fragment survives a query scrub", async () => {
+    // `#section-3` is somebody's anchor into the document, not a code. Taking
+    // the query out must not take that with it.
+    standOn(`/p/${PLAN_ID}?code=by-the-other-route#section-3`);
+
+    await mountAsync(gate());
+
+    expect(window.location.search).toBe("");
+    expect(window.location.hash).toBe("#section-3");
+  });
+
   test("a fragment that is only padding is no code at all", async () => {
     // `%20%20` decodes to spaces and trims to nothing. Posting that would spend
     // an attempt on a string the server can only refuse, and showing an error
