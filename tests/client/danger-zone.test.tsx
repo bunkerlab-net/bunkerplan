@@ -1,5 +1,5 @@
 import "./dom-env.ts";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DangerZone } from "../../src/client/DangerZone.tsx";
 import {
   client,
@@ -32,6 +32,13 @@ describe("DangerZone", () => {
   // anything it cannot match against, so every test needs a session.
   beforeEach(() => {
     setSession(signedIn(HANDLE));
+  });
+
+  /** Cleanup for the one test that replaces `location.assign`. Idempotent. */
+  let restoreAssign: (() => void) | null = null;
+  afterEach(() => {
+    restoreAssign?.();
+    restoreAssign = null;
   });
 
   test("names the handle that has to be typed", () => {
@@ -100,8 +107,18 @@ describe("DangerZone", () => {
     // The descriptor, not the value: `location.assign` is installed by
     // tests/client/auth-stub.ts on the one `window.location` this process has,
     // and putting a plain writable property back where a differently configured
-    // one stood would leave that stub subtly replaced for every later file.
+    // one stood would leave that stub subtly replaced. `afterEach` is the
+    // fallback for a test abandoned at the timeout, which reaches no `finally`.
     const original = Object.getOwnPropertyDescriptor(window.location, "assign");
+    restoreAssign = () => {
+      if (original === undefined) {
+        Reflect.deleteProperty(window.location, "assign");
+      } else {
+        Object.defineProperty(window.location, "assign", original);
+      }
+      // Cleared last: a restore that threw must stay on the fallback's list.
+      restoreAssign = null;
+    };
     Object.defineProperty(window.location, "assign", {
       configurable: true,
       writable: true,
@@ -131,11 +148,7 @@ describe("DangerZone", () => {
       await flush();
       expect(attempts).toBe(1);
     } finally {
-      if (original === undefined) {
-        Reflect.deleteProperty(window.location, "assign");
-      } else {
-        Object.defineProperty(window.location, "assign", original);
-      }
+      restoreAssign?.();
     }
   });
 

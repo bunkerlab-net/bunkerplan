@@ -41,7 +41,9 @@ export function createPostgresDb(connectionString: string): Db {
     uploadRateLimits: createPgRateLimitRepo(db),
     unlockRateLimits: createPgUnlockRateLimitRepo(db),
     accountClosing: createPgAccountClosingRepo(db),
-    async probe() {
+    // `pg` takes no abort signal on a query; the pool and statement timeouts
+    // above are what bound this probe against an unreachable server.
+    async probe(_signal?: AbortSignal) {
       await db.execute(sql`select 1`);
     },
   };

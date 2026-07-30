@@ -11,12 +11,16 @@ type UnlockRateConfig = Pick<
 /**
  * The share-code redemption budget for the calling address.
  *
- * Two halves on purpose. `checkUnlockRate` gates without spending, and
- * `chargeUnlockAttempt` spends only once the attempt is known to have failed -
- * so a correct code costs nothing. Charging every attempt made a link shared
- * with a room of people behind one egress address lock them out of a plan they
- * had been given, at the 31st opening in a minute. What this rations is
- * guessing, and a guess is a failure by definition.
+ * Two halves on purpose. `reserveUnlockAttempt` takes a count before the code is
+ * compared, and `refundUnlockAttempt` gives it back once the attempt turns out
+ * to have been a redemption - so a correct code costs nothing and a failed guess
+ * is what the budget spends on. Charging every attempt made a link shared with a
+ * room of people behind one egress address lock them out of a plan they had been
+ * given, at the 31st opening in a minute. What this rations is guessing, and a
+ * guess is a failure by definition.
+ *
+ * Spending first and refunding after is the order that works, not the reverse;
+ * see `reserveUnlockAttempt` for why reading the budget first bounds nothing.
  *
  * Keyed on the address alone, never the plan. Per-plan is the one thing an
  * anonymous limiter must not do: the plan id travels in the share link, so
