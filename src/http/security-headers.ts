@@ -83,6 +83,14 @@ export const APP_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
+  /*
+   * `'self'` only - no `data:`, no `blob:`, unlike PLAN_CSP which has to take
+   * whatever an uploaded document carries. Measured rather than assumed: the
+   * Scalar reference at /api/docs renders with zero CSP violations, zero
+   * blocked requests and no `<img>` element at all, and the app's own pages
+   * serve their icons from `public/`. Widening this needs a blocked resource
+   * to point at.
+   */
   "img-src 'self'",
   "connect-src 'self'",
   "base-uri 'none'",

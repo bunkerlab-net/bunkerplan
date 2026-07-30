@@ -158,6 +158,12 @@ export function createPgPlanRepo(db: PgDb): PlanRepo {
            * must not multiply its own row, and the column renders one word.
            * Postgres answers this as a boolean and SQLite as 0/1, so both
            * sides map it the same way rather than trusting the driver.
+           *
+           * Indexed: `plan_grant`'s primary key is `(plan_id, user_id)` in
+           * both dialects, so this reads a prefix rather than scanning - and
+           * tests/schema-shape.test.ts pins that order, because a key declared
+           * the other way round would still be unique and would turn every row
+           * of the dashboard into a scan.
            */
           hasGrants: sql<boolean>`exists (
             select 1 from ${planGrant} where ${planGrant.planId} = ${plan.id}

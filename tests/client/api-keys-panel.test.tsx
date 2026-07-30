@@ -324,6 +324,48 @@ describe("ApiKeysPanel creating", () => {
     await click(view.byText("button", "Copy"));
 
     expect(copied).toEqual(["bkp_the_only_time"]);
+    // No fallback on the path that worked, which is what makes its presence
+    // below mean something.
+    expect(view.text()).not.toContain("Copying failed");
+  });
+
+  test("a refused clipboard leaves the key on screen to be read", async () => {
+    // `writeText` rejects on a denied permission or an insecure context, and
+    // this is the one secret the app shows once - a copy that failed must not
+    // take the only copy with it, or throw past the panel.
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new Error("permission denied");
+        },
+      },
+    });
+    client.apiKey.create = ok({ key: "bkp_the_only_time" });
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+    await click(view.byText("button", "Copy"));
+
+    expect(view.text()).toContain("bkp_the_only_time");
+    expect(view.text()).toContain("Copying failed");
+  });
+
+  test("no clipboard at all is survivable too", async () => {
+    // An older browser, or a page the platform decided is insecure. Reading
+    // `navigator.clipboard.writeText` would throw where the handler runs.
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    client.apiKey.create = ok({ key: "bkp_the_only_time" });
+    const view = await mountAsync(<ApiKeysPanel />);
+
+    await click(view.byText("button", "Create key"));
+    await click(view.byText("button", "Copy"));
+
+    expect(view.text()).toContain("bkp_the_only_time");
+    expect(view.text()).toContain("Copying failed");
   });
 
   test("a create that returns no key does not render an empty reveal", async () => {

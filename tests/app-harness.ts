@@ -200,6 +200,16 @@ export function memoryPlans(
   };
   const handleOf = (userId: string): string =>
     Object.entries(handles).find(([, id]) => id === userId)?.[0] ?? userId;
+  /**
+   * The account a handle names, or `undefined`.
+   *
+   * `Object.hasOwn` rather than a bare index: `handles["__proto__"]` and
+   * `handles["constructor"]` answer from the prototype, so a plain lookup
+   * would resolve those two strings to something and hand a grant to a
+   * "user id" that is a function. The real repositories match a row.
+   */
+  const accountFor = (handle: string): string | undefined =>
+    Object.hasOwn(handles, handle) ? handles[handle] : undefined;
 
   return {
     rows,
@@ -302,14 +312,14 @@ export function memoryPlans(
     grantByHandle: async (planId, ownerId, handle) => {
       const row = owned(planId, ownerId);
       if (row === undefined) return "no-plan";
-      const userId = handles[handle];
+      const userId = accountFor(handle);
       if (userId === undefined) return "no-user";
       if (!row.grants.includes(userId)) row.grants.push(userId);
       return "granted";
     },
     revokeByHandle: async (planId, ownerId, handle) => {
       const row = owned(planId, ownerId);
-      const userId = handles[handle];
+      const userId = accountFor(handle);
       if (row === undefined || userId === undefined) return false;
       const at = row.grants.indexOf(userId);
       if (at === -1) return false;

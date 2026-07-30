@@ -220,15 +220,21 @@ confusing 403 much later.
   its code - `DELETE /api/plans/{id}/share-code` is how that one is dropped.
   Grants are untouched by either flip: those name accounts the owner chose, and
   each is revocable on its own.
-- **Security headers are applied in `src/server.ts`**, the one entry both
-  targets share: `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options:
-DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
-  `form-action`, and `frame-ancestors`. Each is only set when absent, so the
-  plan route's `sandbox` CSP above always wins. The app CSP deliberately has no
-  `script-src`: server-side rendering inlines the hydration payload, so a
-  script policy needs per-request nonces, and `'unsafe-inline'` would be
-  theatre. Helmet is not used - it is Express middleware and cannot run on
-  Workers.
+- **Security headers are applied in `src/http/security-headers.ts`**, reached
+  from the one middleware both targets share: `X-Content-Type-Options`,
+  `Referrer-Policy`, `X-Frame-Options: DENY`, HSTS over TLS, and `APP_CSP`.
+  That policy is `default-src 'self'` with `script-src 'self'`, `img-src
+'self'`, `connect-src 'self'`, `style-src 'self' 'unsafe-inline'`,
+  `base-uri 'none'`, `object-src 'none'`, `form-action 'self'` and
+  `frame-ancestors 'none'`. Each header is only set when absent, so the plan
+  route's `sandbox` CSP above always wins.
+
+  `script-src 'self'` is why nothing in this app inlines a script: the
+  hydration payload rides in a `<script type="application/json">` element,
+  which executes nothing, and `/api/docs` loads its bootstrap from
+  `public/api-docs.js` for the same reason. `style-src` keeps `'unsafe-inline'`
+  because the pages carry inline `style` attributes. Helmet is not used - it is
+  Express middleware and cannot run on Workers.
 - **Account deletion is immediate and irreversible.** There is no email
   confirmation because addresses are synthetic (`…@passkey.invalid`) and cannot
   receive mail. Three safeguards stand in: Better Auth's fresh-session

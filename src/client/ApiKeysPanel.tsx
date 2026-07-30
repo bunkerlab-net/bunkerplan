@@ -33,6 +33,26 @@ function Reveal({
   value: string;
   onDismiss: () => void;
 }) {
+  const [copyFailed, setCopyFailed] = useState(false);
+
+  /*
+   * `writeText` rejects on a denied permission or an insecure context, and is
+   * absent entirely on an older browser - and this is the one secret the app
+   * shows once. A copy that quietly did nothing, or threw past the handler,
+   * would take the only copy of the key with it. The value is on screen either
+   * way, so the fallback is to say so rather than to retry.
+   */
+  const copy = () => {
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(value);
+        setCopyFailed(false);
+      } catch {
+        setCopyFailed(true);
+      }
+    })();
+  };
+
   return (
     <div className="notice">
       <p>
@@ -40,17 +60,16 @@ function Reveal({
       </p>
       <div className="row">
         <code>{value}</code>
-        <button
-          type="button"
-          className="btn-text"
-          onClick={() => void navigator.clipboard.writeText(value)}
-        >
+        <button type="button" className="btn-text" onClick={copy}>
           Copy
         </button>
         <button type="button" className="btn-text" onClick={onDismiss}>
           Dismiss
         </button>
       </div>
+      {copyFailed && (
+        <p className="muted">Copying failed - select the key above instead.</p>
+      )}
     </div>
   );
 }

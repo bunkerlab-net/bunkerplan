@@ -93,8 +93,13 @@ async function hydrate(document_: string): Promise<HTMLElement> {
 
   const props = page.querySelector(`#${PAGE_PROPS_ID}`);
   const root = page.querySelector<HTMLElement>(`#${ROOT_ID}`);
-  if (props === null || root === null) {
-    throw new Error("the server document carries no props element");
+  // Named separately: these are two different bugs in the server render, and
+  // one message for both sends the next reader looking at the wrong half.
+  if (props === null) {
+    throw new Error(`the server document carries no #${PAGE_PROPS_ID} element`);
+  }
+  if (root === null) {
+    throw new Error(`the server document carries no #${ROOT_ID} element`);
   }
 
   roots.push(
