@@ -128,9 +128,13 @@ happens some of the time. Repeat it instead:
 BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
 ```
 
-A genuine regression fails every repetition, and fails on its own assertion.
-The flake fails a minority of them, at the deadline, in a whole block at once.
-If a failure does not fit that shape, treat it as real.
+Repetition narrows it, it does not decide it. A genuine regression tends to
+fail every repetition and to fail on its own assertion; the flake tends to
+fail a minority of them, at the deadline, in a whole block at once. Read the
+assertion that failed and the surrounding output before calling anything
+environmental - a real bug that only shows up under load wears the flake's
+shape exactly. Anything that does not fit the flake's shape is a regression
+until the evidence says otherwise.
 
 ## Self-hosting
 

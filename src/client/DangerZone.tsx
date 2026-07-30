@@ -33,6 +33,9 @@ type DeleteOutcome =
 const WRONG_ACCOUNT =
   "This page is signed in as a different account now. Reload before deleting anything.";
 
+const UNRESOLVED_SESSION =
+  "Your session has not finished loading. Try again in a moment.";
+
 /** The signed-in account's id, or null while the session is unresolved. */
 const currentUserId = (): string | null =>
   authClient().useSession.get().data?.user?.id ?? null;
@@ -65,8 +68,19 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
    * expected account and decides in one request, which Better Auth's
    * `deleteUser` does not offer. The ceremony check below is the sound one -
    * it compares the answer the ceremony itself returned.
+   *
+   * An unresolved session is a different answer from a mismatched one. Either
+   * id being absent means there is nothing to compare yet, and calling that
+   * `blocked` would be terminal - the caller keeps its latch closed for a
+   * refusal that says nothing about who is signed in, so a press landing
+   * before the session arrives would kill the button for the rest of the
+   * page's life.
    */
-  if (intended === null || currentUserId() !== intended) {
+  const current = currentUserId();
+  if (intended === null || current === null) {
+    return { kind: "refused", message: UNRESOLVED_SESSION };
+  }
+  if (current !== intended) {
     return { kind: "blocked", message: WRONG_ACCOUNT };
   }
 

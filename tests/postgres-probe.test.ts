@@ -196,16 +196,22 @@ describe("the Postgres health probe", () => {
     const probing = createPostgresDb(DSN).probe(controller.signal);
     await settle();
 
-    controller.abort();
+    const reason = new Error("probe timed out after 2000ms");
+    controller.abort(reason);
     arrive(stubClient());
-    await probing;
+    // Not a resolve: a probe that answers is one that reached the database.
+    // The caller's own reason, so a handler can tell why it never did.
+    await expect(probing).rejects.toBe(reason);
 
     expect(asked).toEqual([]);
     expect(released).toEqual([{ destroyed: true }]);
   });
 
   test("does not take a connection at all when already abandoned", async () => {
-    await createPostgresDb(DSN).probe(AbortSignal.abort());
+    const reason = new Error("gave up before asking");
+    await expect(
+      createPostgresDb(DSN).probe(AbortSignal.abort(reason)),
+    ).rejects.toBe(reason);
 
     expect(connects).toBe(0);
     expect(released).toEqual([]);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "hono/jsx";
+import { useCallback, useEffect, useRef, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
 import { messageOf } from "./errors.ts";
@@ -93,55 +93,83 @@ function useKeyList() {
   return { keys, error, setError, busy, setBusy, loaded, refresh };
 }
 
+/**
+ * One write against the key list at a time: busy while it runs, the list
+ * refreshed after it, and either kind of failure rendered rather than thrown.
+ *
+ * The latch is a ref because `busy` is state - two presses in one tick both
+ * read the value their render closed over - and `disabled` needs a re-render
+ * to appear, so it never guarded the call. Shared by both writes because
+ * `busy` is: each already disables the other's button. The same shape as
+ * PasskeysPanel's, for the same reason.
+ */
+function useKeyWrite(
+  setError: (message: string | null) => void,
+  setBusy: (busy: boolean) => void,
+  refresh: () => Promise<void>,
+) {
+  const inFlight = useRef(false);
+
+  // Called as `void create(...)` / `void revoke(...)` from an event handler,
+  // so this may not reject: the call itself can throw before it ever reaches
+  // `refresh`, and there is no handler upstream to catch it.
+  return async <T,>(
+    operation: () => Promise<{
+      data?: T | null;
+      error?: { message?: string } | null;
+    }>,
+    fallback: string,
+    onData?: (data: T | null) => void,
+  ): Promise<boolean> => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      const result = await operation();
+      if (result.error) {
+        setError(result.error.message ?? fallback);
+        return false;
+      }
+      setError(null);
+      onData?.(result.data ?? null);
+      await refresh();
+      return true;
+    } catch (cause) {
+      setError(messageOf(cause, fallback));
+      return false;
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+}
+
 /** Keys, and the three calls that change them. */
 function useApiKeys() {
   const { keys, error, setError, busy, setBusy, loaded, refresh } =
     useKeyList();
   const [plaintext, setPlaintext] = useState<string | null>(null);
+  const run = useKeyWrite(setError, setBusy, refresh);
 
-  // Both of these are called as `void create(...)` / `void revoke(...)` from
-  // an event handler, so neither may reject: the call itself can throw before
-  // it ever reaches `refresh`, and there is no handler upstream to catch it.
-  const create = async (name: string, expiryIndex: number) => {
-    setBusy(true);
-    try {
-      const seconds = EXPIRY_CHOICES[expiryIndex]?.seconds ?? null;
-      const result = await authClient().apiKey.create({
-        name: name.trim() === "" ? "API key" : name.trim(),
-        ...(seconds === null ? {} : { expiresIn: seconds }),
-      });
-      if (result.error) {
-        setError(result.error.message ?? "could not create API key");
-        return false;
-      }
-      setError(null);
+  const create = (name: string, expiryIndex: number) => {
+    const seconds = EXPIRY_CHOICES[expiryIndex]?.seconds ?? null;
+    return run(
+      () =>
+        authClient().apiKey.create({
+          name: name.trim() === "" ? "API key" : name.trim(),
+          ...(seconds === null ? {} : { expiresIn: seconds }),
+        }),
+      "could not create API key",
       // The only time the plaintext key is ever returned.
-      setPlaintext(result.data?.key ?? null);
-      await refresh();
-      return true;
-    } catch (cause) {
-      setError(messageOf(cause, "could not create API key"));
-      return false;
-    } finally {
-      setBusy(false);
-    }
+      (data) => setPlaintext(data?.key ?? null),
+    );
   };
 
   const revoke = async (keyId: string) => {
-    setBusy(true);
-    try {
-      const result = await authClient().apiKey.delete({ keyId });
-      if (result.error) {
-        setError(result.error.message ?? "could not revoke API key");
-        return;
-      }
-      setError(null);
-      await refresh();
-    } catch (cause) {
-      setError(messageOf(cause, "could not revoke API key"));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      () => authClient().apiKey.delete({ keyId }),
+      "could not revoke API key",
+    );
   };
 
   return {

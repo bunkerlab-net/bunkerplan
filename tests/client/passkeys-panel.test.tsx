@@ -255,6 +255,35 @@ describe("PasskeysPanel adding", () => {
       view.byText<HTMLButtonElement>("button", "Add a passkey").disabled,
     ).toBe(false);
   });
+
+  test("two presses in one tick run one ceremony, not two", async () => {
+    // A second WebAuthn prompt for a key the browser is already registering:
+    // the reader gets two dialogs, and answering both leaves a duplicate they
+    // then have to find and delete.
+    const ceremony = deferred<void>();
+    let ceremonies = 0;
+    client.passkey.addPasskey = async () => {
+      ceremonies += 1;
+      await ceremony.answer();
+      return { data: { id: "pk1" }, error: null };
+    };
+    const view = await mountAsync(<PasskeysPanel />);
+    const button = view.byText<HTMLButtonElement>("button", "Add a passkey");
+
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    await flush();
+
+    expect(ceremonies).toBe(1);
+
+    ceremony.release(undefined);
+    await flush();
+    expect(ceremonies).toBe(1);
+  });
 });
 
 describe("PasskeysPanel deleting", () => {

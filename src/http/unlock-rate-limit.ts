@@ -10,6 +10,18 @@ type UnlockRateConfig = Pick<
 >;
 
 /**
+ * Configs that have already reported a missing trusted header.
+ *
+ * The warning below names one deployment-wide misconfiguration, and this route
+ * takes no credential: repeating it per request lets a stranger turn a flood of
+ * refused unlocks into a flood of log lines. Keyed on the config object, which
+ * `getServices` memoises for the life of the isolate, so it says it once per
+ * deployment and again in each new isolate - and a caller holding a different
+ * config, as every test does, is unaffected.
+ */
+const reported = new WeakSet<UnlockRateConfig>();
+
+/**
  * The share-code redemption budget for the calling address.
  *
  * Two halves on purpose. `reserveUnlockAttempt` takes a count before the code is
@@ -85,11 +97,16 @@ export async function reserveUnlockAttempt(
      * deployment answers 429 and no reader can tell why. Configuration refuses
      * to load without naming a header, so reaching here means the proxy in
      * front is not sending the one it was told to trust.
+     *
+     * Once, per the note on `reported`. The refusal below is still every time.
      */
-    logger.warn(
-      { header: config.clientIpHeader },
-      "no trusted client address header, so every unlock is refused",
-    );
+    if (!reported.has(config)) {
+      reported.add(config);
+      logger.warn(
+        { header: config.clientIpHeader },
+        "no trusted client address header, so every unlock is refused",
+      );
+    }
     return {
       refused: problem(429, "rate limit exceeded", { "retry-after": "1" }),
     };

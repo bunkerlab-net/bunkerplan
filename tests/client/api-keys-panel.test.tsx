@@ -365,6 +365,38 @@ describe("ApiKeysPanel creating", () => {
       view.byText<HTMLButtonElement>("button", "Create key").disabled,
     ).toBe(false);
   });
+
+  test("two presses in one tick create one key, not two", async () => {
+    /*
+     * Both dispatched before any re-render, which is the window `disabled`
+     * cannot close: it needs a render to appear, and `busy` is state, so both
+     * handlers read the value their own render closed over. A second key here
+     * is one the account never asked for, with its own plaintext shown once.
+     */
+    const creating = deferred<void>();
+    let creates = 0;
+    client.apiKey.create = async () => {
+      creates += 1;
+      await creating.answer();
+      return { data: { key: "bkp_secret" }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+    const button = view.byText<HTMLButtonElement>("button", "Create key");
+
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    await flush();
+
+    expect(creates).toBe(1);
+
+    creating.release(undefined);
+    await flush();
+    expect(creates).toBe(1);
+  });
 });
 
 describe("ApiKeysPanel revoking", () => {
@@ -428,6 +460,37 @@ describe("ApiKeysPanel revoking", () => {
     client.apiKey.delete = ok({ success: true });
     await click(view.byText("button", "Revoke"));
 
+    expect(view.maybe(".error")).toBeNull();
+  });
+
+  test("two presses in one tick revoke once, not twice", async () => {
+    // The second call would answer "no such key" for a key this panel just
+    // revoked successfully, so the row disappears and an error appears beside
+    // it - a failure the account never had.
+    listing([key()]);
+    const revoking = deferred<void>();
+    let revokes = 0;
+    client.apiKey.delete = async () => {
+      revokes += 1;
+      await revoking.answer();
+      return { data: { success: true }, error: null };
+    };
+    const view = await mountAsync(<ApiKeysPanel />);
+    const button = view.byText<HTMLButtonElement>("button", "Revoke");
+
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    await flush();
+
+    expect(revokes).toBe(1);
+
+    revoking.release(undefined);
+    await flush();
+    expect(revokes).toBe(1);
     expect(view.maybe(".error")).toBeNull();
   });
 });

@@ -78,6 +78,52 @@ describe("DangerZone", () => {
     expect(navigations).toEqual(["/"]);
   });
 
+  test("a press before the session resolves refuses, and the retry still works", async () => {
+    /*
+     * The refusal has to be the retryable kind. An unresolved id says nothing
+     * about who is signed in, so reporting it as the wrong account would latch
+     * the control closed and the panel would never delete anything, however
+     * long the visitor waited.
+     */
+    let deletes = 0;
+    client.deleteUser = async () => {
+      deletes += 1;
+      return { data: { success: true }, error: null };
+    };
+
+    function Resolving() {
+      const [userId, setUserId] = useState<string | null>(null);
+      return (
+        <>
+          <button id="resolve" type="button" onClick={() => setUserId(USER_ID)}>
+            resolve
+          </button>
+          <DangerZone handle={HANDLE} userId={userId} />
+        </>
+      );
+    }
+
+    const view = mount(<Resolving />);
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.byText("button", "Delete account"));
+
+    expect(deletes).toBe(0);
+    expect(view.text()).not.toContain("different account");
+    expect(view.text()).toContain("not finished loading");
+    // Re-enabled, which is the whole point: a latched button here is a panel
+    // that can never delete the account it was mounted for.
+    expect(
+      view.byText<HTMLButtonElement>("button", "Delete account").disabled,
+    ).toBe(false);
+    expect(navigations).toEqual([]);
+
+    await click(view.find("#resolve"));
+    await click(view.byText("button", "Delete account"));
+
+    expect(deletes).toBe(1);
+    expect(navigations).toEqual(["/"]);
+  });
+
   test("a later userId prop cannot redefine which account is intended", async () => {
     /*
      * The seeding above must not become "last render wins". A prop that changed

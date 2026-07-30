@@ -55,7 +55,9 @@ export function createPostgresDb(connectionString: string): Db {
      * it, which is not the case being bounded.
      */
     async probe(signal?: AbortSignal) {
-      if (signal?.aborted) return;
+      // Throwing, not returning: a probe that resolves is a probe that found
+      // the database reachable, and an abandoned one established nothing.
+      if (signal?.aborted) throw signal.reason;
       const client = await pool.connect();
       let released = false;
       /*
@@ -76,7 +78,7 @@ export function createPostgresDb(connectionString: string): Db {
       // after the caller left is discarded without asking anything of it.
       if (signal?.aborted) {
         abandon();
-        return;
+        throw signal.reason;
       }
       signal?.addEventListener("abort", abandon, { once: true });
       try {

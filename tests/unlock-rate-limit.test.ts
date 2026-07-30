@@ -14,6 +14,15 @@ const CONFIG = {
   unlockRateWindowSec: 60,
 };
 
+/**
+ * A config no earlier call has seen.
+ *
+ * The missing-header warning is reported once per config object, so a test
+ * that reaches that path and reuses `CONFIG` would read the silence a previous
+ * test earned rather than its own.
+ */
+const unreported = () => ({ ...CONFIG });
+
 const WINDOW_START = 1_700_000_000_000;
 
 /** Records the bucket each half was called with, so the keying is asserted. */
@@ -210,7 +219,7 @@ describe("the unlock rate limit", () => {
     // a matter of type rather than of the handler remembering.
     const { limits, spent } = fakeLimits(true);
 
-    expect((await refusalOf(limits, CONFIG, post())).status).toBe(429);
+    expect((await refusalOf(limits, unreported(), post())).status).toBe(429);
     expect(spent).toEqual([]);
   });
 
@@ -220,13 +229,28 @@ describe("the unlock rate limit", () => {
     // here means the proxy in front is not sending the one it was told to
     // trust - which is an operator's problem and needs saying once.
     const { limits } = fakeLimits(true);
+    const config = unreported();
 
-    await refusalOf(limits, CONFIG, post());
+    await refusalOf(limits, config, post());
 
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toContain("no trusted client address header");
     // Names the header it looked for, so the fix does not need a code read.
-    expect(warnings[0]?.fields).toEqual({ header: CONFIG.clientIpHeader });
+    expect(warnings[0]?.fields).toEqual({ header: config.clientIpHeader });
+  });
+
+  test("says it once, so a stranger cannot flood the log with refusals", async () => {
+    // The route takes no credential, and every one of these answers 429 - so a
+    // line per attempt is a log bill anyone can run up. The refusal itself is
+    // still every time; only the operator's notice is deduplicated.
+    const { limits } = fakeLimits(true);
+    const config = unreported();
+
+    await refusalOf(limits, config, post());
+    await refusalOf(limits, config, post());
+    await refusalOf(limits, config, post());
+
+    expect(warnings).toHaveLength(1);
   });
 
   test("refuses a blank header rather than reserving an empty bucket", async () => {
@@ -234,7 +258,7 @@ describe("the unlock rate limit", () => {
 
     const refused = await refusalOf(
       limits,
-      CONFIG,
+      unreported(),
       post({ "cf-connecting-ip": "" }),
     );
 
