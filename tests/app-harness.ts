@@ -1,7 +1,7 @@
 import { pino } from "pino";
 import { type AppDeps, createApp } from "../src/app.ts";
 import type { AppAuth } from "../src/auth/instance.ts";
-import type { Config } from "../src/config.ts";
+import { type Config, loadConfig } from "../src/config.ts";
 import type { AssetManifest } from "../src/server/assets.ts";
 import type {
   AccountClosingRepo,
@@ -48,19 +48,36 @@ export const PUBLIC_BASE_URL = "https://plans.example.test";
 export const CLIENT_IP_HEADER = "x-forwarded-for";
 export const CLIENT_IP = "203.0.113.7";
 
-export const CONFIG = {
-  publicBaseUrl: PUBLIC_BASE_URL,
-  secret: "app-harness-secret-0123456789abcdef",
-  maxUploadBytes: 2 * 1024 * 1024,
-  planIdLength: 16,
-  shareCodeLength: 16,
-  maxPlansPerUser: 10,
-  uploadRateMax: 100,
-  uploadRateWindowSec: 60,
-  unlockRateMax: 100,
-  unlockRateWindowSec: 60,
-  clientIpHeader: CLIENT_IP_HEADER,
-} as unknown as Config;
+/**
+ * Built by the real loader rather than cast into shape, so every field these
+ * suites do not name - `rpId`, the log settings, the driver block - holds what
+ * production would hold instead of `undefined` behind a type that promises
+ * otherwise.
+ */
+export const CONFIG: Config = loadConfig(
+  {
+    BETTER_AUTH_SECRET: "app-harness-secret-0123456789abcdef",
+    PUBLIC_BASE_URL,
+    CLIENT_IP_HEADER,
+    MAX_UPLOAD_BYTES: String(2 * 1024 * 1024),
+    PLAN_ID_LENGTH: "16",
+    SHARE_CODE_LENGTH: "16",
+    MAX_PLANS_PER_USER: "10",
+    UPLOAD_RATE_MAX: "100",
+    UPLOAD_RATE_WINDOW_SEC: "60",
+    UNLOCK_RATE_MAX: "100",
+    UNLOCK_RATE_WINDOW_SEC: "60",
+    // A driver set has to be named for the loader to accept the environment.
+    // Nothing here reaches it: every suite supplies its own repositories.
+    STORAGE_DRIVER: "s3",
+    S3_BUCKET: "plans",
+    DB_DRIVER: "postgres",
+    DATABASE_URL: "postgres://localhost/plans",
+    KV_DRIVER: "valkey",
+    VALKEY_URL: "redis://localhost:6379",
+  },
+  {},
+);
 
 export const ASSETS: AssetManifest = {
   script: "/assets/entry-deadbeef.js",

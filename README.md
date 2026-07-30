@@ -96,34 +96,36 @@ project (`bunkerplan-test`), separate from the self-hosting stack below, so
 volumes with it. Postgres then works in a scratch schema and MinIO in a bucket
 created for the run, both dropped afterwards.
 
-`bun run test` is `bun run build && BUNKERPLAN_PREBUILT=1 bun test --isolate`:
-one process, a fresh global object per file. The build comes first because the
-suite serves the real Workers bundle on Miniflare, and the variable is what
-stops each worker rebuilding it. It was `--parallel` (one process per file,
-which implies `--isolate`),
-and the reason for the change is coverage. Bun's parallel reporter registers
-lines that are not statements - comments, blank lines, the continuation lines
-of a multi-line string - as coverable and unhit in workers that loaded a module
-without exercising it. On this repo that invents 1583 such lines and reports
-86% where the same run measures 99.5% in one process, with
-`src/client/errors.ts` at 44% and every branch in it covered. No real line is
-found by one topology and missed by the other; only the denominator moves.
-
-What `--parallel` was buying is given up, and what that costs shows up as
-intermittent failures in one process. Observed: several tests in the same file
-failing together at almost exactly 5000ms - Bun's per-test timeout - most often
-the Valkey expiry suite, which waits on real TTLs. It does not hang the run.
-
-The cause is suspected rather than established. Sharing one process with the
-workerd child Miniflare runs is the candidate, and `tests/drivers` is where the
-backends and that child meet, but nothing here has isolated it. What is
-reliable is the shape: re-run before believing a failure, and a genuine
-regression fails the same way every time rather than at the deadline. The
-diagnostic is the same command with the topology swapped:
+Two commands, because no single topology gives both a reliable verdict and an
+honest coverage figure.
 
 ```sh
-bun run build && BUNKERPLAN_PREBUILT=1 bun test --parallel
+bun run test           # the gate: one process per file, no coverage
+bun run test:coverage  # one shared process, coverage measured
 ```
+
+Both build first, because the suite serves the real Workers bundle on Miniflare;
+`BUNKERPLAN_PREBUILT=1` is what stops each worker rebuilding it.
+
+`--parallel` is the gate because it is the one that passes reliably. Its
+coverage is unusable: Bun's parallel reporter registers lines that are not
+statements - comments, blank lines, the continuation lines of a multi-line
+string - as coverable and unhit in workers that loaded a module without
+exercising it. On this repo that invents 1583 such lines and reports 86% where
+the same run measures 99.5% in one process, with `src/client/errors.ts` at 44%
+and every branch in it covered. No real line is found by one topology and
+missed by the other; only the denominator moves. So coverage is off by default
+in `bunfig.toml` and `test:coverage` turns it back on.
+
+`--isolate` measures correctly and fails intermittently. What is observed:
+several tests in one file failing together at almost exactly 5000ms, Bun's
+per-test timeout, most often the Valkey expiry suite - the only block in the
+suite that waits on the real clock. The cause is not established. One shared
+process holds every other file's handles and the workerd child Miniflare runs,
+and `tests/drivers` is where those meet, but nothing here has isolated it.
+
+So: a red `test:coverage` is worth a re-run before it is worth believing, and a
+genuine regression fails the same way every time rather than at the deadline.
 
 ## Self-hosting
 

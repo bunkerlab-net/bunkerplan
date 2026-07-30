@@ -217,19 +217,26 @@ describe("ApiKeysPanel creating", () => {
     expect("expiresIn" in created.options).toBe(false);
   });
 
-  test.each([
+  // Typed tuples, not a widened array: `choose` takes the option value and the
+  // assertion takes seconds, so a swapped pair should be a type error here.
+  const EXPIRY_CHOICES: ReadonlyArray<readonly [string, number]> = [
     ["1", 30 * DAY],
     ["2", 90 * DAY],
     ["3", 365 * DAY],
-  ])("expiry choice %s sends %i seconds", async (index, seconds) => {
-    const created = recordCreate();
-    const view = await mountAsync(<ApiKeysPanel />);
+  ];
 
-    await choose(view.find<HTMLSelectElement>("select"), index);
-    await click(view.byText("button", "Create key"));
+  test.each(EXPIRY_CHOICES)(
+    "expiry choice %s sends %i seconds",
+    async (index, seconds) => {
+      const created = recordCreate();
+      const view = await mountAsync(<ApiKeysPanel />);
 
-    expect(created.options["expiresIn"]).toBe(seconds);
-  });
+      await choose(view.find<HTMLSelectElement>("select"), index);
+      await click(view.byText("button", "Create key"));
+
+      expect(created.options["expiresIn"]).toBe(seconds);
+    },
+  );
 
   test("the plaintext is revealed once and the name field is cleared", async () => {
     client.apiKey.create = ok({ key: "bkp_the_only_time" });

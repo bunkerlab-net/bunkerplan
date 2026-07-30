@@ -506,6 +506,22 @@ describe("a link that brought its own code", () => {
     expect(window.location.hash).toBe("");
   });
 
+  test("padding on the relay forwards rather than stranding the reader", async () => {
+    /*
+     * Nothing was spent, so the relay has nothing left to do and must hand the
+     * reader on. Treating a fragment that trims away as a spend would leave
+     * them on `/s/{id}`, a page whose only job is to get out of the way, while
+     * a session or an earlier cookie may already let them read the plan.
+     */
+    standOn(`/s/${PLAN_ID}#code=%20%20`);
+
+    const view = await mountAsync(gate({ relay: true }));
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+    expect(view.maybe('[role="alert"]')).toBeNull();
+  });
+
   test("decodes it, matching what the dashboard encoded", async () => {
     standOn(`/p/${PLAN_ID}#code=a%20b%26c%3Dd`);
     api.unlockPlan = async () => undefined;

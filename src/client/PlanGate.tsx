@@ -86,9 +86,16 @@ function useLinkCode(
       window.history.replaceState(null, "", window.location.pathname);
     }
 
-    // Spent only when there is a code to spend and a code on the plan to match
-    // it. `redeem` navigates on success, so nothing below runs in that case.
-    if (fromLink !== null && hasCode) {
+    /*
+     * Spent only when there is a code to spend and a code on the plan to match
+     * it. `redeem` navigates on success, so nothing below runs in that case.
+     *
+     * Trimmed to the same rule `redeem` applies before it spends. A fragment
+     * that trims away would otherwise take this branch and then spend nothing,
+     * and the `return` would skip the forward below - stranding a reader on
+     * `/s/{id}`, a page whose only job is to hand them on.
+     */
+    if (fromLink !== null && fromLink.trim() !== "" && hasCode) {
       redeem(fromLink);
       return;
     }

@@ -6,6 +6,7 @@ minimumReleaseAge = 86400
 frozenLockfile = false
 
 [test]
-# Enables coverage reporting.
-# Default `false`. Use `--coverage` to override.
-coverage = true
+# Off by default: the accurate figure comes from `bun run test:coverage`, which
+# runs one process. Under `--parallel` the denominator is wrong - see README.md -
+# so the gate stays quiet rather than printing a number nobody should read.
+coverage = false

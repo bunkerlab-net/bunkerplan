@@ -46,14 +46,17 @@ async function bucketFor(
 }
 
 /**
- * Either the 429 to return, or the reservation the attempt now holds.
- *
- * The bucket and the window it was charged in, so the refund can name both: it
- * must give the count back to the window that took it and nowhere else.
+ * The bucket and the window a reservation was charged in, so the refund can
+ * name both: it must give the count back to the window that took it and nowhere
+ * else.
  */
-export type UnlockReservation =
-  | { readonly refused: Response }
-  | { readonly bucket: string; readonly windowStart: number };
+export interface UnlockHold {
+  readonly bucket: string;
+  readonly windowStart: number;
+}
+
+/** Either the 429 to return, or the reservation the attempt now holds. */
+export type UnlockReservation = { readonly refused: Response } | UnlockHold;
 
 /**
  * Takes one count before the code is compared.
@@ -104,7 +107,7 @@ export async function reserveUnlockAttempt(
  */
 export async function refundUnlockAttempt(
   limits: RateLimitRepo,
-  reservation: { readonly bucket: string; readonly windowStart: number },
+  reservation: UnlockHold,
 ): Promise<void> {
   await limits.refund(reservation.bucket, reservation.windowStart);
 }

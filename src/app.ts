@@ -25,6 +25,7 @@ import {
   reserveUnlockAttempt,
 } from "./http/unlock-rate-limit.ts";
 import { checkUploadRate } from "./http/upload-rate-limit.ts";
+import { isPlanId } from "./ids.ts";
 import type { AssetManifest } from "./server/assets.ts";
 import {
   renderDashboard,
@@ -271,7 +272,9 @@ function registerShareRelay(app: Hono, deps: AppDeps): void {
   app.get("/s/:planId", async (c) => {
     const { config, db } = await getServices();
     const planId = c.req.param("planId");
-    const row = await db.plans.findAccess(planId);
+    // Only ids this app could have issued reach the store, the same rule
+    // `resolvePlanAccess` applies on `/p/{id}`.
+    const row = isPlanId(planId) ? await db.plans.findAccess(planId) : null;
     if (row === null) return c.html(renderNotFound(assets), 404);
 
     // Only whether a code exists. `shareCodeHash` is what would let a holder

@@ -667,11 +667,13 @@ describe("redeeming a code", () => {
       unlockRateLimits: countingLimits(3),
     });
 
+    // The same length as `CODE`, so every one of these reaches the comparison
+    // rather than being turned away on shape by whatever runs before it.
     const responses = await Promise.all(
       Array.from({ length: 10 }, () =>
         app.fetch(
           `/api/plans/${PLAN_ID}/unlock`,
-          unlockInit("wrongcode123456"),
+          unlockInit("wrongcode1234567"),
         ),
       ),
     );
@@ -879,6 +881,37 @@ describe("the share-link relay", () => {
     // exists and nothing else, which that path already does.
     expect(response.status).toBe(404);
     expect(await response.text()).toContain("Nothing lives at this URL");
+  });
+
+  test("a malformed id is refused without reaching the store", async () => {
+    /*
+     * The id above is well shaped and merely unknown, so it reads the store and
+     * finds nothing - which is why it cannot show this. A segment that could
+     * never have been minted is turned away first, the same rule
+     * `resolvePlanAccess` applies on `/p/{id}`: anything outside the alphabet
+     * must not become a lookup key.
+     *
+     * Uppercase rather than an encoded separator: `%2F` may be decoded before
+     * the router dispatches, which would answer 404 from the router and pass
+     * this test with the guard deleted.
+     */
+    let reads = 0;
+    const plans = memoryPlans([]);
+    const app = buildApp({
+      plans: {
+        ...plans,
+        findAccess: async (id) => {
+          reads += 1;
+          return await plans.findAccess(id);
+        },
+      },
+    });
+
+    const response = await app.fetch("/s/NotAPlanId");
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain("Nothing lives at this URL");
+    expect(reads).toBe(0);
   });
 });
 

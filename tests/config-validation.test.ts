@@ -63,7 +63,11 @@ describe("the identity settings", () => {
   test("a missing base URL is refused with an example", () => {
     const { PUBLIC_BASE_URL, ...rest } = SELF_HOSTED;
 
-    expect(refusal(rest)).toContain("PUBLIC_BASE_URL is required");
+    // The example is the point of the message: an operator who has not set this
+    // needs the shape, not just the name of the variable they missed.
+    expect(refusal(rest)).toContain(
+      "PUBLIC_BASE_URL is required (e.g. https://plans.example.com)",
+    );
   });
 
   test("a base URL that is not a URL is refused, quoting what was given", () => {
