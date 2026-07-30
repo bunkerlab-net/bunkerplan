@@ -111,15 +111,15 @@ armWhileFileRuns(arm, () => {});
  *
  * Measured, both ways: asserting `subscribers.size === 0` in an `afterEach`
  * fails four cases, and moving it to the next `beforeEach` - after the
- * harness's own teardown - fails the same ones. `hono/jsx/dom` does not run
- * effect cleanups when a root is unmounted; it runs them when a component
- * leaves a tree that stays mounted. So a subscription outliving `root.unmount`
- * is the renderer's behaviour, not this file's bug, and an assertion here
- * would be pinning that rather than anything the module does.
+ * harness's own teardown - fails the same ones. The harness renders each tree
+ * away, and that removes the DOM without running the subtree's effect
+ * cleanups; see the note in harness.tsx, which records what was tried. So a
+ * subscription outliving the teardown is the harness's limit rather than this
+ * module's bug, and asserting here would pin that instead.
  *
  * Where the unsubscribe can be seen is the case built for it: "unsubscribes
- * when the subscriber leaves the tree" toggles a child out of a live tree and
- * watches the delivery count.
+ * when the subscriber leaves the tree" removes a child from a tree that stays
+ * mounted, which does run the cleanup, and watches the delivery count.
  */
 afterEach(() => {
   value = UNRESOLVED;

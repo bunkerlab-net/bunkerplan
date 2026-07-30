@@ -194,6 +194,16 @@ export function memoryPlans(
      */
     insert: async (row, maxPlans): Promise<PlanInsert> => {
       if (rows.has(row.id)) return "duplicate";
+      /*
+       * The state the database will not hold: `setVisibility` nulls the hash
+       * on the way out of private and `setShareCodeHash` only writes to a
+       * private row, so no SQL path produces a public plan with a code. A seed
+       * that did would let a test assert against a plan production cannot
+       * make - which is the one thing a fake must never allow.
+       */
+      if (row.visibility === "public" && row.shareCodeHash !== null) {
+        throw new Error("a public plan cannot carry a share code");
+      }
       const held = [...rows.values()].filter(
         (item) => item.userId === row.userId,
       ).length;

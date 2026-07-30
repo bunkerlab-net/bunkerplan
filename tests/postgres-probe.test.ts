@@ -132,6 +132,12 @@ const DSN = "postgres://stub@127.0.0.1:1/stub";
 const reaches = async (ready: () => boolean) => {
   for (let turn = 0; turn < 1000; turn += 1) {
     if (ready()) return;
+    /*
+     * Microtasks are the whole queue here: every step this waits on is the
+     * stub above resolving, and nothing in this file touches a timer or a
+     * socket. Yielding a macrotask instead would put real time into a suite
+     * that has none, for a turn that cannot exist.
+     */
     await Promise.resolve();
   }
   throw new Error("the probe never reached the expected point");

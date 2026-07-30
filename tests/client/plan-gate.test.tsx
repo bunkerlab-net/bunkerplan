@@ -74,7 +74,7 @@ describe("what the gate says", () => {
   test("a plan with no code offers only the account way in", async () => {
     const view = await mountAsync(gate({ hasCode: false }));
 
-    expect(view.maybe('input[type="text"]')).toBeNull();
+    expect(view.maybe(TEXT_INPUT)).toBeNull();
     expect(view.text()).toContain("Sign in");
     // With one way in, that control takes the page's single accent.
     expect(view.byText("button", "Sign in with passkey").className).toBe(
@@ -226,18 +226,14 @@ describe("unlocking with a code", () => {
     expect(alert.textContent).toBe("wrong code");
     // A wrong code is the expected outcome here, so the box points at the
     // message rather than leaving a screen reader to find it.
-    expect(
-      view.find('input[type="text"]').getAttribute("aria-describedby"),
-    ).toBe(alert.id);
+    expect(codeBox(view).getAttribute("aria-describedby")).toBe(alert.id);
     expect(replacements).toEqual([]);
   });
 
   test("with no error the box describes nothing", async () => {
     const view = await mountAsync(gate());
 
-    expect(
-      view.find('input[type="text"]').getAttribute("aria-describedby"),
-    ).toBeNull();
+    expect(codeBox(view).getAttribute("aria-describedby")).toBeNull();
   });
 
   test("a rate limit names the wait it was given", async () => {
@@ -386,7 +382,7 @@ describe("unlocking with a code", () => {
 
   test("the box does not spell-check or autocomplete a secret", async () => {
     const view = await mountAsync(gate());
-    const box = view.find('input[type="text"]');
+    const box = codeBox(view);
 
     expect(box.getAttribute("autocomplete")).toBe("off");
     expect(box.getAttribute("spellcheck")).toBe("false");

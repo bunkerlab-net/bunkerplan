@@ -77,6 +77,11 @@ export function useHarness(): void {
  * round of both. Draining several turns is what makes "mount, then assert on
  * what the first fetch produced" work without sprinkling sleeps through the
  * assertions.
+ *
+ * Six is a ceiling, not a promise: a chain longer than that is under-flushed
+ * and the assertion after it reads a half-settled tree. It is a parameter for
+ * exactly that case - `flush(10)` - and a test that needs one is saying its
+ * component takes more rounds than anything else here.
  */
 export async function flush(turns = 6): Promise<void> {
   for (let turn = 0; turn < turns; turn++) {
@@ -117,8 +122,24 @@ export function mount(node: Child): Mounted {
   const host = document.createElement("div");
   document.body.appendChild(host);
 
-  // The root exists only so the teardown above has something to render the
-  // component away with; it adds no element of its own.
+  /*
+   * The root exists only so the teardown has something to render the component
+   * away with; it adds no element of its own.
+   *
+   * That render-away removes the DOM but does not run the subtree's
+   * `useEffect` cleanups. Measured, and not for want of trying: wrapping the
+   * node in a stable element, replacing `null` with a string, putting a
+   * component boundary between the root and the node, moving the state off the
+   * root component, and driving the change through a dispatched click all
+   * leave the counter at zero. A component built inside its parent's render
+   * and removed from a live tree does run them - tests/client/auth-module
+   * pins that - so the difference is the caller's pre-built element, which
+   * this harness exists to accept. Not isolated further.
+   *
+   * What it costs: a mounted component's effects outlive its test. A suite
+   * whose stubs can notice resets them itself; see the note on `subscribers`
+   * in auth-module.test.tsx.
+   */
   let hide = (): void => {};
   // Returns `Child` rather than an element, which JSX cannot type - the point
   // is to render whatever it was handed, including a bare string.
@@ -203,6 +224,12 @@ export async function keyboardClick(node: HTMLElement): Promise<void> {
  *
  * The attribute is lifted for the dispatch and put straight back, so what runs
  * is the handler, and what the assertion reads is the handler's own guard.
+ *
+ * That restore lands as soon as `dispatchEvent` returns, which is when the
+ * synchronous part of every listener has run. An async handler resumes after
+ * its first `await` with the control disabled again - so this exercises a
+ * guard the handler checks on entry, and cannot be used to ask what a handler
+ * does about `disabled` partway through.
  */
 export async function clickPastDisabled(
   node: HTMLButtonElement,

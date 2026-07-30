@@ -920,7 +920,9 @@ describe("the share-link relay", () => {
      *
      * Uppercase rather than an encoded separator: `%2F` may be decoded before
      * the router dispatches, which would answer 404 from the router and pass
-     * this test with the guard deleted.
+     * this test with the guard deleted. Sixteen characters, so the length
+     * check passes it through and the alphabet is what refuses it - a short
+     * id would be turned away before the rule under test ever ran.
      */
     let reads = 0;
     const plans = memoryPlans([]);
@@ -934,7 +936,7 @@ describe("the share-link relay", () => {
       },
     });
 
-    const response = await app.fetch("/s/NotAPlanId");
+    const response = await app.fetch("/s/aaaaaaaaaaaaaaaA");
 
     expect(response.status).toBe(404);
     expect(await response.text()).toContain("Nothing lives at this URL");

@@ -11,7 +11,7 @@ import {
 } from "../../src/server/pages.tsx";
 import { useApiStub } from "./api-stub.ts";
 import { navigations, replacements, useAuthStub } from "./auth-stub.ts";
-import { flush, useHarness } from "./harness.tsx";
+import { flush } from "./harness.tsx";
 
 /**
  * The handshake between the two renders, driven exactly as `entry.tsx` does
@@ -61,7 +61,6 @@ afterEach(async () => {
   }
 });
 
-useHarness();
 useApiStub();
 useAuthStub();
 
