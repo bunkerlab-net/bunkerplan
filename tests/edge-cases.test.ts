@@ -402,10 +402,11 @@ describe("the health probe", () => {
     // thing that reaches the driver: without this the S3 client holds its
     // connection and a pool client for as long as the endpoint stays silent.
     //
-    // The reason, not just the flag: `withTimeout` also aborts in its `finally`
-    // once nothing reads the answer, so `aborted` alone is true even if the
-    // deadline itself never fired. This is what says the deadline is what
-    // cancelled it.
+    // The reason as well as the flag. Cancellation happens in one place - the
+    // timeout callback, which calls `controller.abort(expired)` before it
+    // rejects; `withTimeout`'s `finally` only clears the timer. So the message
+    // is what identifies the deadline as what cancelled this, rather than some
+    // later abort, and it pins the wording an operator reads in the log.
     expect(seen?.aborted).toBe(true);
     expect((seen?.reason as Error | undefined)?.message).toBe(
       `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
