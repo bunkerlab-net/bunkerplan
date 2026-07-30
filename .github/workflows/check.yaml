@@ -99,11 +99,9 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      # `bun run test` is `bun test --parallel`: one process per file, and the
-      # topology that passes reliably. Coverage is measured by a separate
-      # command because the parallel reporter counts comments, blank lines and
-      # multi-line-string continuations as uncovered, reporting 86% where the
-      # same suite measures 99.5% in one process. See README.md.
+      # `bun run test` is `bun test --isolate`, with coverage on through
+      # bunfig.toml. That is the topology that measures coverage correctly and
+      # the one that flakes; see README.md for the shape a real failure has.
       #
       # The suite also serves the real Workers bundle on Miniflare, so it
       # builds one first. That covers what a separate build step used to: a

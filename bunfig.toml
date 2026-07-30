@@ -6,6 +6,4 @@ minimumReleaseAge = 86400
 frozenLockfile = false
 
 [test]
-# Coverage is opt-in through `--coverage` - see `test:coverage`. Under
-# `--parallel` the denominator is wrong (README.md), so the gate stays quiet
-# rather than printing a number nobody should read.
+coverage = true

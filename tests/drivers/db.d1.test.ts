@@ -7,8 +7,8 @@ import { describeUnlockRateLimitRepo } from "./contract/unlock-rate-limit-repo.t
 
 /**
  * D1 on real workerd, with the `drizzle/sqlite` migrations applied. One
- * backend per file so `bun test --parallel` gives each its own process - see
- * tests/drivers/plan-storage.r2.test.ts for why that matters.
+ * backend per file, which under `--isolate` buys a module registry rather
+ * than a process - see tests/drivers/plan-storage.r2.test.ts.
  */
 const skip = false;
 

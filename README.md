@@ -33,9 +33,8 @@ bun run dev
 | `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it   |
-| `bun run test`                         | Builds, then the whole suite, one process per file. Skips the container-backed backends unless they are up - see Tests |
-| `bun run test:coverage`                | The same suite in one shared process, with coverage measured - see Tests for why the topology differs    |
-| `bun run test:backends`                | Postgres, Valkey, and MinIO on localhost, so nothing skips                                              |
+| `bun run test`                         | Builds, then the whole suite, with coverage. Partial by default: the container-backed suites run only when their `TEST_*` variables are set - see Tests |
+| `bun run test:backends`                | Starts Postgres, Valkey, and MinIO on localhost; set the `TEST_*` variables to reach them               |
 | `bun run check`                        | Biome lint and format                                                                                   |
 | `bun run typecheck`                    | Builds, then `tsc --noEmit`                                                                             |
 
@@ -97,45 +96,41 @@ project (`bunkerplan-test`), separate from the self-hosting stack below, so
 volumes with it. Postgres then works in a scratch schema and MinIO in a bucket
 created for the run, both dropped afterwards.
 
-Two commands, because no single topology gives both a reliable verdict and an
-honest coverage figure.
+One command, `bun run test`. It builds first, because the suite serves the
+real Workers bundle on Miniflare; `BUNKERPLAN_PREBUILT=1` is what stops each
+worker rebuilding it. Coverage is on in `bunfig.toml`, so every run reports a
+figure - and that figure counts only what ran, so a run with the backends
+absent measures a smaller suite than the full matrix does.
 
-```sh
-bun run test           # the gate: one process per file, no coverage
-bun run test:coverage  # one shared process, coverage measured
-```
+The run is `--isolate`, which gives each file its own module registry. That is
+the topology that measures coverage correctly. `--parallel` does not: its
+reporter registers lines that are not statements - comments, blank lines, the
+continuation lines of a multi-line string - as coverable and unhit in workers
+that loaded a module without exercising it. On this repo that invents 1583
+such lines and reports 86% where the same run measures 99.5% in one process,
+with `src/client/errors.ts` at 44% and every branch in it covered. No real
+line is found by one topology and missed by the other; only the denominator
+moves.
 
-Both build first, because the suite serves the real Workers bundle on Miniflare;
-`BUNKERPLAN_PREBUILT=1` is what stops each worker rebuilding it.
+What `--isolate` costs is intermittent failures. What is observed: several
+tests in one file failing together at almost exactly 5000ms, Bun's per-test
+timeout, most often the Valkey suite - the only part of the run that waits on
+the real clock. The cause is not established. Every file shares one process
+there, and that process both holds the other files' open handles and runs the
+workerd children Miniflare starts; `tests/drivers` is where those meet, but
+nothing here has isolated it.
 
-`--parallel` is the gate because it is the one that passes reliably. Its
-coverage is unusable: Bun's parallel reporter registers lines that are not
-statements - comments, blank lines, the continuation lines of a multi-line
-string - as coverable and unhit in workers that loaded a module without
-exercising it. On this repo that invents 1583 such lines and reports 86% where
-the same run measures 99.5% in one process, with `src/client/errors.ts` at 44%
-and every branch in it covered. No real line is found by one topology and
-missed by the other; only the denominator moves. So coverage is off by default
-in `bunfig.toml` and `test:coverage` turns it back on.
-
-`--isolate` measures correctly and fails intermittently. What is observed:
-several tests in one file failing together at almost exactly 5000ms, Bun's
-per-test timeout, most often the Valkey expiry suite - the only block in the
-suite that waits on the real clock. The cause is not established. One shared
-process holds every other file's handles and the workerd child Miniflare runs,
-and `tests/drivers` is where those meet, but nothing here has isolated it.
-
-A red `test:coverage` is therefore not evidence on its own - but neither is one
-green re-run, which is the trap. A single pass says nothing about a failure that
+A red run is therefore not evidence on its own - but neither is one green
+re-run, which is the trap. A single pass says nothing about a failure that
 happens some of the time. Repeat it instead:
 
 ```sh
 BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
 ```
 
-A genuine regression fails every repetition, and fails on its own assertion. The
-flake fails a minority of them, at the deadline, in a whole block at once. If a
-failure does not fit that shape, treat it as real.
+A genuine regression fails every repetition, and fails on its own assertion.
+The flake fails a minority of them, at the deadline, in a whole block at once.
+If a failure does not fit that shape, treat it as real.
 
 ## Self-hosting
 

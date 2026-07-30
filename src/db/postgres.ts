@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import type { Db } from "../services/types.ts";
@@ -47,10 +46,48 @@ export function createPostgresDb(connectionString: string): Db {
     uploadRateLimits: createPgRateLimitRepo(db),
     unlockRateLimits: createPgUnlockRateLimitRepo(db),
     accountClosing: createPgAccountClosingRepo(db),
-    // `pg` takes no abort signal on a query; the pool and statement timeouts
-    // above are what bound this probe against an unreachable server.
-    async probe(_signal?: AbortSignal) {
-      await db.execute(sql`select 1`);
+    /*
+     * The caller's deadline is shorter than `query_timeout`, so an abandoned
+     * probe must not park its client: releasing with an error destroys the
+     * connection instead, freeing the slot at the abort rather than whenever
+     * the server gets around to answering. Not a shorter `statement_timeout`
+     * for this query - as above, that needs a server well enough to enforce
+     * it, which is not the case being bounded.
+     */
+    async probe(signal?: AbortSignal) {
+      if (signal?.aborted) return;
+      const client = await pool.connect();
+      let released = false;
+      /*
+       * An argument destroys the connection instead of parking it. Both
+       * callers below pass one, which is what `pool.query` did for us before
+       * this took the client itself: a query that failed can leave the
+       * protocol mid-message, so the connection is not fit to hand out again.
+       */
+      const release = (broken?: Error) => {
+        if (released) return;
+        released = true;
+        client.release(broken);
+      };
+      const abandon = () =>
+        release(new Error("health probe abandoned; connection discarded"));
+      // The wait for a client is itself bounded only by
+      // `connectionTimeoutMillis`, which outlasts the probe: one that arrives
+      // after the caller left is discarded without asking anything of it.
+      if (signal?.aborted) {
+        abandon();
+        return;
+      }
+      signal?.addEventListener("abort", abandon, { once: true });
+      try {
+        await client.query("select 1");
+      } catch (cause) {
+        release(cause instanceof Error ? cause : new Error(String(cause)));
+        throw cause;
+      } finally {
+        signal?.removeEventListener("abort", abandon);
+        release();
+      }
     },
   };
 }
