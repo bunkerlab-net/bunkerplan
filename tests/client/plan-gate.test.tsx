@@ -688,4 +688,21 @@ describe("the share-link relay", () => {
     expect(codeBox(view).value).toBe("wrongcode123");
     expect(window.location.hash).toBe("");
   });
+
+  test("a query code on the relay is scrubbed, not spent", async () => {
+    /*
+     * `?code=` is the documented form on `/p/{id}`, where the server has
+     * already spent it. Nothing builds `/s/{id}?code=`, and the relay does not
+     * redeem one - it takes the value out of the bar and hands the reader to
+     * the plan, which decides. See the note on `codeInFragment`.
+     */
+    standOn(`/s/${PLAN_ID}?code=by-the-other-route`);
+    api.unlockPlan = async () => undefined;
+
+    await mountAsync(gate({ relay: true }));
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(window.location.search).toBe("");
+    expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+  });
 });

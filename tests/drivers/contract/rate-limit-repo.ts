@@ -176,6 +176,11 @@ export function describeRateLimitRepo(
 
         await limits.refund(key, Date.now());
 
+        // No row at all, not merely one at zero: a counter conjured here would
+        // hold a window nobody opened, and the next real consume would fall
+        // into it rather than starting its own.
+        expect(await fixture.countRateLimits(key)).toBe(0);
+
         const verdicts: boolean[] = [];
         for (let i = 0; i < MAX + 1; i += 1) {
           verdicts.push((await consume(key)).allowed);

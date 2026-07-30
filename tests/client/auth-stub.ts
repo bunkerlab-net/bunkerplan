@@ -93,6 +93,16 @@ const unset = (name: string) => async () => {
   throw new Error(`${name} was called but this test did not stub it`);
 };
 
+/**
+ * Declared before `blank()` reads it.
+ *
+ * `useSession.get` closes over this rather than capturing a value, so the
+ * client built at module load answers with whatever a test set most recently.
+ * `let` after the call worked - the closure only runs later - but it read as
+ * though the first client saw `undefined`.
+ */
+let session: SessionState = SIGNED_OUT;
+
 function blank(): Client {
   return {
     apiKey: {
@@ -114,8 +124,6 @@ function blank(): Client {
 
 /** Mutated in place, so the stubbed module keeps pointing at it. */
 export const client: Client = blank();
-
-let session: SessionState = SIGNED_OUT;
 
 export function setSession(next: SessionState): void {
   session = next;
@@ -177,6 +185,12 @@ mock.module("../../src/client/auth.ts", () => stubs);
  * Gated on the arm like everything else here: `window.location` is one object
  * for the whole process, so an unarmed file has to get the navigation it
  * actually asked for rather than one this module quietly swallowed.
+ *
+ * Installed once at module scope rather than per suite, which is the same
+ * shape as the `mock.module` registrations above and for the same reason: the
+ * patch cannot be taken back cleanly once other files hold references, so what
+ * varies per file is the gate, not the installation. Nothing here reads
+ * `window.location` at import time.
  */
 export const navigations: string[] = [];
 

@@ -447,11 +447,14 @@ describe("making a plan private again", () => {
     const anonymous = buildApp({ plans, storage });
     expect((await anonymous.fetch(`/p/${PLAN_ID}`)).status).toBe(200);
 
-    await app.fetch(`/api/plans/${PLAN_ID}/sharing`, {
+    const updated = await app.fetch(`/api/plans/${PLAN_ID}/sharing`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ visibility: "private" }),
     });
+    // The premise: a rejected update leaves a public plan, and "the next read
+    // is 401" would then be a claim about a request that changed nothing.
+    expect(updated.status).toBe(200);
 
     expect((await anonymous.fetch(`/p/${PLAN_ID}`)).status).toBe(401);
   });

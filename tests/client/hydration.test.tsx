@@ -109,7 +109,7 @@ async function hydrate(document_: string): Promise<HTMLElement> {
 
 describe("the plan gate", () => {
   test("keeps the share code out of the spell checker", async () => {
-    const served = renderPlanGate(ASSETS, "abc123", true, ORIGIN);
+    const served = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true });
     expect(served).toContain('spellcheck="false"');
 
     const root = await hydrate(served);
@@ -122,7 +122,9 @@ describe("the plan gate", () => {
   });
 
   test("keeps autocomplete off", async () => {
-    const root = await hydrate(renderPlanGate(ASSETS, "abc123", true, ORIGIN));
+    const root = await hydrate(
+      renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true }),
+    );
 
     expect(root.querySelector("input")?.getAttribute("autocomplete")).toBe(
       "off",
@@ -130,7 +132,9 @@ describe("the plan gate", () => {
   });
 
   test("survives hydration without losing the page", async () => {
-    const root = await hydrate(renderPlanGate(ASSETS, "abc123", false, ORIGIN));
+    const root = await hydrate(
+      renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: false }),
+    );
 
     expect(root.textContent).toContain("This plan is private.");
     expect(root.querySelector("input")).toBeNull();
@@ -148,7 +152,7 @@ describe("the plan gate", () => {
     window.history.replaceState(null, "", "/s/abc123");
 
     const root = await hydrate(
-      renderPlanGate(ASSETS, "abc123", true, ORIGIN, { relay: true }),
+      renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true, relay: true }),
     );
 
     expect(root.querySelector("input")).not.toBeNull();

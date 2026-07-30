@@ -306,26 +306,25 @@ function registerShareRelay(app: Hono, deps: AppDeps): void {
     // Only whether a code exists. `shareCodeHash` is what would let a holder
     // forge this plan's unlock cookie, so it never reaches a response body.
     return c.html(
-      renderPlanGate(
-        assets,
-        planId,
-        row.shareCodeHash !== null,
-        config.publicBaseUrl,
-        { relay: true },
-      ),
+      renderPlanGate(assets, planId, config.publicBaseUrl, {
+        hasCode: row.shareCodeHash !== null,
+        relay: true,
+      }),
       200,
       { "cache-control": "no-store" },
     );
   });
 }
 
-/** Published plans, the rendered pages, and the self-hosting probe. */
-function registerSite(app: Hono, deps: AppDeps): void {
-  const { getServices, runtime, assets } = deps;
-
-  // `getServices` is passed uncalled on purpose: on Workers the probe is
-  // refused before any binding is touched. See src/http/healthz.ts.
-  app.get("/healthz", () => healthz(runtime, getServices));
+/**
+ * The published plan itself, at the one prefix reserved for it.
+ *
+ * Its own registration rather than part of the site below: this is the only
+ * route that serves a document somebody else uploaded, and the only one whose
+ * responses carry the plan sandbox instead of the app policy.
+ */
+function registerPlanPage(app: Hono, deps: AppDeps): void {
+  const { getServices, assets } = deps;
 
   app.get("/p/:planId", async (c) => {
     const { auth, config, db, storage } = await getServices();
@@ -346,14 +345,24 @@ function registerSite(app: Hono, deps: AppDeps): void {
     // could neither sign in nor post a code.
     if ("gate" in served) {
       return c.html(
-        renderPlanGate(assets, planId, served.hasCode, config.publicBaseUrl),
+        renderPlanGate(assets, planId, config.publicBaseUrl, {
+          hasCode: served.hasCode,
+        }),
         401,
         { "cache-control": "no-store" },
       );
     }
     return served;
   });
+}
 
+/** The rendered pages, the self-hosting probe, and the catch-all. */
+function registerSite(app: Hono, deps: AppDeps): void {
+  const { getServices, runtime, assets } = deps;
+
+  // `getServices` is passed uncalled on purpose: on Workers the probe is
+  // refused before any binding is touched. See src/http/healthz.ts.
+  app.get("/healthz", () => healthz(runtime, getServices));
   // The origin comes from the configured public base URL, not from the
   // request: `Host` is whatever reached the process, so behind a proxy that
   // forwards it unchanged a crawler could be handed tags pointing at someone
@@ -410,6 +419,7 @@ export function createApp(deps: AppDeps): Hono {
   registerPlanSharing(app, deps.getServices);
   registerPlanUnlock(app, deps.getServices);
   registerShareRelay(app, deps);
+  registerPlanPage(app, deps);
   registerSite(app, deps);
 
   return app;

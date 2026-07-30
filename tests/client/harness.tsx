@@ -89,7 +89,14 @@ export function useHarness(): void {
       for (const entry of entries) entry.host.remove();
       registered = false;
     }
-    if (failures.length > 0) throw failures[0];
+    if (failures.length > 0) {
+      // The first is the cause, and the rest ride along: two trees failing to
+      // come down is a different story from one, and dropping the others would
+      // send the next reader looking for a single culprit.
+      throw new AggregateError(failures, "the harness could not tear down", {
+        cause: failures[0],
+      });
+    }
   });
 }
 

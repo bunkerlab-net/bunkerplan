@@ -33,6 +33,44 @@ const STATEMENT_TIMEOUT_MS = 15_000;
 const ABANDONED = "health probe abandoned; connection discarded";
 
 /**
+ * A pool client, or the caller's reason for having stopped waiting.
+ *
+ * Raced, because waiting for a free client is bounded by
+ * `connectionTimeoutMillis` and that outlasts the probe's deadline. The
+ * acquisition itself is not cancelled - `pool.connect` takes no signal - so a
+ * client can still turn up afterwards, and is destroyed rather than parked.
+ */
+async function acquire(
+  pool: pg.Pool,
+  signal?: AbortSignal,
+): Promise<pg.PoolClient> {
+  const pending = pool.connect();
+  if (signal === undefined) return await pending;
+  /*
+   * Named and removed rather than left to `once: true`. The signal belongs to
+   * the caller and outlives this race - a listener left on it holds this
+   * closure, and its rejected promise, for as long as the caller keeps the
+   * signal around.
+   */
+  let onAbort = (): void => {};
+  const abandoned = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([pending, abandoned]);
+  } catch (cause) {
+    void pending.then(
+      (late) => late.release(new Error(ABANDONED)),
+      () => {},
+    );
+    throw cause;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
+/**
  * Asks the database one question, bounded by the caller's deadline rather than
  * the pool's.
  *
@@ -47,39 +85,7 @@ async function probeOnce(pool: pg.Pool, signal?: AbortSignal): Promise<void> {
   // Throwing, not returning: a probe that resolves is a probe that found the
   // database reachable, and an abandoned one established nothing.
   if (signal?.aborted) throw signal.reason;
-  /*
-   * Raced, because waiting for a free client is bounded by
-   * `connectionTimeoutMillis` and that outlasts the probe's deadline. The
-   * acquisition itself is not cancelled - `pool.connect` takes no signal - so
-   * a client can still turn up afterwards, and is thrown away rather than
-   * parked.
-   */
-  const pending = pool.connect();
-  if (signal !== undefined) {
-    /*
-     * Named and removed rather than left to `once: true`. The signal belongs
-     * to the caller and outlives this race - a listener left on it holds this
-     * closure, and its rejected promise, for as long as the caller keeps the
-     * signal around.
-     */
-    let onAbort = (): void => {};
-    const abandoned = new Promise<never>((_, reject) => {
-      onAbort = () => reject(signal.reason);
-      signal.addEventListener("abort", onAbort, { once: true });
-    });
-    try {
-      await Promise.race([pending, abandoned]);
-    } catch (cause) {
-      void pending.then(
-        (late) => late.release(new Error(ABANDONED)),
-        () => {},
-      );
-      throw cause;
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-    }
-  }
-  const client = await pending;
+  const client = await acquire(pool, signal);
   let released = false;
   /*
    * An argument destroys the connection instead of parking it, which is what

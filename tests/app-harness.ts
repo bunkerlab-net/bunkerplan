@@ -217,7 +217,11 @@ export function memoryPlans(
         (item) => item.userId === row.userId,
       ).length;
       if (held >= maxPlans) return "quota";
-      rows.set(row.id, { ...storedPlan(), ...row, createdAt: new Date() });
+      // `grants` cloned, as the seed path does: a row that kept the caller's
+      // array would let a later `grantByHandle` write into an object the test
+      // still holds, which is a fake editing its own input.
+      const stored = { ...storedPlan(), ...row, createdAt: new Date() };
+      rows.set(row.id, { ...stored, grants: [...stored.grants] });
       return "created";
     },
     /*

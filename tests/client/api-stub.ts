@@ -73,7 +73,11 @@ function blank(): Api {
   return Object.fromEntries(
     NAMES.map((name) => [
       name,
-      () => {
+      // Async, as the auth stub is: every one of these stands in for a network
+      // call the panels reach with `await` or `.catch(...)`, and a synchronous
+      // throw escapes both - landing in the caller's frame rather than in the
+      // error handling the test meant to exercise.
+      async () => {
         throw new Error(`${name} was called but this test did not stub it`);
       },
     ]),

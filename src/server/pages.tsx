@@ -140,16 +140,22 @@ export function renderDashboard(
 export function renderPlanGate(
   assets: AssetManifest,
   planId: string,
-  hasCode: boolean,
   origin: string,
-  /**
-   * The share-link relay at `/s/{planId}`, which spends a fragment code and
-   * then sends the reader to the plan.
-   *
-   * Defaulted off, so the bare call is the refusal page this has always
-   * rendered: `/p/{planId}` at 401, where the reader types a code instead.
-   */
-  { relay = false }: { relay?: boolean } = {},
+  {
+    hasCode = false,
+    relay = false,
+  }: {
+    /** Whether the plan has a share code, so the box is worth offering. */
+    hasCode?: boolean;
+    /**
+     * The share-link relay at `/s/{planId}`, which spends a fragment code and
+     * then sends the reader to the plan.
+     *
+     * Defaulted off, so the bare call is the refusal page this has always
+     * rendered: `/p/{planId}` at 401, where the reader types a code instead.
+     */
+    relay?: boolean;
+  } = {},
 ): string {
   const page: PageProps = {
     name: "gate",

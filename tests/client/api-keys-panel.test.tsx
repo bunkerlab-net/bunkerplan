@@ -252,13 +252,18 @@ describe("ApiKeysPanel creating", () => {
 
   test.each(expiries)(
     "expiry choice %s sends %i seconds, the option labelled %s",
-    async (index, seconds) => {
+    async (index, seconds, label) => {
       const created = recordCreate();
       const view = await mountAsync(<ApiKeysPanel />);
+      const select = view.find<HTMLSelectElement>("select");
 
-      await choose(view.find<HTMLSelectElement>("select"), index);
+      await choose(select, index);
       await click(view.byText("button", "Create key"));
 
+      // The option a person reads and the duration the request carries, tied
+      // together: without this the index could address any option at all and
+      // the seconds assertion would still hold.
+      expect(view.byText("option", label).getAttribute("value")).toBe(index);
       expect(created.options["expiresIn"]).toBe(seconds);
     },
   );

@@ -65,7 +65,7 @@ describe("every page", () => {
   const pages: ReadonlyArray<[string, string]> = [
     ["landing", renderLanding(ASSETS, "/", ORIGIN)],
     ["dashboard", renderDashboard(ASSETS, "/dashboard", ORIGIN)],
-    ["gate", renderPlanGate(ASSETS, "abc123", true, ORIGIN)],
+    ["gate", renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true })],
     ["404", renderNotFound(ASSETS)],
   ];
 
@@ -188,7 +188,7 @@ describe("the dashboard page", () => {
 
 describe("the plan gate", () => {
   test("carries the plan id and whether there is a code to enter", () => {
-    const markup = renderPlanGate(ASSETS, "abc123", true, ORIGIN);
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true });
 
     expect(pageProps(markup)).toEqual({
       name: "gate",
@@ -202,21 +202,21 @@ describe("the plan gate", () => {
   });
 
   test("a plan with no code offers no code box", () => {
-    const markup = renderPlanGate(ASSETS, "abc123", false, ORIGIN);
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: false });
 
     expect(pageProps(markup)).toMatchObject({ hasCode: false });
     expect(markup).not.toContain("Have a code?");
   });
 
   test("is not indexed - it names a private plan", () => {
-    const markup = renderPlanGate(ASSETS, "abc123", true, ORIGIN);
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true });
 
     expect(metaOf(markup, "robots")).toBe("noindex");
     expect(metaOf(markup, "og:url")).toBeNull();
   });
 
   test("reveals nothing about the document behind it", () => {
-    const markup = renderPlanGate(ASSETS, "abc123", true, ORIGIN);
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true });
 
     expect(markup).toContain("This plan is private.");
     expect(markup).toContain(
@@ -230,7 +230,7 @@ describe("the plan gate", () => {
     // validated to lowercase alphanumerics and nothing can carry this, but the
     // serialiser is shared, so the boundary is pinned rather than argued about.
     const payload = "</script><script>alert(1)</script>";
-    const markup = renderPlanGate(ASSETS, payload, true, ORIGIN);
+    const markup = renderPlanGate(ASSETS, payload, ORIGIN, { hasCode: true });
 
     const element = new RegExp(
       `id="${PAGE_PROPS_ID}">(.*?)</script>`,
@@ -250,7 +250,7 @@ describe("the plan gate", () => {
   });
 
   test("the props element parses as the JSON the client expects", () => {
-    const markup = renderPlanGate(ASSETS, "abc123", true, ORIGIN);
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true });
 
     // The type is what stops the browser executing it, and the id is what
     // `entry.tsx` finds it by.
@@ -272,7 +272,8 @@ describe("the plan gate", () => {
     // `/s/{id}` is where a share link points, because a fragment code must not
     // land on `/p/{id}` - that path answers an authorised reader with the
     // uploaded document, which can read its own `location.hash`.
-    const markup = renderPlanGate(ASSETS, "abc123", true, ORIGIN, {
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, {
+      hasCode: true,
       relay: true,
     });
 
