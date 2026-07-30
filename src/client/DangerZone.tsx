@@ -190,10 +190,12 @@ function useAccountDeletion(
    * before the session resolves, and freezing `null` would leave the panel
    * permanently unable to delete anything.
    *
-   * That is defence in depth rather than the load-bearing guard: a swapped
-   * session changes the `handle` prop too, and the typed confirmation stops the
-   * button on its own. The checks that do the work are in `deleteAccount` - the
-   * live session before the first call, and the ceremony's own answer after it.
+   * None of that is the load-bearing guard. This ref decides which account the
+   * request names; what decides whether the delete happens is the server
+   * comparing that name against the session the request authenticated, inside
+   * one request. The checks in `deleteAccount` - the live session before the
+   * first call, the ceremony's own answer after it - are the local, fast half,
+   * and exist so a doomed request is not made rather than to make it safe.
    */
   const intended = useRef<string | null>(userId);
   if (intended.current === null) intended.current = userId;

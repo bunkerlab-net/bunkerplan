@@ -37,7 +37,12 @@ function refusal(env: Record<string, unknown>, workers = false): string {
   try {
     loadConfig(env as never, { workers });
   } catch (cause) {
-    return cause instanceof Error ? cause.message : String(cause);
+    const message = cause instanceof Error ? cause.message : String(cause);
+    // Only the validator's own refusal answers these tests. A TypeError from a
+    // fixture built wrong would otherwise satisfy every `toContain` naming a
+    // substring it happened to include, and the case would look covered.
+    if (!message.startsWith("Invalid configuration:")) throw cause;
+    return message;
   }
   throw new Error("expected loadConfig to refuse this environment");
 }

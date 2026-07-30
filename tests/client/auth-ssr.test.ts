@@ -24,6 +24,17 @@ import { authClient } from "../../src/client/auth.ts";
  * of `window`, which the body arranges rather than assumes.
  */
 test("authClient refuses to construct outside a browser", () => {
+  /*
+   * `undefined` when nothing installed one, which is the usual case here: this
+   * file deliberately does not import ./dom-env.ts, so there is no happy-dom
+   * window to take away. The delete is for a run where some other file left
+   * one on the shared global, and the restore below puts back only what was
+   * actually there.
+   *
+   * No assertion on the descriptor: the precondition this test needs is that
+   * `window` is gone once the delete has run, and that is what line below
+   * reads - a non-configurable one would fail there rather than pass quietly.
+   */
   const installed = Object.getOwnPropertyDescriptor(globalThis, "window");
   Reflect.deleteProperty(globalThis, "window");
 

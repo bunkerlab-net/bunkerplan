@@ -34,6 +34,9 @@ async function refundOne(
   key: string,
   windowStart: number,
 ): Promise<void> {
+  // Floored, so a repeat cannot drive the count negative - but not idempotent:
+  // two refunds of one reservation give back two counts. The caller reaches
+  // this once per reservation, on the path that took one.
   await db
     .update(t)
     .set({ count: sql`max(${t.count} - 1, 0)` })

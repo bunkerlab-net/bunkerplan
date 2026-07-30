@@ -1,66 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "hono/jsx";
+import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { messageOf } from "./errors.ts";
+import { useWriteLatch } from "./write-latch.ts";
 
 interface PasskeyRow {
   id: string;
   name?: string | null | undefined;
   createdAt?: Date | null | undefined;
-}
-
-/**
- * One write against the passkey list at a time: busy while it runs, the list
- * refreshed after it, and either kind of failure rendered rather than thrown.
- *
- * The latch is a ref because `busy` is state - two presses in one tick both read
- * the value their render closed over - and `disabled` needs a re-render to
- * appear, so it never guarded the call. Neither ceremony wants doing twice.
- */
-function usePasskeyWrite(
-  refresh: () => Promise<void>,
-  setError: (message: string | null) => void,
-) {
-  const [busy, setBusy] = useState(false);
-  const inFlight = useRef(false);
-
-  /*
-   * `operation` resolves an object, never `undefined`. `addPasskey` is
-   * @better-auth/passkey's own `registerPasskey`, whose declared return
-   * (dist/client.d.mts) is a union of objects and whose every path returns
-   * one; `deletePasskey` has no client-side function at all - it is generated
-   * from the endpoint, and resolves the `{ data, error }` envelope every
-   * generated action does. Both satisfy this signature, which is what tsc
-   * checks at the two call sites below. Widening it back to `| undefined`
-   * would put a nullish branch here that nothing can reach, and the panel
-   * would have to decide whether a result it cannot get counts as success.
-   */
-  const run = async (
-    operation: () => Promise<{ error?: { message?: string } | null }>,
-    fallback: string,
-  ) => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    try {
-      const result = await operation();
-      if (result.error) {
-        // `messageOf`, not `?? fallback`: an empty or whitespace-only message
-        // renders a blank error line, and `??` only catches the absent one. The
-        // thrown path below already reads it this way.
-        setError(messageOf(result.error, fallback));
-        return;
-      }
-      setError(null);
-      await refresh();
-    } catch (cause) {
-      setError(messageOf(cause, fallback));
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
-  };
-
-  return { busy, run };
 }
 
 /** Passkeys, and the two ceremonies that change them. */
@@ -102,7 +48,7 @@ function usePasskeys() {
     void refresh();
   }, [refresh]);
 
-  const { busy, run } = usePasskeyWrite(refresh, setError);
+  const { busy, run } = useWriteLatch(setError, refresh);
 
   const add = () =>
     run(
@@ -113,11 +59,15 @@ function usePasskeys() {
       "could not add a passkey",
     );
 
-  const remove = (id: string) =>
-    run(
+  // `void`, not the latch's boolean: nothing here branches on whether the
+  // ceremony landed - the refresh is what puts the answer on the page - and
+  // the row's `onDelete` is typed as returning nothing.
+  const remove = async (id: string): Promise<void> => {
+    await run(
       () => authClient().passkey.deletePasskey({ id }),
       "could not delete the passkey",
     );
+  };
 
   return { passkeys, error, busy, loaded, add, remove };
 }

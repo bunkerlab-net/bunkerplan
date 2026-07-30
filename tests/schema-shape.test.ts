@@ -149,8 +149,13 @@ const canonical = (
  * drift, or the reverse. Every field is in the key because every field is one
  * the comparison reads.
  */
-const byRecord = (a: unknown, b: unknown): number =>
-  JSON.stringify(a).localeCompare(JSON.stringify(b));
+const byRecord = (a: unknown, b: unknown): number => {
+  // Codepoint order, not `localeCompare`: that collates, so two distinct
+  // records can compare equal and sort into whichever order they arrived in -
+  // which is the non-determinism this exists to remove.
+  const [left, right] = [JSON.stringify(a), JSON.stringify(b)];
+  return left < right ? -1 : left > right ? 1 : 0;
+};
 
 /** One comparable description per table, from either dialect's config. */
 function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {

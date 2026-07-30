@@ -126,8 +126,14 @@ re-run, which is the trap. A single pass says nothing about a failure that
 happens some of the time. Repeat it instead:
 
 ```sh
+bun run build # BUNKERPLAN_PREBUILT=1 below promises this already happened
 BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
 ```
+
+`tests/drivers/` because that is where the failure has always appeared. It is
+also the narrower run: the contention is between files sharing one process, so
+dropping the path repeats the whole suite and keeps every other file in the
+picture.
 
 Repetition narrows it, it does not decide it. A genuine regression tends to
 fail every repetition and to fail on its own assertion; the flake tends to

@@ -12,27 +12,39 @@ import {
   signedIn,
   useAuthStub,
 } from "./auth-stub.ts";
-import { click, flush, mount, type, useHarness } from "./harness.tsx";
+import {
+  click,
+  clickPastDisabled,
+  flush,
+  mount,
+  type,
+  useHarness,
+} from "./harness.tsx";
 
 // Arms the module stubs for this file; unarmed, the real modules answer.
 useHarness();
 useAuthStub();
 
 const HANDLE = "swift-otter-42";
-/** The account the panel is mounted for; `signedIn()` reports the same id. */
+/** The account the panel is mounted for. */
 const USER_ID = "u1";
 
 /**
- * The one control in the app that destroys data with no undo. Its whole
- * safety story is the typed confirmation, the disabled button, and the
- * identity the panel was mounted for, so all three are pinned here rather
- * than assumed.
+ * The one control in the app that destroys data with no undo.
+ *
+ * Its safety story has two halves and both are pinned here. The client half is
+ * the typed confirmation, the disabled button, and the account frozen at
+ * mount - which is fast, local, and can be out of date. The half that decides
+ * is the server's: every delete names the account it means, and Better Auth
+ * compares that against the session inside the same request. See
+ * src/http/expected-account.ts.
  */
 describe("DangerZone", () => {
-  // The panel freezes the signed-in account at mount and refuses to delete
-  // anything it cannot match against, so every test needs a session.
+  // Spelled out rather than left to `signedIn`'s default: the panel matches
+  // this id against the one it was mounted for, so a default that drifted
+  // would turn every test here into a wrong-account refusal.
   beforeEach(() => {
-    setSession(signedIn(HANDLE));
+    setSession(signedIn(HANDLE, USER_ID));
   });
 
   /** Cleanup for the one test that replaces `location.assign`. Idempotent. */
@@ -221,7 +233,7 @@ describe("DangerZone", () => {
     expect(view.text()).toContain("different account");
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
 
-    await click(view.find("button"));
+    await clickPastDisabled(view.find<HTMLButtonElement>("button"));
     expect(attempts).toBe(1);
     expect(navigations).toEqual([]);
   });
@@ -234,15 +246,12 @@ describe("DangerZone", () => {
     };
     const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
 
-    // Nothing typed, so the button is disabled - but a dispatched `click`
-    // still runs the listener, because only user activation is suppressed.
-    // `disabled` is a hint to a person, not a guard on the call.
+    // Nothing typed, so the button is disabled - but `disabled` is a hint to a
+    // person, not a guard on the call: a browser runs the listener anyway, and
+    // this is the one action in the app that cannot be taken back.
     const button = view.find<HTMLButtonElement>("button");
     expect(button.disabled).toBe(true);
-    button.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, cancelable: true }),
-    );
-    await flush();
+    await clickPastDisabled(button);
 
     expect(attempts).toBe(0);
     expect(navigations).toEqual([]);
@@ -512,7 +521,7 @@ describe("DangerZone", () => {
     let attempts = 0;
     client.deleteUser = async () => {
       attempts += 1;
-      return { data: null, error: null };
+      return { data: { success: true }, error: null };
     };
     const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);

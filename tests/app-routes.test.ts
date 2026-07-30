@@ -542,12 +542,20 @@ describe("sharing", () => {
 describe("redeeming a code", () => {
   const CODE = "sHaReCoDe1234567";
 
-  const gated = async () =>
+  /**
+   * A plan behind a share code, with the document behind it.
+   *
+   * Takes the same overrides as `buildApp` so the throttle cases can swap the
+   * limiter without restating the seed - which is the part every one of them
+   * shares and none of them is testing.
+   */
+  const gated = async (over: Parameters<typeof buildApp>[0] = {}) =>
     buildApp({
       plans: memoryPlans([
         storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
       ]),
       storage: memoryStorage({ [PLAN_ID]: "<p>secret</p>" }),
+      ...over,
     });
 
   /**
@@ -598,12 +606,7 @@ describe("redeeming a code", () => {
   });
 
   test("the throttle answers before the code is even compared", async () => {
-    const app = buildApp({
-      plans: memoryPlans([
-        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
-      ]),
-      unlockRateLimits: closedRateLimits,
-    });
+    const app = await gated({ unlockRateLimits: closedRateLimits });
 
     const response = await app.fetch(
       `/api/plans/${PLAN_ID}/unlock`,
@@ -642,12 +645,7 @@ describe("redeeming a code", () => {
   };
 
   test("a correct code costs nothing, however many readers open the link", async () => {
-    const app = buildApp({
-      plans: memoryPlans([
-        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
-      ]),
-      unlockRateLimits: countingLimits(3),
-    });
+    const app = await gated({ unlockRateLimits: countingLimits(3) });
 
     const statuses: number[] = [];
     for (let i = 0; i < 8; i += 1) {
@@ -666,12 +664,7 @@ describe("redeeming a code", () => {
   });
 
   test("wrong codes still run out, which is what the budget is for", async () => {
-    const app = buildApp({
-      plans: memoryPlans([
-        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
-      ]),
-      unlockRateLimits: countingLimits(3),
-    });
+    const app = await gated({ unlockRateLimits: countingLimits(3) });
 
     const statuses: number[] = [];
     for (let i = 0; i < 5; i += 1) {
@@ -696,12 +689,7 @@ describe("redeeming a code", () => {
      * would be compared against a budget of three. Ten at once, and the limit has
      * to hold across them rather than only in a sequence.
      */
-    const app = buildApp({
-      plans: memoryPlans([
-        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
-      ]),
-      unlockRateLimits: countingLimits(3),
-    });
+    const app = await gated({ unlockRateLimits: countingLimits(3) });
 
     // The same length as `CODE`, so every one of these reaches the comparison
     // rather than being turned away on shape by whatever runs before it.
@@ -722,10 +710,7 @@ describe("redeeming a code", () => {
 
   test("a caller the proxy did not identify is refused, not counted", async () => {
     let consumed = 0;
-    const app = buildApp({
-      plans: memoryPlans([
-        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
-      ]),
+    const app = await gated({
       unlockRateLimits: {
         consume: async () => {
           consumed += 1;
@@ -840,7 +825,13 @@ describe("the share-link relay", () => {
   // breaks this rather than leaving it matching nothing and parsing "{}".
   const propsOf = (markup: string): Record<string, unknown> => {
     const pattern = new RegExp(`id="${PAGE_PROPS_ID}">([^<]*)<`);
-    const json = pattern.exec(markup)?.[1] ?? "{}";
+    const json = pattern.exec(markup)?.[1];
+    if (json === undefined) {
+      // `?? "{}"` here would parse to an empty object, and every
+      // `toMatchObject` below passes against one - so a page that stopped
+      // serialising its props at all would read as a page serialising them.
+      throw new Error(`no #${PAGE_PROPS_ID} element in the markup`);
+    }
     return JSON.parse(json) as Record<string, unknown>;
   };
 

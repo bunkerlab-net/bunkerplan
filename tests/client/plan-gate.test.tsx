@@ -30,6 +30,11 @@ useHarness();
 useApiStub();
 useAuthStub();
 
+/** The gate's one text input, which twenty-odd cases reach for by selector. */
+const TEXT_INPUT = 'input[type="text"]';
+const codeBox = (view: Mounted): HTMLInputElement =>
+  view.find<HTMLInputElement>(TEXT_INPUT);
+
 /**
  * The page a visitor gets when a plan exists but they may not read it.
  *
@@ -147,7 +152,6 @@ describe("unlocking with a code", () => {
       }),
     );
   };
-
   test("a code is traded for the cookie and the plan loaded bare", async () => {
     // The URL someone is handed: the code is in the query, and the fragment
     // may mean something to the document.
@@ -155,7 +159,7 @@ describe("unlocking with a code", () => {
     api.unlockPlan = async () => undefined;
     const view = await mountAsync(gate());
 
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "abcd1234");
+    await type(codeBox(view), "abcd1234");
     await submitForm(view.find("form"));
 
     expect(argsOf("unlockPlan")).toEqual([PLAN_ID, "abcd1234"]);
@@ -177,10 +181,7 @@ describe("unlocking with a code", () => {
     api.unlockPlan = async () => undefined;
     const view = await mountAsync(gate());
 
-    await type(
-      view.find<HTMLInputElement>('input[type="text"]'),
-      "  abcd1234\n",
-    );
+    await type(codeBox(view), "  abcd1234\n");
     await submitForm(view.find("form"));
 
     expect(argsOf("unlockPlan")[1]).toBe("abcd1234");
@@ -192,12 +193,12 @@ describe("unlocking with a code", () => {
       true,
     );
 
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "   ");
+    await type(codeBox(view), "   ");
     expect(view.byText<HTMLButtonElement>("button", "Unlock").disabled).toBe(
       true,
     );
 
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "x");
+    await type(codeBox(view), "x");
     expect(view.byText<HTMLButtonElement>("button", "Unlock").disabled).toBe(
       false,
     );
@@ -218,7 +219,7 @@ describe("unlocking with a code", () => {
     };
     const view = await mountAsync(gate());
 
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
+    await type(codeBox(view), "nope");
     await submitForm(view.find("form"));
 
     const alert = view.find('[role="alert"]');
@@ -245,7 +246,7 @@ describe("unlocking with a code", () => {
     };
     const view = await mountAsync(gate());
 
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
+    await type(codeBox(view), "nope");
     await submitForm(view.find("form"));
 
     expect(view.find('[role="alert"]').textContent).toBe(
@@ -259,7 +260,7 @@ describe("unlocking with a code", () => {
     };
     const view = await mountAsync(gate());
 
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
+    await type(codeBox(view), "nope");
     await submitForm(view.find("form"));
 
     // Not the thrown string: `messageOf` renders wording this app chose rather
@@ -275,7 +276,7 @@ describe("unlocking with a code", () => {
     };
     const view = await mountAsync(gate());
 
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
+    await type(codeBox(view), "nope");
     await submitForm(view.find("form"));
 
     expect(view.find('[role="alert"]').textContent).toBe(
@@ -290,18 +291,14 @@ describe("unlocking with a code", () => {
         throw new Error("wrong code");
       });
     const view = await mountAsync(gate());
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
+    await type(codeBox(view), "nope");
 
     await submitForm(view.find("form"));
-    expect(view.find<HTMLInputElement>('input[type="text"]').disabled).toBe(
-      true,
-    );
+    expect(codeBox(view).disabled).toBe(true);
 
     attempt.release();
     await flush();
-    expect(view.find<HTMLInputElement>('input[type="text"]').disabled).toBe(
-      false,
-    );
+    expect(codeBox(view).disabled).toBe(false);
   });
 
   test("a second attempt does not start under the first one's message", async () => {
@@ -314,11 +311,11 @@ describe("unlocking with a code", () => {
         : second.answer();
     };
     const view = await mountAsync(gate());
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
+    await type(codeBox(view), "nope");
     await submitForm(view.find("form"));
     expect(view.maybe('[role="alert"]')).not.toBeNull();
 
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "better");
+    await type(codeBox(view), "better");
     await submitForm(view.find("form"));
 
     expect(view.maybe('[role="alert"]')).toBeNull();
@@ -328,9 +325,11 @@ describe("unlocking with a code", () => {
 
   test("hammering Enter spends one attempt, not one per press", async () => {
     const attempt = deferred<void>();
-    api.unlockPlan = attempt.answer;
+    // A thunk, not `attempt.answer` itself: the panel calls this with the plan
+    // id and the code, and the deferred takes neither.
+    api.unlockPlan = () => attempt.answer();
     const view = await mountAsync(gate());
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "abcd");
+    await type(codeBox(view), "abcd");
 
     // All in one turn, before any re-render can disable the controls. This
     // route is rate-limited per client address and a wrong code is the
@@ -350,7 +349,7 @@ describe("unlocking with a code", () => {
     standOn(`/p/${PLAN_ID}`);
     api.unlockPlan = async () => undefined;
     const view = await mountAsync(gate());
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "abcd1234");
+    await type(codeBox(view), "abcd1234");
 
     for (let round = 0; round < 2; round++) {
       submitNow(view);
@@ -375,7 +374,7 @@ describe("unlocking with a code", () => {
       throw new Error("wrong code");
     };
     const view = await mountAsync(gate());
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "nope");
+    await type(codeBox(view), "nope");
 
     for (let round = 0; round < 2; round++) {
       submitNow(view);
@@ -480,6 +479,10 @@ describe("a link that brought its own code", () => {
 
     await mountAsync(gate());
 
+    // The fragment is the one that gets spent: the query half is a secret this
+    // page is scrubbing, not redeeming, and swapping them would leave the
+    // location assertions below just as green.
+    expect(argsOf("unlockPlan")).toEqual([PLAN_ID, "abcd1234"]);
     expect(window.location.hash).toBe("");
     expect(window.location.search).toBe("?ref=email");
   });
@@ -573,9 +576,7 @@ describe("a link that brought its own code", () => {
     expect(replacements).toEqual([]);
     // And it is in the box, so the next press is a retry rather than a hunt for
     // the link again.
-    expect(view.find<HTMLInputElement>('input[type="text"]').value).toBe(
-      "abcd1234",
-    );
+    expect(codeBox(view).value).toBe("abcd1234");
   });
 
   test("does not spend one the plan no longer has, and still strips it", async () => {
@@ -611,7 +612,7 @@ describe("a link that brought its own code", () => {
 
     expect(countOf("unlockPlan")).toBe(0);
     expect(view.maybe('[role="alert"]')).toBeNull();
-    expect(view.find<HTMLInputElement>('input[type="text"]').value).toBe("");
+    expect(codeBox(view).value).toBe("");
   });
 });
 
@@ -684,9 +685,7 @@ describe("the share-link relay", () => {
     expect(replacements).toEqual([]);
     expect(navigations).toEqual([]);
     expect(view.find('[role="alert"]').textContent).toBe("wrong code");
-    expect(view.find<HTMLInputElement>('input[type="text"]').value).toBe(
-      "wrongcode123",
-    );
+    expect(codeBox(view).value).toBe("wrongcode123");
     expect(window.location.hash).toBe("");
   });
 });

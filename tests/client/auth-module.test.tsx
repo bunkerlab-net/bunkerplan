@@ -33,6 +33,8 @@ const UNRESOLVED: SessionValue = { data: null, error: null, isPending: true };
 let value: SessionValue = UNRESOLVED;
 const subscribers = new Set<Subscriber>();
 let unsubscribed = 0;
+/** How many listeners `push` has delivered to, so a late one is observable. */
+let delivered = 0;
 /** Every `baseURL` a client was constructed with, so laziness is observable. */
 const constructedWith: string[] = [];
 /** One entry per construction, so a second one cannot append to the first. */
@@ -40,7 +42,10 @@ const pluginNames: string[][] = [];
 
 function push(next: SessionValue): void {
   value = next;
-  for (const notify of subscribers) notify(next);
+  for (const notify of subscribers) {
+    delivered += 1;
+    notify(next);
+  }
 }
 
 const arm: Arm = { on: false };
@@ -101,6 +106,21 @@ useHarness();
 // Arms the stubs above for this file; unarmed, the real packages answer.
 armWhileFileRuns(arm, () => {});
 
+/*
+ * The clear is load-bearing, and not a way of hiding leaks.
+ *
+ * Measured, both ways: asserting `subscribers.size === 0` in an `afterEach`
+ * fails four cases, and moving it to the next `beforeEach` - after the
+ * harness's own teardown - fails the same ones. `hono/jsx/dom` does not run
+ * effect cleanups when a root is unmounted; it runs them when a component
+ * leaves a tree that stays mounted. So a subscription outliving `root.unmount`
+ * is the renderer's behaviour, not this file's bug, and an assertion here
+ * would be pinning that rather than anything the module does.
+ *
+ * Where the unsubscribe can be seen is the case built for it: "unsubscribes
+ * when the subscriber leaves the tree" toggles a child out of a live tree and
+ * watches the delivery count.
+ */
 afterEach(() => {
   value = UNRESOLVED;
   subscribers.clear();
@@ -264,10 +284,17 @@ describe("useSession", () => {
 
     expect(unsubscribed).toBe(before + 1);
     expect(subscribers.size).toBe(0);
-    // A store update after the teardown must reach nobody: writing into an
-    // unmounted tree is how a leaked subscription shows up.
+    /*
+     * A store update after the teardown must reach nobody. The span being gone
+     * says nothing - it left with the unmount, whatever the store did - and
+     * re-reading the empty set only repeats the line above. What is watched is
+     * the delivery itself: a leaked subscription is one this push would still
+     * call.
+     */
+    const beforeDelivery = delivered;
     push({ data: { user: { name: "late" } }, error: null, isPending: false });
     await flush();
-    expect(view.maybe("span")).toBeNull();
+
+    expect(delivered).toBe(beforeDelivery);
   });
 });

@@ -81,7 +81,15 @@ interface Client {
   useSession: { get: () => SessionState };
 }
 
-const unset = (name: string) => () => {
+/**
+ * Rejects rather than throwing where it is called.
+ *
+ * Every one of these stands in for a network call the panels reach with
+ * `await` or `.catch(...)`. A synchronous throw escapes both - it lands in the
+ * caller's own frame, not in its error handling - so an unstubbed method would
+ * fail the test somewhere other than the path that was meant to catch it.
+ */
+const unset = (name: string) => async () => {
   throw new Error(`${name} was called but this test did not stub it`);
 };
 

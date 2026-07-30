@@ -136,7 +136,7 @@ describe("construction", () => {
   test("passes the region through", () => {
     storage();
 
-    expect(constructed[0]).toMatchObject({ region: "eu-west-2" });
+    expect(optionsAt(0)).toMatchObject({ region: "eu-west-2" });
   });
 
   test("path-style addressing rides with the endpoint, not on its own", () => {
@@ -152,7 +152,7 @@ describe("construction", () => {
     });
 
     expect("forcePathStyle" in optionsAt(0)).toBe(false);
-    expect(constructed[1]).toMatchObject({ forcePathStyle: true });
+    expect(optionsAt(1)).toMatchObject({ forcePathStyle: true });
     expect(optionsAt(2)["forcePathStyle"]).toBe(false);
   });
 
@@ -179,7 +179,7 @@ describe("construction", () => {
   test("uses them when both are configured", () => {
     storage({ s3AccessKeyId: "AKIA0000", s3SecretAccessKey: "secret" });
 
-    expect(constructed[0]).toMatchObject({
+    expect(optionsAt(0)).toMatchObject({
       credentials: { accessKeyId: "AKIA0000", secretAccessKey: "secret" },
     });
   });
@@ -189,7 +189,7 @@ describe("construction", () => {
     storage({ s3Endpoint: "https://minio.internal:9000" });
 
     expect("endpoint" in optionsAt(0)).toBe(false);
-    expect(constructed[1]).toMatchObject({
+    expect(optionsAt(1)).toMatchObject({
       endpoint: "https://minio.internal:9000",
     });
   });

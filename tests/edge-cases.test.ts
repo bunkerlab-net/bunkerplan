@@ -212,7 +212,7 @@ describe("replacing a plan whose row vanishes underneath", () => {
   });
 
   test("a cleanup that itself fails is logged, not thrown", async () => {
-    const { storage, plans, logged, sink } = racing(true);
+    const { storage, plans, logged, sink, objects } = racing(true);
 
     const response = await replacePlan(
       storage,
@@ -236,6 +236,10 @@ describe("replacing a plan whose row vanishes underneath", () => {
     // than as a shape mismatch against `undefined`.
     expect(orphan).toBeDefined();
     expect(orphan).toMatchObject({ planId: PLAN_ID });
+    // And it really is orphaned: the log would say so either way, but what
+    // makes it the operator's problem is the object still sitting in the
+    // bucket with no row naming it.
+    expect([...objects.keys()]).toContain(PLAN_ID);
   });
 });
 

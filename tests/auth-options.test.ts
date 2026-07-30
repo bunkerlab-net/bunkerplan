@@ -106,6 +106,31 @@ describe("secondary storage", () => {
 });
 
 describe("logging", () => {
+  /**
+   * Runs `body` with every console method captured, and hands back what they
+   * were called with.
+   *
+   * The claim below is that a Better Auth line reaches the app logger *instead
+   * of* console, and only half of that is visible in the app logger's own
+   * capture: a bridge that wrote to both would satisfy it.
+   */
+  const consoleCallsDuring = (body: () => void): unknown[][] => {
+    const names = ["log", "info", "warn", "error", "debug"] as const;
+    const originals = names.map((name) => [name, console[name]] as const);
+    const calls: unknown[][] = [];
+    for (const name of names) {
+      console[name] = (...args: unknown[]) => {
+        calls.push([name, ...args]);
+      };
+    }
+    try {
+      body();
+    } finally {
+      for (const [name, original] of originals) console[name] = original;
+    }
+    return calls;
+  };
+
   test("is omitted when no logger is supplied, so the generator stubs build", () => {
     expect("logger" in options).toBe(false);
   });
@@ -128,10 +153,13 @@ describe("logging", () => {
       } as unknown as Logger;
 
       const withLogger = buildAuthOptions({ ...BASE, logger });
-      withLogger.logger?.log(level, "adapter failed", { detail: 1 }, "extra");
+      const shouted = consoleCallsDuring(() => {
+        withLogger.logger?.log(level, "adapter failed", { detail: 1 }, "extra");
+      });
 
       // `console` is the one output that bypasses the redacting destination in
       // src/log.ts, and an adapter error can carry a connection string.
+      expect(shouted).toEqual([]);
       expect(lines).toEqual([
         {
           level,

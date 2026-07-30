@@ -393,12 +393,19 @@ describe("a plan that is not there", () => {
 
   test("a deleted plan is indistinguishable from an id never issued", async () => {
     const app = serve({ sessionUser: OWNER });
-    await app.fetch(`/api/plans/${PLAN_ID}`, { method: "DELETE" });
+    const deleted = await app.fetch(`/api/plans/${PLAN_ID}`, {
+      method: "DELETE",
+    });
+    // The premise: a delete that quietly failed would leave a plan that still
+    // serves, and "both answered the same" would then be a claim about two
+    // live plans.
+    expect(deleted.status).toBe(204);
 
     const gone = await app.fetch(`/p/${PLAN_ID}`);
     const never = await app.fetch("/p/neverissued12345");
 
-    expect(gone.status).toBe(never.status);
+    expect(gone.status).toBe(404);
+    expect(never.status).toBe(404);
     expect(await gone.text()).toBe(await never.text());
   });
 

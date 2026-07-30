@@ -189,9 +189,30 @@ export async function click(node: Element): Promise<void> {
  */
 export async function keyboardClick(node: HTMLElement): Promise<void> {
   node.focus();
+  await click(node);
+}
+
+/**
+ * Dispatches a click that a disabled control's own listener will see.
+ *
+ * happy-dom drops a dispatched `click` at a disabled element. Browsers do not:
+ * `dispatchEvent` runs listeners whatever the element's state, and what
+ * `disabled` suppresses is activation behaviour from real input. So a test
+ * meaning "the handler re-checks rather than trusting `disabled`" passes under
+ * happy-dom because nothing ran at all - which is the opposite of the claim.
+ *
+ * The attribute is lifted for the dispatch and put straight back, so what runs
+ * is the handler, and what the assertion reads is the handler's own guard.
+ */
+export async function clickPastDisabled(
+  node: HTMLButtonElement,
+): Promise<void> {
+  const held = node.disabled;
+  node.disabled = false;
   node.dispatchEvent(
     new MouseEvent("click", { bubbles: true, cancelable: true }),
   );
+  node.disabled = held;
   await flush();
 }
 

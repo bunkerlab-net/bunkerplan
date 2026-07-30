@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "hono/jsx";
+import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
 import { messageOf } from "./errors.ts";
+import { useWriteLatch } from "./write-latch.ts";
 
 interface KeyRow {
   id: string;
@@ -62,7 +63,6 @@ function Reveal({
 function useKeyList() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   /**
    * False until the first list call has answered. Without it the panel says
    * "No API keys." for the length of that request, to an account that may
@@ -90,70 +90,14 @@ function useKeyList() {
     void refresh();
   }, [refresh]);
 
-  return { keys, error, setError, busy, setBusy, loaded, refresh };
-}
-
-/**
- * One write against the key list at a time: busy while it runs, the list
- * refreshed after it, and either kind of failure rendered rather than thrown.
- *
- * The latch is a ref because `busy` is state - two presses in one tick both
- * read the value their render closed over - and `disabled` needs a re-render
- * to appear, so it never guarded the call. Shared by both writes because
- * `busy` is: each already disables the other's button. The same shape as
- * PasskeysPanel's, for the same reason.
- */
-function useKeyWrite(
-  setError: (message: string | null) => void,
-  setBusy: (busy: boolean) => void,
-  refresh: () => Promise<void>,
-) {
-  const inFlight = useRef(false);
-
-  // Called as `void create(...)` / `void revoke(...)` from an event handler,
-  // so this may not reject: the call itself can throw before it ever reaches
-  // `refresh`, and there is no handler upstream to catch it.
-  return async <T,>(
-    operation: () => Promise<{
-      data?: T | null;
-      error?: { message?: string } | null;
-    }>,
-    fallback: string,
-    onData?: (data: T | null) => void,
-  ): Promise<boolean> => {
-    if (inFlight.current) return false;
-    inFlight.current = true;
-    setBusy(true);
-    try {
-      const result = await operation();
-      if (result.error) {
-        // `messageOf`, not `?? fallback`: an empty or whitespace-only message
-        // renders a blank error line, and `??` only catches the absent one.
-        // The thrown path below already reads it this way, as do the sibling
-        // panels.
-        setError(messageOf(result.error, fallback));
-        return false;
-      }
-      setError(null);
-      onData?.(result.data ?? null);
-      await refresh();
-      return true;
-    } catch (cause) {
-      setError(messageOf(cause, fallback));
-      return false;
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
-  };
+  return { keys, error, setError, loaded, refresh };
 }
 
 /** Keys, and the three calls that change them. */
 function useApiKeys() {
-  const { keys, error, setError, busy, setBusy, loaded, refresh } =
-    useKeyList();
+  const { keys, error, setError, loaded, refresh } = useKeyList();
   const [plaintext, setPlaintext] = useState<string | null>(null);
-  const run = useKeyWrite(setError, setBusy, refresh);
+  const { busy, run } = useWriteLatch(setError, refresh);
 
   const create = (name: string, expiryIndex: number) => {
     const seconds = EXPIRY_CHOICES[expiryIndex]?.seconds ?? null;

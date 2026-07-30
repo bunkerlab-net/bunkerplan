@@ -155,6 +155,19 @@ describe("the Postgres health probe", () => {
     expect(released).toEqual([{ destroyed: false }]);
   });
 
+  test("a pool that cannot hand out a client releases nothing", async () => {
+    // The other refusal: no connection was taken, so there is none to give
+    // back or destroy - and the probe still has to say the database is
+    // unreachable rather than resolving on an empty success.
+    const refused = new Error("timeout exceeded when trying to connect");
+    connect = () => Promise.reject(refused);
+
+    await expect(createPostgresDb(DSN).probe()).rejects.toBe(refused);
+
+    expect(asked).toEqual([]);
+    expect(released).toEqual([]);
+  });
+
   test("discards a connection whose query failed", async () => {
     // `pool.query` used to do this for us. A query that errors can leave the
     // protocol mid-message, so the client is not fit to hand to the next
