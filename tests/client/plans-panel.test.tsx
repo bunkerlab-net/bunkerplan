@@ -1,6 +1,7 @@
 import "./dom-env.ts";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { useState } from "hono/jsx";
+import type { PlanSummary } from "../../src/client/api.ts";
 import { PlansPanel } from "../../src/client/PlansPanel.tsx";
 import { MAX_PLAN_LABEL_LENGTH } from "../../src/http/plan-label.ts";
 import {
@@ -176,7 +177,13 @@ describe("PlansPanel listing", () => {
     expect(view.find<HTMLAnchorElement>("tbody a").href).toContain("/p/abc123");
   });
 
-  test.each([
+  /**
+   * Byte counts and how the column renders them. Typed for the same reason as
+   * the expiry table in the API-keys suite: a heterogeneous literal widens the
+   * callback's parameters to a union, so a swapped pair reads as a passing
+   * test rather than a type error.
+   */
+  const SIZES: ReadonlyArray<readonly [number, string]> = [
     [0, "0 B"],
     [1023, "1023 B"],
     [1024, "1.0 KiB"],
@@ -184,19 +191,50 @@ describe("PlansPanel listing", () => {
     [1024 * 1024 - 1, "1024.0 KiB"],
     [1024 * 1024, "1.00 MiB"],
     [2 * 1024 * 1024 + 512 * 1024, "2.50 MiB"],
-  ])("a %i byte plan reads as %s", async (size, rendered) => {
+  ];
+
+  test.each(SIZES)("a %i byte plan reads as %s", async (size, rendered) => {
     api.listPlans = async () => [plan({ size })];
     const view = await mountAsync(<PlansPanel />);
 
     expect(view.all("tbody td")[2]?.textContent).toBe(rendered);
   });
 
-  test.each([
-    [{ visibility: "public" as const, hasShareCode: false }, "Public"],
-    [{ visibility: "public" as const, hasShareCode: true }, "Public"],
-    [{ visibility: "private" as const, hasShareCode: true }, "Private + code"],
-    [{ visibility: "private" as const, hasShareCode: false }, "Private"],
-  ])("%o reads as %s", async (state, rendered) => {
+  /**
+   * Every state a row can actually be in, and the label each shows.
+   *
+   * "Public + code" is absent because the repository will not produce it:
+   * going public nulls the hash, and a code can only be written to a private
+   * row. Public and granted is reachable - a grant made while private survives
+   * the switch - and reads as Public, because it is.
+   */
+  const SHARING: ReadonlyArray<
+    readonly [
+      Pick<PlanSummary, "visibility" | "hasShareCode" | "hasGrants">,
+      string,
+    ]
+  > = [
+    [{ visibility: "public", hasShareCode: false, hasGrants: false }, "Public"],
+    [{ visibility: "public", hasShareCode: false, hasGrants: true }, "Public"],
+    [
+      { visibility: "private", hasShareCode: false, hasGrants: false },
+      "Private",
+    ],
+    [
+      { visibility: "private", hasShareCode: false, hasGrants: true },
+      "Private + user share",
+    ],
+    [
+      { visibility: "private", hasShareCode: true, hasGrants: false },
+      "Private + Code",
+    ],
+    [
+      { visibility: "private", hasShareCode: true, hasGrants: true },
+      "Private + user share + Code",
+    ],
+  ];
+
+  test.each(SHARING)("%o reads as %s", async (state, rendered) => {
     api.listPlans = async () => [plan(state)];
     const view = await mountAsync(<PlansPanel />);
 

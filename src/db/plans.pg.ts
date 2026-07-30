@@ -153,6 +153,15 @@ export function createPgPlanRepo(db: PgDb): PlanRepo {
           createdAt: plan.createdAt,
           visibility: plan.visibility,
           shareCodeHash: plan.shareCodeHash,
+          /*
+           * `exists`, not a join or a count: a plan shared with forty accounts
+           * must not multiply its own row, and the column renders one word.
+           * Postgres answers this as a boolean and SQLite as 0/1, so both
+           * sides map it the same way rather than trusting the driver.
+           */
+          hasGrants: sql<boolean>`exists (
+            select 1 from ${planGrant} where ${planGrant.planId} = ${plan.id}
+          )`.mapWith(Boolean),
         })
         .from(plan)
         .where(eq(plan.userId, userId))

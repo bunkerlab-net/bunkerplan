@@ -67,8 +67,20 @@ describe("the /api/docs page", () => {
     expect(await Bun.file(VENDORED).exists()).toBe(true);
   });
 
-  /** And so is the bootstrap, which is committed rather than vendored. */
-  test("the bootstrap is present at the path the page asks for", async () => {
+  /**
+   * And so is the bootstrap, which is committed rather than vendored.
+   *
+   * The page has to ask for it too. Existence alone would pass for a document
+   * that dropped the tag or misspelled the path - which is the same dead page
+   * the inline `<script>` produced, and the test above only requires that
+   * every tag have some `src`.
+   */
+  test("the bootstrap is present, and the page asks for it", async () => {
+    const srcs = [...DOCS_PAGE.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+
+    expect(srcs).toEqual([SCALAR_SCRIPT_PATH, DOCS_BOOT_PATH]);
     expect(await Bun.file(BOOT).exists()).toBe(true);
   });
 

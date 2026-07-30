@@ -18,10 +18,22 @@ import {
 } from "./api.ts";
 import { inputOf } from "./dom.ts";
 
-/** What the Sharing column says at a glance. */
+/**
+ * What the Sharing column says at a glance.
+ *
+ * Public is public: a plan cannot carry a code while it is public, because
+ * `setVisibility` nulls the hash on the way out of private and `setShareCodeHash`
+ * only writes to a private row - so there is no "Public + code" to render.
+ *
+ * A private plan can carry both a code and named accounts at once. That is a
+ * real state, not an accident, so it is named rather than collapsed into
+ * whichever half is checked first.
+ */
 function describeSharing(plan: PlanSummary): string {
   if (plan.visibility === "public") return "Public";
-  return plan.hasShareCode ? "Private + code" : "Private";
+  if (plan.hasShareCode && plan.hasGrants) return "Private + user share + Code";
+  if (plan.hasShareCode) return "Private + Code";
+  return plan.hasGrants ? "Private + user share" : "Private";
 }
 
 function formatBytes(size: number): string {

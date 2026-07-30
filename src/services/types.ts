@@ -137,6 +137,14 @@ export interface PlanRow {
   visibility: PlanVisibility;
   /** Whether a share code is set. The hash itself never leaves the repo. */
   hasShareCode: boolean;
+  /**
+   * Whether any account has been granted this plan.
+   *
+   * A count would say more and cost the same, but the dashboard renders one
+   * word per row and the editor lists the handles themselves - so a number
+   * here would be a field with no reader, and one more thing to keep true.
+   */
+  hasGrants: boolean;
 }
 
 /**

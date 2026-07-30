@@ -183,6 +183,12 @@ export function createSqlitePlanRepo(db: SqliteDb): PlanRepo {
           createdAt: plan.createdAt,
           visibility: plan.visibility,
           shareCodeHash: plan.shareCodeHash,
+          // See the note on the Postgres side: `exists` so a plan shared with
+          // forty accounts still returns one row, mapped because SQLite
+          // answers 0/1 where Postgres answers a boolean.
+          hasGrants: sql<boolean>`exists (
+            select 1 from ${planGrant} where ${planGrant.planId} = ${plan.id}
+          )`.mapWith(Boolean),
         })
         .from(plan)
         .where(eq(plan.userId, userId))

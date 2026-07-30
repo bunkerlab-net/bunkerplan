@@ -100,6 +100,7 @@ describe("listPlans", () => {
       createdAt: "2026-01-01T00:00:00Z",
       visibility: "private",
       hasShareCode: false,
+      hasGrants: true,
     };
     queued = [json({ plans: [summary], truncated: false })];
 

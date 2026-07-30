@@ -9,6 +9,7 @@ import {
   ok,
   PENDING,
   refuse,
+  replacements,
   SIGNED_OUT,
   setSession,
   signedIn,
@@ -343,7 +344,7 @@ describe("Page routing", () => {
         path="/p/abc"
         origin={ORIGIN}
         planId="abc"
-        hasCode
+        hasCode={true}
         relay={false}
       />,
     );
@@ -369,5 +370,26 @@ describe("Page routing", () => {
     expect(view.find('[role="alert"]').textContent).toBe(
       "no credential was offered",
     );
+  });
+
+  test("the relay flag reaches the gate, which forwards instead of asking", async () => {
+    /*
+     * Same page, one prop different. On `/s/{id}` with nothing to spend there
+     * is no secret to ask for, so the gate hands the reader to the plan and
+     * lets that decide - and if `Page` dropped the flag on the way through,
+     * this would render the code box instead with nobody the wiser.
+     */
+    await mountAsync(
+      <Page
+        name="gate"
+        path="/s/abc"
+        origin={ORIGIN}
+        planId="abc"
+        hasCode={false}
+        relay={true}
+      />,
+    );
+
+    expect(replacements).toEqual(["/p/abc"]);
   });
 });

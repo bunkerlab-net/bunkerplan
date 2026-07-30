@@ -223,6 +223,7 @@ export function memoryPlans(
           createdAt: row.createdAt,
           visibility: row.visibility,
           hasShareCode: row.shareCodeHash !== null,
+          hasGrants: row.grants.length > 0,
         })),
     findOwner: async (id) => rows.get(id)?.userId ?? null,
     relabel: async (id, userId, label) => {

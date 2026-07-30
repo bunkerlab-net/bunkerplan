@@ -150,6 +150,33 @@ describe("the plan collection", () => {
     expect(response.status).toBe(401);
   });
 
+  test("a listed row carries both sharing flags, not just the code", async () => {
+    /*
+     * The dashboard's Sharing column is the only place a plan's audience is
+     * visible at a glance, and it reads these two. A route that dropped
+     * `hasGrants` would render every shared plan as plain "Private" - the one
+     * word that says nobody else can read it.
+     */
+    const app = buildApp({
+      sessionUser: OWNER,
+      plans: memoryPlans(
+        [
+          storedPlan({ id: "aaaaaaaaaaaaaaaa", grants: [GRANTEE] }),
+          storedPlan({ id: "bbbbbbbbbbbbbbbb" }),
+        ],
+        { "brisk-heron": GRANTEE },
+      ),
+    });
+
+    const body = (await (await app.fetch("/api/plans")).json()) as {
+      plans: Array<{ id: string; hasShareCode: boolean; hasGrants: boolean }>;
+    };
+    const flags = (id: string) => body.plans.find((row) => row.id === id);
+
+    expect(flags("aaaaaaaaaaaaaaaa")).toMatchObject({ hasGrants: true });
+    expect(flags("bbbbbbbbbbbbbbbb")).toMatchObject({ hasGrants: false });
+  });
+
   test("a full page says so rather than silently returning a short list", async () => {
     // One row more than the page size is what `truncated` reports on; the
     // page itself is capped at the fixed size, never at the quota.
@@ -163,6 +190,7 @@ describe("the plan collection", () => {
           createdAt: new Date("2026-01-01T00:00:00Z"),
           visibility: "private" as const,
           hasShareCode: false,
+          hasGrants: false,
         })),
     };
     const app = buildApp({ sessionUser: OWNER, plans });

@@ -8,6 +8,8 @@ export interface PlanSummary {
   createdAt: string;
   visibility: PlanVisibility;
   hasShareCode: boolean;
+  /** Whether any account is named on this plan; the handles are in sharing. */
+  hasGrants: boolean;
 }
 
 export interface PlanSharing {
@@ -85,6 +87,8 @@ export async function uploadPlan(
     createdAt: new Date().toISOString(),
     visibility,
     hasShareCode: false,
+    // This upload names nobody: the browser sends only `?visibility=`.
+    hasGrants: false,
   };
 }
 

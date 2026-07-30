@@ -170,6 +170,7 @@ export function plan(over: Partial<PlanSummary> = {}): PlanSummary {
     createdAt: "2026-01-02T03:04:05.000Z",
     visibility: "private",
     hasShareCode: false,
+    hasGrants: false,
     ...over,
   };
 }

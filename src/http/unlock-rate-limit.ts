@@ -14,10 +14,11 @@ type UnlockRateConfig = Pick<
  *
  * The warning below names one deployment-wide misconfiguration, and this route
  * takes no credential: repeating it per request lets a stranger turn a flood of
- * refused unlocks into a flood of log lines. Keyed on the config object, which
- * `getServices` memoises for the life of the isolate, so it says it once per
- * deployment and again in each new isolate - and a caller holding a different
- * config, as every test does, is unaffected.
+ * refused unlocks into a flood of log lines. Keyed on the config object, so it
+ * is once per config per isolate - `getServices` memoises one config, which
+ * makes that once per isolate in production, and a fresh one each time a new
+ * isolate starts. A caller that builds its own config gets its own first
+ * warning; a test wanting one has to pass a config no earlier call has seen.
  */
 const reported = new WeakSet<UnlockRateConfig>();
 
