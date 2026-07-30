@@ -56,8 +56,9 @@ const UNDOCUMENTED: Record<string, true> = {
    * The share-link relay: a page, and one an API client never calls. It exists
    * because a share code rides in a fragment and `/p/{id}` answers an
    * authorised reader with untrusted HTML that could read its own
-   * `location.hash`. What a client needs to know is how to compose the link,
-   * and that is on `PUT /api/plans` where the code is handed out.
+   * `location.hash`. What a client needs is how to compose the link, and that
+   * is described on both endpoints that hand a code out - `PUT /api/plans` with
+   * `?visibility=code`, and `POST /api/plans/{id}/share-code`.
    */
   "/s/{id}": true,
 };

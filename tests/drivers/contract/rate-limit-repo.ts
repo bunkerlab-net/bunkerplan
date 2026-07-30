@@ -29,7 +29,11 @@ export function describeRateLimitRepo(
     const account = () => fixture.seedUser();
     const consume = (key: string, max = MAX) =>
       limits.consume(key, max, WINDOW);
-    const peek = (key: string, max = MAX) => limits.peek(key, max, WINDOW);
+    const reserve = async (key: string, max = MAX): Promise<number> => {
+      const result = await limits.consume(key, max, WINDOW);
+      if (!result.allowed) throw new Error("expected the reservation to pass");
+      return result.windowStart;
+    };
 
     /** Puts the stored window far enough back that the next call rolls it. */
     const ageOut = (key: string) =>
@@ -120,52 +124,74 @@ export function describeRateLimitRepo(
     });
 
     /**
-     * `peek` is the same decision without the spend, and the unlock route leans
-     * on both halves being the same decision: it gates on this and charges only
-     * a refused attempt, so a `peek` that disagreed with `consume` about where
-     * the window ended would either ration nothing or refuse a reader whose
-     * budget was intact.
+     * The other half of a limiter that charges only what it means to discourage:
+     * the caller spends up front so the decision is atomic, then gives the count
+     * back when the request turns out not to be the kind being rationed. See
+     * src/http/unlock-rate-limit.ts, which does exactly that for a share code.
      */
-    describe("reading the budget without spending it", () => {
-      test("an untouched key has its whole budget", async () => {
+    describe("giving a reservation back", () => {
+      test("a refunded count can be spent again", async () => {
         const key = await account();
+        const windows: number[] = [];
+        for (let i = 0; i < MAX; i += 1) windows.push(await reserve(key));
 
-        expect((await peek(key)).allowed).toBe(true);
-        // And still does: asking is not spending, which is the entire point.
-        for (let i = 0; i < MAX + 2; i += 1) {
-          expect((await peek(key)).allowed).toBe(true);
-        }
+        // Spent out.
+        expect((await consume(key)).allowed).toBe(false);
+
+        const first = windows[0];
+        expect(first).toBeDefined();
+        await limits.refund(key, first as number);
+
+        // And exactly one back, not the whole budget.
         expect((await consume(key)).allowed).toBe(true);
-      });
-
-      test("it refuses exactly when the next spend would", async () => {
-        const key = await account();
-        for (let i = 0; i < MAX - 1; i += 1) {
-          expect((await peek(key)).allowed).toBe(true);
-          await consume(key);
-        }
-
-        // One left: still allowed, and spending it is what closes the bucket.
-        expect((await peek(key)).allowed).toBe(true);
-        expect((await consume(key)).allowed).toBe(true);
-        expect((await peek(key)).allowed).toBe(false);
         expect((await consume(key)).allowed).toBe(false);
       });
 
-      test("a refusal carries the wait, and a rollover clears it", async () => {
+      test("refunding what was never spent cannot go below zero", async () => {
         const key = await account();
-        for (let i = 0; i < MAX; i += 1) await consume(key);
+        const windowStart = await reserve(key);
 
-        const refused = await peek(key);
-        expect(refused.allowed).toBe(false);
-        // Zero would tell a client to retry immediately, forever.
-        expect(refused.retryAfter).toBeGreaterThanOrEqual(1);
-        expect(refused.retryAfter).toBeLessThanOrEqual(WINDOW);
+        for (let i = 0; i < MAX + 3; i += 1) {
+          await limits.refund(key, windowStart);
+        }
 
-        await ageOut(key);
-        // Read from the stored window rather than a stored verdict, so this
-        // rolls over without anything having to spend first.
-        expect((await peek(key)).allowed).toBe(true);
+        // A negative count would hand out more than `max` for the rest of the
+        // window, which is the limit quietly not applying.
+        const verdicts: boolean[] = [];
+        for (let i = 0; i < MAX + 1; i += 1) {
+          verdicts.push((await consume(key)).allowed);
+        }
+        expect(verdicts.filter(Boolean)).toHaveLength(MAX);
+      });
+
+      test("a refund for an elapsed window leaves the new one alone", async () => {
+        /*
+         * The race this exists for: a request reserves, its window rolls while it
+         * is still in flight, somebody else opens the new window, and only then
+         * does the first one finish and refund. The count it took went with the
+         * old window, so giving one back here would take it off a budget that
+         * never charged it - charging the new caller for a request they did not
+         * make.
+         *
+         * The elapsed window is a fixed epoch rather than the one the first
+         * reservation returned. Three writes can land in the same millisecond, so
+         * `Date.now()` twice can produce the same window and the refund would
+         * match for reasons that have nothing to do with the rule.
+         */
+        const ELAPSED = 1_000_000_000_000;
+        const key = await account();
+        await reserve(key);
+        await fixture.backdateRateWindow(key, ELAPSED);
+
+        await reserve(key); // Rolls, opening a fresh window with one spent.
+        await limits.refund(key, ELAPSED);
+
+        // The fresh window still has exactly that one spent against it.
+        const verdicts: boolean[] = [];
+        for (let i = 0; i < MAX; i += 1) {
+          verdicts.push((await consume(key)).allowed);
+        }
+        expect(verdicts.filter(Boolean)).toHaveLength(MAX - 1);
       });
     });
 

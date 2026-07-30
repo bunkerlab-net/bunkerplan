@@ -42,11 +42,28 @@ export interface KvStore {
   probe(signal?: AbortSignal): Promise<void>;
 }
 
-export interface RateLimitResult {
-  allowed: boolean;
-  /** Seconds remaining in the current window. */
-  retryAfter: number;
-}
+/**
+ * A union rather than one shape: only a request that was allowed took a count,
+ * so only that side carries the window to give it back to. A refusal reserved
+ * nothing, and inventing a `windowStart` for it would mean reading one back out
+ * of a row that may have been swept between the decision and the read.
+ */
+export type RateLimitResult =
+  | {
+      allowed: true;
+      /** Seconds remaining in the current window. */
+      retryAfter: number;
+      /**
+       * The window this count was taken from, as epoch milliseconds.
+       *
+       * Handed back to `refund` so a reservation can only be returned to the
+       * window that charged it. A request slow enough for its window to roll
+       * underneath it would otherwise refund a fresh budget that never charged
+       * it, taking a count from whoever opened the new one.
+       */
+      windowStart: number;
+    }
+  | { allowed: false; retryAfter: number };
 
 export interface RateLimitRepo {
   /**
@@ -64,26 +81,29 @@ export interface RateLimitRepo {
   ): Promise<RateLimitResult>;
 
   /**
-   * Whether `key` has budget left, without spending any.
+   * Gives back one count, for a caller that reserved through `consume` and then
+   * found the request was not the kind being rationed.
    *
-   * For a limiter that should charge only the requests it means to discourage:
-   * the caller gates on this, does the work, and calls `consume` only when the
-   * outcome was the kind being rationed. `POST /api/plans/{id}/unlock` is the
-   * one - see src/http/unlock-rate-limit.ts - because a correct code spent from
-   * the same budget as a guess, and a link shared with a room full of people
-   * behind one address then locked them out of a plan they were given.
+   * This is how a limiter charges only what it means to discourage while still
+   * deciding atomically. `POST /api/plans/{id}/unlock` is the one that needs it
+   * - see src/http/unlock-rate-limit.ts - because a correct code must not spend
+   * from the same budget as a guess: a link shared with a room of people behind
+   * one address would otherwise lock them out of a plan they were given.
    *
-   * Not atomic with the work that follows, and cannot be: concurrent callers
-   * all see the same budget and all proceed. That bounds a parallel burst to
-   * one round trip's worth of over-spend rather than to `max`, which is
-   * immaterial for the thing this rations - guessing a 16-character base62
-   * code - and is why `consume` stays the atomic one.
+   * Reserving first and refunding after is deliberate, and the other order does
+   * not work. Reading the budget without spending it cannot bound anything: any
+   * number of concurrent callers pass such a read before one write lands, so a
+   * parallel caller would face no limit at all. The cost of this order is that
+   * simultaneous legitimate requests can briefly hold the budget down and one of
+   * them see a refusal it would not have seen a moment later; a retry then works,
+   * which is the better failure of the two.
+   *
+   * No-ops rather than going negative, and matches `windowStart` exactly rather
+   * than merely checking that some window is still open. A request whose window
+   * rolled while it was in flight has nothing to give back: the count it took
+   * went with that window, and the row now holds a budget somebody else opened.
    */
-  peek(
-    key: string,
-    max: number,
-    windowSeconds: number,
-  ): Promise<RateLimitResult>;
+  refund(key: string, windowStart: number): Promise<void>;
 }
 
 export type PlanVisibility = "public" | "private";

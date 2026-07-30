@@ -492,6 +492,20 @@ describe("a link that brought its own code", () => {
     ]);
   });
 
+  test("a fragment that is only padding is no code at all", async () => {
+    // `%20%20` decodes to spaces and trims to nothing. Posting that would spend
+    // an attempt on a string the server can only refuse, and showing an error
+    // would blame the reader for a link that carried nothing.
+    standOn(`/p/${PLAN_ID}#code=%20%20`);
+
+    const view = await mountAsync(gate());
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(view.maybe('[role="alert"]')).toBeNull();
+    // Taken out of the address bar even so: it was meant to be a secret.
+    expect(window.location.hash).toBe("");
+  });
+
   test("decodes it, matching what the dashboard encoded", async () => {
     standOn(`/p/${PLAN_ID}#code=a%20b%26c%3Dd`);
     api.unlockPlan = async () => undefined;

@@ -41,6 +41,15 @@ describe("messageOf", () => {
     expect(messageOf({ message: "\n\t " }, FALLBACK)).toBe(FALLBACK);
   });
 
+  test("a padded message is kept, not trimmed on the way out", () => {
+    // The trim decides whether there is anything to show, and nothing more: the
+    // message is relayed as the thrower wrote it. Trimming the returned value
+    // would quietly edit an operator-facing string this only has to carry.
+    expect(messageOf(new Error("  disk is full\n"), FALLBACK)).toBe(
+      "  disk is full\n",
+    );
+  });
+
   test("a non-string message is not rendered", () => {
     expect(messageOf({ message: 404 }, FALLBACK)).toBe(FALLBACK);
   });

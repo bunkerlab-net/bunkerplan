@@ -21,8 +21,8 @@ import { resolveSessionUserId, resolveUserId } from "./http/require-user.ts";
 import { applySecurityHeaders } from "./http/security-headers.ts";
 import { servePlan } from "./http/serve-plan.ts";
 import {
-  chargeUnlockAttempt,
-  checkUnlockRate,
+  refundUnlockAttempt,
+  reserveUnlockAttempt,
 } from "./http/unlock-rate-limit.ts";
 import { checkUploadRate } from "./http/upload-rate-limit.ts";
 import type { AssetManifest } from "./server/assets.ts";
@@ -194,13 +194,13 @@ function registerPlanSharing(app: Hono, getServices: GetServices): void {
  */
 function registerPlanUnlock(app: Hono, getServices: GetServices): void {
   app.post("/api/plans/:id/unlock", async (c) => {
-    const { config, db } = await getServices();
-    const budget = await checkUnlockRate(
+    const { config, db, logger } = await getServices();
+    const reservation = await reserveUnlockAttempt(
       db.unlockRateLimits,
       config,
       c.req.raw,
     );
-    if ("refused" in budget) return budget.refused;
+    if ("refused" in reservation) return reservation.refused;
 
     const response = await unlockPlan(
       db.plans,
@@ -208,14 +208,16 @@ function registerPlanUnlock(app: Hono, getServices: GetServices): void {
       c.req.raw,
       c.req.param("id"),
     );
-    // Anything that did not grant access: a wrong code, a plan with none, a
-    // body that was not a code at all. `ok` rather than a status list, so a
-    // refusal added later is charged without this line being remembered.
-    //
-    // Against the bucket the gate already read, so the two cannot pick
-    // different ones and the HMAC is computed once.
-    if (!response.ok) {
-      await chargeUnlockAttempt(db.unlockRateLimits, config, budget.bucket);
+    if (response.ok) {
+      // A redemption was never the thing being rationed, so it gives its count
+      // back. Swallowed on failure: the reader has their cookie, and losing a
+      // refund only leaves the budget one lower than it should be - which errs
+      // towards refusing rather than towards letting a guesser through.
+      try {
+        await refundUnlockAttempt(db.unlockRateLimits, reservation);
+      } catch (cause) {
+        logger.warn({ err: cause }, "unlock reservation was not refunded");
+      }
     }
     return response;
   });

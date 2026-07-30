@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { PAGE_PROPS_ID } from "../src/client/mount.ts";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
-import { PLAN_PAGE_SIZE } from "../src/services/types.ts";
+import { PLAN_PAGE_SIZE, type RateLimitRepo } from "../src/services/types.ts";
 import {
   buildApp,
   CLIENT_IP,
   CLIENT_IP_HEADER,
   closedRateLimits,
   GRANTEE,
+  type HarnessOptions,
   html,
+  type MemoryStorage,
   memoryPlans,
   memoryStorage,
   OWNER,
@@ -577,23 +579,29 @@ describe("redeeming a code", () => {
   });
 
   /**
-   * A counter that actually spends, rather than a fake reporting a verdict.
+   * A counter that really spends and really gives back.
    *
-   * The two tests below are about the difference between spending and asking,
-   * so a limiter that always answered the same thing could not show it.
+   * The tests below are about the difference between a count taken and a count
+   * returned, so a limiter that answered the same thing every time could not
+   * show it. One window for the whole test, which is what a refund has to name.
    */
-  const countingLimits = (max: number) => {
+  const WINDOW_START = 1_700_000_000_000;
+
+  const countingLimits = (max: number): RateLimitRepo => {
     const counts = new Map<string, number>();
     return {
       consume: async (key: string) => {
         const spent = (counts.get(key) ?? 0) + 1;
         counts.set(key, spent);
-        return { allowed: spent <= max, retryAfter: 30 };
+        return spent <= max
+          ? { allowed: true, retryAfter: 30, windowStart: WINDOW_START }
+          : { allowed: false, retryAfter: 30 };
       },
-      peek: async (key: string) => ({
-        allowed: (counts.get(key) ?? 0) < max,
-        retryAfter: 30,
-      }),
+      refund: async (key: string, windowStart: number) => {
+        // Only the window that charged it, the way the drivers do.
+        if (windowStart !== WINDOW_START) return;
+        counts.set(key, Math.max((counts.get(key) ?? 0) - 1, 0));
+      },
     };
   };
 
@@ -615,9 +623,9 @@ describe("redeeming a code", () => {
     }
 
     // Eight openings against a budget of three. A share link is opened by
-    // everyone it was sent to, and charging those meant a link pasted into one
-    // channel refused the colleagues behind the same egress address from the
-    // fourth onwards - locked out of a plan they had been given.
+    // everyone it was sent to: each opening takes a count before the code is
+    // compared and gives it back once it turns out to be a redemption, so the
+    // budget is never spent down by people the plan was shared with.
     expect(statuses).toEqual([204, 204, 204, 204, 204, 204, 204, 204]);
   });
 
@@ -643,9 +651,39 @@ describe("redeeming a code", () => {
     expect(statuses).toEqual([401, 401, 401, 429, 429]);
   });
 
+  test("parallel guesses are bounded, not all admitted", async () => {
+    /*
+     * The reason the count is taken before the code is compared.
+     *
+     * Reading the budget without spending it cannot bound this: every one of
+     * these requests would pass such a read before any write landed, and all ten
+     * would be compared against a budget of three. Ten at once, and the limit has
+     * to hold across them rather than only in a sequence.
+     */
+    const app = buildApp({
+      plans: memoryPlans([
+        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
+      ]),
+      unlockRateLimits: countingLimits(3),
+    });
+
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        app.fetch(
+          `/api/plans/${PLAN_ID}/unlock`,
+          unlockInit("wrongcode123456"),
+        ),
+      ),
+    );
+    const statuses = responses.map((response) => response.status);
+
+    // Three reached the comparison; the rest were refused before it.
+    expect(statuses.filter((status) => status === 401)).toHaveLength(3);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(7);
+  });
+
   test("a caller the proxy did not identify is refused, not counted", async () => {
     let consumed = 0;
-    let peeked = 0;
     const app = buildApp({
       plans: memoryPlans([
         storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
@@ -653,12 +691,9 @@ describe("redeeming a code", () => {
       unlockRateLimits: {
         consume: async () => {
           consumed += 1;
-          return { allowed: true, retryAfter: 0 };
+          return { allowed: true, retryAfter: 0, windowStart: 0 };
         },
-        peek: async () => {
-          peeked += 1;
-          return { allowed: true, retryAfter: 0 };
-        },
+        refund: async () => {},
       },
     });
 
@@ -671,11 +706,10 @@ describe("redeeming a code", () => {
     // is exactly the lockout the per-address keying exists to prevent.
     expect(response.status).toBe(429);
     // A flat one second from the handler's own unidentified-caller branch, not
-    // the limiter's window: neither half of the limiter having been called is
-    // what says it was never reached to be asked.
+    // the limiter's window: the limiter never having been called is what says it
+    // was not reached to be asked.
     expect(response.headers.get("retry-after")).toBe("1");
     expect(consumed).toBe(0);
-    expect(peeked).toBe(0);
   });
 
   test("the bucket is keyed on the address, never on the plan", async () => {
@@ -693,16 +727,14 @@ describe("redeeming a code", () => {
     const app = buildApp({
       plans,
       unlockRateLimits: {
+        // Recorded from the reservation, which every attempt takes before the
+        // code is compared - including the three here that go on to succeed and
+        // hand their count straight back.
         consume: async (key) => {
           keys.push(key);
-          return { allowed: true, retryAfter: 0 };
+          return { allowed: true, retryAfter: 0, windowStart: 0 };
         },
-        // Recorded from the gate rather than the spend: these three redemptions
-        // all succeed, and a correct code is exactly what no longer spends.
-        peek: async (key) => {
-          keys.push(key);
-          return { allowed: true, retryAfter: 0 };
-        },
+        refund: async () => {},
       },
     });
 
@@ -755,7 +787,9 @@ describe("the share-link relay", () => {
   const CODE = "sHaReCoDe1234567";
   const DOCUMENT = "<p>the plan itself</p>";
 
-  const shared = async (over: Record<string, unknown> = {}) =>
+  // The harness's own option type, so a misspelled override is a type error
+  // rather than a silently ignored key.
+  const shared = async (over: HarnessOptions<MemoryStorage> = {}) =>
     buildApp({
       plans: memoryPlans([
         storedPlan({ shareCodeHash: await hashShareCode(CODE) }),

@@ -42,22 +42,33 @@ async function bucketFor(
 }
 
 /**
- * Either the 429 to return, or the bucket the attempt will be charged against.
+ * Either the 429 to return, or the reservation the attempt now holds.
  *
- * The key rather than a bare "proceed": it is an HMAC of the caller's address,
- * and handing it back means the charge cannot compute a second one. Same bucket
- * by construction rather than by two call sites agreeing.
+ * The bucket and the window it was charged in, so the refund can name both: it
+ * must give the count back to the window that took it and nowhere else.
  */
-export type UnlockBudget =
+export type UnlockReservation =
   | { readonly refused: Response }
-  | { readonly bucket: string };
+  | { readonly bucket: string; readonly windowStart: number };
 
-/** Spends nothing. */
-export async function checkUnlockRate(
+/**
+ * Takes one count before the code is compared.
+ *
+ * Spending first is what makes the limit real. Reading the budget without
+ * spending it bounds nothing: any number of concurrent callers pass such a read
+ * before one write lands, so a parallel guesser would face no limit at all.
+ *
+ * A correct code gets its count back - see `refundUnlockAttempt` - so the budget
+ * still rations only guessing. What this order costs is that simultaneous
+ * openings of one shared link hold the budget down while they are in flight, and
+ * one of them can see a refusal it would not have seen a moment later. A retry
+ * works; a limiter a parallel caller walks through does not.
+ */
+export async function reserveUnlockAttempt(
   limits: RateLimitRepo,
   config: UnlockRateConfig,
   request: Request,
-): Promise<UnlockBudget> {
+): Promise<UnlockReservation> {
   const bucket = await bucketFor(config, request);
   if (bucket === null) {
     return {
@@ -65,12 +76,12 @@ export async function checkUnlockRate(
     };
   }
 
-  const limit = await limits.peek(
+  const limit = await limits.consume(
     bucket,
     config.unlockRateMax,
     config.unlockRateWindowSec,
   );
-  if (limit.allowed) return { bucket };
+  if (limit.allowed) return { bucket, windowStart: limit.windowStart };
 
   return {
     refused: problem(429, "rate limit exceeded", {
@@ -80,19 +91,16 @@ export async function checkUnlockRate(
 }
 
 /**
- * Charges one refused redemption, against the bucket the gate read.
+ * Gives the reservation back, for an attempt that turned out to be a redemption.
  *
- * Called after the attempt and only when it did not grant access. A write
- * failure propagates: catching it would leave the limiter silently not counting.
+ * A failure here is swallowed by the caller rather than surfaced: the count was
+ * already taken, so losing the refund only leaves the budget one lower than it
+ * should be. That errs towards refusing, which is the safe direction, and it
+ * must not turn a redemption the reader completed into a 500.
  */
-export async function chargeUnlockAttempt(
+export async function refundUnlockAttempt(
   limits: RateLimitRepo,
-  config: UnlockRateConfig,
-  bucket: string,
+  reservation: { readonly bucket: string; readonly windowStart: number },
 ): Promise<void> {
-  await limits.consume(
-    bucket,
-    config.unlockRateMax,
-    config.unlockRateWindowSec,
-  );
+  await limits.refund(reservation.bucket, reservation.windowStart);
 }

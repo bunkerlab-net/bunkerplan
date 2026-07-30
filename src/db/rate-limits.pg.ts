@@ -1,6 +1,6 @@
-import { eq, lte, sql } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import type { RateLimitRepo, RateLimitResult } from "../services/types.ts";
+import type { RateLimitRepo } from "../services/types.ts";
 import type { PgSchema } from "./pg-shared.ts";
 import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
 import { unlockRateLimit, uploadRateLimit } from "./schema/rate-limit.pg.ts";
@@ -12,38 +12,24 @@ import { unlockRateLimit, uploadRateLimit } from "./schema/rate-limit.pg.ts";
 export type PgRateLimitTable = typeof uploadRateLimit | typeof unlockRateLimit;
 
 /**
- * The budget left on `key`, read rather than spent.
+ * Gives one count back, for a reservation the caller decided not to keep.
  *
  * Its own function so the factory below stays one statement per method. See the
  * sqlite twin, whose reasoning this mirrors exactly.
  */
-async function peekBudget(
+async function refundOne(
   db: NodePgDatabase<PgSchema>,
   t: PgRateLimitTable,
   key: string,
-  max: number,
-  windowSeconds: number,
-): Promise<RateLimitResult> {
-  const windowMs = windowSeconds * 1000;
-  const now = Date.now();
-
-  const current = await db
-    .select({ count: t.count, windowStart: t.windowStart })
-    .from(t)
-    .where(eq(t.key, key))
-    .limit(1);
-
-  const row = current[0];
-  // No row, or one whose window has rolled, is a full budget. Reads the same
-  // two conditions `consume` decides on rather than a stored verdict, so the
-  // two cannot disagree about where the window ended.
-  if (row === undefined || row.windowStart <= now - windowMs) {
-    return { allowed: true, retryAfter: 0 };
-  }
-  return {
-    allowed: row.count < max,
-    retryAfter: retryAfterSeconds(row.windowStart, now, windowMs),
-  };
+  windowStart: number,
+): Promise<void> {
+  await db
+    .update(t)
+    // Floored, and matched on the exact window that charged it. A request whose
+    // window rolled while it was in flight has nothing to give back: that count
+    // went with the window, and this row now holds somebody else's fresh budget.
+    .set({ count: sql`greatest(${t.count} - 1, 0)` })
+    .where(and(eq(t.key, key), eq(t.windowStart, windowStart)));
 }
 
 /** See src/db/rate-limits.sqlite.ts for why this is a single statement. */
@@ -75,6 +61,8 @@ export function createPgRateLimitRepo(
         return {
           allowed: true,
           retryAfter: retryAfterSeconds(row.windowStart, now, windowMs),
+          // The window this count came out of, so a refund can name it.
+          windowStart: row.windowStart,
         };
       }
 
@@ -93,8 +81,7 @@ export function createPgRateLimitRepo(
       };
     },
 
-    peek: (key, max, windowSeconds) =>
-      peekBudget(db, t, key, max, windowSeconds),
+    refund: (key, windowStart) => refundOne(db, t, key, windowStart),
   };
 }
 
@@ -119,9 +106,8 @@ export function createPgUnlockRateLimitRepo(
       return await counter.consume(key, max, windowSeconds);
     },
 
-    // No sweep here: this runs on every attempt including the ones that are
-    // about to succeed, and the sweep belongs on the spending path where its
-    // cost is already accounted for.
-    peek: counter.peek,
+    // No sweep here: a refund follows a reservation this repo already swept for,
+    // and sweeping again would only add a write to the path that gives one back.
+    refund: counter.refund,
   };
 }

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { unlockPlan } from "../src/client/api.ts";
 import {
-  chargeUnlockAttempt,
-  checkUnlockRate,
+  refundUnlockAttempt,
+  reserveUnlockAttempt,
 } from "../src/http/unlock-rate-limit.ts";
 import type { RateLimitRepo } from "../src/services/types.ts";
 
@@ -14,28 +14,24 @@ const CONFIG = {
   unlockRateWindowSec: 60,
 };
 
-/**
- * Records what bucket was touched, and separately what was spent.
- *
- * Both halves record a key: the gate reads the budget through `peek` and only a
- * refused attempt reaches `consume`. Every claim below - the digest, the
- * ceiling, one bucket per address - is meant to hold of either.
- */
+const WINDOW_START = 1_700_000_000_000;
+
+/** Records the bucket each half was called with, so the keying is asserted. */
 function fakeLimits(allowed: boolean, retryAfter = 42) {
-  const keys: string[] = [];
   const spent: string[] = [];
+  const returned: Array<[string, number]> = [];
   const limits: RateLimitRepo = {
     consume: async (key) => {
-      keys.push(key);
       spent.push(key);
-      return { allowed, retryAfter };
+      return allowed
+        ? { allowed: true, retryAfter, windowStart: WINDOW_START }
+        : { allowed: false, retryAfter };
     },
-    peek: async (key) => {
-      keys.push(key);
-      return { allowed, retryAfter };
+    refund: async (key, windowStart) => {
+      returned.push([key, windowStart]);
     },
   };
-  return { limits, keys, spent };
+  return { limits, spent, returned };
 }
 
 const post = (headers: Record<string, string> = {}) =>
@@ -46,29 +42,28 @@ const post = (headers: Record<string, string> = {}) =>
   });
 
 /**
- * The bucket a passed gate handed back, or a failure naming what came instead.
- *
- * The result is a union, and every test below wants one side or the other. This
- * asserts which rather than reaching into `unknown`, so a gate that started
- * refusing reads as that rather than as `undefined` somewhere later.
+ * The reservation a passed gate handed back, or a failure naming what came
+ * instead. The result is a union and every test below wants one side or the
+ * other, so a gate that started refusing reads as that rather than as
+ * `undefined` somewhere later.
  */
-const bucketOf = async (
-  ...args: Parameters<typeof checkUnlockRate>
-): Promise<string> => {
-  const budget = await checkUnlockRate(...args);
-  if ("refused" in budget) {
-    throw new Error(`gate refused with ${budget.refused.status}`);
+const reservationOf = async (
+  ...args: Parameters<typeof reserveUnlockAttempt>
+): Promise<{ bucket: string; windowStart: number }> => {
+  const held = await reserveUnlockAttempt(...args);
+  if ("refused" in held) {
+    throw new Error(`gate refused with ${held.refused.status}`);
   }
-  return budget.bucket;
+  return held;
 };
 
 /** The refusal a closed gate produced, asserted as one. */
 const refusalOf = async (
-  ...args: Parameters<typeof checkUnlockRate>
+  ...args: Parameters<typeof reserveUnlockAttempt>
 ): Promise<Response> => {
-  const budget = await checkUnlockRate(...args);
-  if (!("refused" in budget)) throw new Error("gate allowed the request");
-  return budget.refused;
+  const held = await reserveUnlockAttempt(...args);
+  if (!("refused" in held)) throw new Error("gate allowed the request");
+  return held.refused;
 };
 
 describe("the unlock rate limit", () => {
@@ -76,85 +71,83 @@ describe("the unlock rate limit", () => {
     // The bucket is the address, so one address cannot spend another address's
     // allowance - callers sharing one still share it. The stored key is a keyed
     // digest, so this table is not a log of every address that poked a link.
-    const { limits, keys } = fakeLimits(true);
-    const bucket = await bucketOf(
+    const { limits, spent } = fakeLimits(true);
+    const held = await reservationOf(
       limits,
       CONFIG,
       post({ "cf-connecting-ip": "203.0.113.9" }),
     );
 
-    expect(keys).toEqual([bucket]);
-    expect(bucket).not.toContain("203.0.113.9");
-    expect(bucket).toMatch(/^[0-9a-f]{64}$/);
+    expect(spent).toEqual([held.bucket]);
+    expect(held.bucket).not.toContain("203.0.113.9");
+    expect(held.bucket).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("passes the configured ceiling and window through", async () => {
     const seen: Array<[number, number]> = [];
-    const answer = async (_key: string, max: number, window: number) => {
-      seen.push([max, window]);
-      return { allowed: true, retryAfter: 0 };
+    const limits: RateLimitRepo = {
+      consume: async (_key, max, window) => {
+        seen.push([max, window]);
+        return { allowed: true, retryAfter: 0, windowStart: WINDOW_START };
+      },
+      refund: async () => {},
     };
-    const limits: RateLimitRepo = { consume: answer, peek: answer };
 
-    const bucket = await bucketOf(
+    await reservationOf(limits, CONFIG, post({ "cf-connecting-ip": "a" }));
+
+    expect(seen).toEqual([[3, 60]]);
+  });
+
+  test("spends before the code is compared, which is what makes the limit real", async () => {
+    const { limits, spent } = fakeLimits(true);
+
+    const held = await reservationOf(
       limits,
       CONFIG,
       post({ "cf-connecting-ip": "a" }),
     );
-    expect(seen).toEqual([[3, 60]]);
-
-    // The charge reads the same two, or a refusal would be rationed against a
-    // window the gate never used.
-    await chargeUnlockAttempt(limits, CONFIG, bucket);
-    expect(seen).toEqual([
-      [3, 60],
-      [3, 60],
-    ]);
-  });
-
-  test("the gate spends nothing, which is what makes a correct code free", async () => {
-    const { limits, keys, spent } = fakeLimits(true);
-
-    await bucketOf(limits, CONFIG, post({ "cf-connecting-ip": "a" }));
-
-    // Asked, and not charged. A link opened by everyone it was sent to is the
-    // normal case, and charging those locked out a room behind one address.
-    expect(keys).toHaveLength(1);
-    expect(spent).toEqual([]);
-  });
-
-  test("a refused attempt spends, against the bucket the gate read", async () => {
-    const { limits, keys, spent } = fakeLimits(true);
-    const request = post({ "cf-connecting-ip": "203.0.113.9" });
-
-    const bucket = await bucketOf(limits, CONFIG, request);
-    await chargeUnlockAttempt(limits, CONFIG, bucket);
 
     /*
-     * The same bucket, and now by construction: the gate hands its key back and
-     * the charge takes one, so there is no second read of the header and no
-     * second HMAC that could disagree. What is left to assert is that the value
-     * travelled - two touches, one spend, one key.
+     * The reservation is the whole point of this order. Reading the budget
+     * without taking from it bounds nothing: concurrent callers all pass such a
+     * read before one write lands, so a parallel guesser would meet no limit.
      */
-    expect(keys).toEqual([bucket, bucket]);
-    expect(spent).toEqual([bucket]);
+    expect(spent).toEqual([held.bucket]);
+    expect(held.windowStart).toBe(WINDOW_START);
+  });
+
+  test("a redemption gives its count back, to the window that took it", async () => {
+    const { limits, spent, returned } = fakeLimits(true);
+    const request = post({ "cf-connecting-ip": "203.0.113.9" });
+
+    const held = await reservationOf(limits, CONFIG, request);
+    await refundUnlockAttempt(limits, held);
+
+    // One spend, one return, both naming the same bucket - and the window named
+    // too, so a refund cannot land on a budget somebody else opened.
+    expect(spent).toEqual([held.bucket]);
+    expect(returned).toEqual([[held.bucket, WINDOW_START]]);
   });
 
   test("buckets one address together and two apart", async () => {
-    const charge = async (address: string) => {
-      const { limits, keys } = fakeLimits(true);
-      await checkUnlockRate(
+    const bucketFrom = async (address: string) => {
+      const { limits } = fakeLimits(true);
+      const held = await reservationOf(
         limits,
         CONFIG,
         post({ "cf-connecting-ip": address }),
       );
-      return keys[0] ?? "";
+      return held.bucket;
     };
 
     // Deterministic, or an address would get a fresh allowance per request.
-    expect(await charge("203.0.113.9")).toBe(await charge("203.0.113.9"));
+    expect(await bucketFrom("203.0.113.9")).toBe(
+      await bucketFrom("203.0.113.9"),
+    );
     // Distinct, or one address could spend another's.
-    expect(await charge("203.0.113.9")).not.toBe(await charge("203.0.113.10"));
+    expect(await bucketFrom("203.0.113.9")).not.toBe(
+      await bucketFrom("203.0.113.10"),
+    );
   });
 
   test("answers 429 with retry-after once the allowance is spent", async () => {
@@ -173,7 +166,7 @@ describe("the unlock rate limit", () => {
     // A self-hosted deployment names its own; trusting `cf-connecting-ip`
     // behind an nginx that does not set it would bucket every caller together.
     const named = fakeLimits(true);
-    await checkUnlockRate(
+    await reservationOf(
       named.limits,
       { ...CONFIG, clientIpHeader: "x-forwarded-for" },
       post({ "x-forwarded-for": "198.51.100.4", "cf-connecting-ip": "wrong" }),
@@ -181,31 +174,30 @@ describe("the unlock rate limit", () => {
 
     // The digest of the named header's value, not of the other one.
     const expected = fakeLimits(true);
-    await checkUnlockRate(
+    await reservationOf(
       expected.limits,
       CONFIG,
       post({ "cf-connecting-ip": "198.51.100.4" }),
     );
-    expect(named.keys).toEqual(expected.keys);
+    expect(named.spent).toEqual(expected.spent);
   });
 
   test("refuses when the trusted header did not arrive", async () => {
-    // Nothing identifies the caller, so there is no bucket to charge. The
-    // alternative is one shared bucket for everyone, which is the lockout the
-    // per-address keying exists to avoid.
+    // Nothing identifies the caller, so there is no bucket to reserve against.
+    // The alternative is one shared bucket for everyone, which is the lockout
+    // the per-address keying exists to avoid.
     //
-    // And there is nothing to charge it with either: the gate hands a bucket
-    // back only on the path that passed, so a refused caller cannot reach
-    // `chargeUnlockAttempt` at all - which is now a matter of type rather than
-    // of the handler remembering.
-    const { limits, keys } = fakeLimits(true);
+    // And nothing to refund either: the gate hands a reservation back only on
+    // the path that passed, so a refused caller cannot reach the refund at all -
+    // a matter of type rather than of the handler remembering.
+    const { limits, spent } = fakeLimits(true);
 
     expect((await refusalOf(limits, CONFIG, post())).status).toBe(429);
-    expect(keys).toEqual([]);
+    expect(spent).toEqual([]);
   });
 
-  test("refuses a blank header rather than charging an empty bucket", async () => {
-    const { limits, keys } = fakeLimits(true);
+  test("refuses a blank header rather than reserving an empty bucket", async () => {
+    const { limits, spent } = fakeLimits(true);
 
     const refused = await refusalOf(
       limits,
@@ -214,7 +206,7 @@ describe("the unlock rate limit", () => {
     );
 
     expect(refused.status).toBe(429);
-    expect(keys).toEqual([]);
+    expect(spent).toEqual([]);
   });
 });
 

@@ -51,12 +51,12 @@ function fakes(fails: string[] = []): Fakes {
       deleteOwned: async () => false,
     },
     uploadRateLimits: {
-      consume: async () => ({ allowed: true, retryAfter: 60 }),
-      peek: async () => ({ allowed: true, retryAfter: 60 }),
+      consume: async () => ({ allowed: true, retryAfter: 60, windowStart: 0 }),
+      refund: async () => {},
     },
     unlockRateLimits: {
-      consume: async () => ({ allowed: true, retryAfter: 60 }),
-      peek: async () => ({ allowed: true, retryAfter: 60 }),
+      consume: async () => ({ allowed: true, retryAfter: 60, windowStart: 0 }),
+      refund: async () => {},
     },
     accountClosing: {
       open: async () => {},

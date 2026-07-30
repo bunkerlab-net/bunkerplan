@@ -96,8 +96,11 @@ project (`bunkerplan-test`), separate from the self-hosting stack below, so
 volumes with it. Postgres then works in a scratch schema and MinIO in a bucket
 created for the run, both dropped afterwards.
 
-`bun run test` is `bun test --isolate`: one process, a fresh global object per
-file. It was `--parallel` (one process per file, which implies `--isolate`),
+`bun run test` is `bun run build && BUNKERPLAN_PREBUILT=1 bun test --isolate`:
+one process, a fresh global object per file. The build comes first because the
+suite serves the real Workers bundle on Miniflare, and the variable is what
+stops each worker rebuilding it. It was `--parallel` (one process per file,
+which implies `--isolate`),
 and the reason for the change is coverage. Bun's parallel reporter registers
 lines that are not statements - comments, blank lines, the continuation lines
 of a multi-line string - as coverable and unhit in workers that loaded a module
@@ -114,9 +117,13 @@ the Valkey expiry suite, which waits on real TTLs. It does not hang the run.
 The cause is suspected rather than established. Sharing one process with the
 workerd child Miniflare runs is the candidate, and `tests/drivers` is where the
 backends and that child meet, but nothing here has isolated it. What is
-reliable is the shape: re-run before believing a failure, `bun test --parallel`
-is the diagnostic, and a genuine regression fails the same way every time
-rather than at the deadline.
+reliable is the shape: re-run before believing a failure, and a genuine
+regression fails the same way every time rather than at the deadline. The
+diagnostic is the same command with the topology swapped:
+
+```sh
+bun run build && BUNKERPLAN_PREBUILT=1 bun test --parallel
+```
 
 ## Self-hosting
 

@@ -660,7 +660,9 @@ describe("PlansPanel row actions", () => {
 
   test("one busy flag holds every row control at once", async () => {
     const removal = deferred<void>();
-    api.listPlans = async () => [plan(), plan()];
+    // Distinct ids: two rows sharing one would hide a control wired to the
+    // wrong row, which is exactly what a shared busy flag could get wrong.
+    api.listPlans = async () => [plan(), plan({ id: "second-plan-id" })];
     api.deletePlan = removal.answer;
     const view = await mountAsync(<PlansPanel />);
 

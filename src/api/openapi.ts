@@ -402,7 +402,10 @@ function rotateShareCodeOperation(codeFormat: string): Record<string, unknown> {
       "code and immediately invalidates every unlock cookie issued under " +
       "the old one. The plan must be private: a public one is readable by " +
       "anyone holding its URL, so a code would gate nothing and would only " +
-      "sit waiting to matter again.",
+      "sit waiting to matter again.\n\n" +
+      "Compose the link the same way as after an upload: `/s/{id}#code=CODE` " +
+      "for a person, `?code=` on the plan URL for a reader without a browser. " +
+      "See `PUT /api/plans` for why the two differ.",
     tags: ["Sharing"],
     security: SESSION_AUTH,
     responses: {

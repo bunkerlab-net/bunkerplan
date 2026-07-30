@@ -240,7 +240,11 @@ describe("replacing a plan whose row vanishes underneath", () => {
 });
 
 describe("the health probe", () => {
-  type Probe = (signal?: AbortSignal) => Promise<void>;
+  /**
+   * Taken from the contract rather than restated: a probe that grew a second
+   * argument would then be a type error here instead of an untested signature.
+   */
+  type Probe = PlanStorage["probe"];
 
   /**
    * A backend that answers the probe and nothing else.
@@ -377,41 +381,51 @@ describe("the health probe", () => {
     expect(PROBE_TIMEOUT_MS).toBe(2_000);
   });
 
-  test("a probe that never answers is cancelled, and the route still answers", async () => {
-    let seen: AbortSignal | undefined;
-    const { services } = probed({
-      storage: backend((signal?: AbortSignal) => {
-        seen = signal;
-        return new Promise<void>(() => {});
-      }),
-    });
+  /*
+   * Every probed backend, not just the first. `healthz` wires the signal into
+   * each of the three separately, so one of them losing it would leave that
+   * driver holding its socket while the other two released theirs - and a test
+   * that only watched `storage` would stay green through it.
+   */
+  test.each(["storage", "db", "kv"] as const)(
+    "a %s probe that never answers is cancelled, and the route still answers",
+    async (check) => {
+      let seen: AbortSignal | undefined;
+      const { services } = probed({
+        [check]: backend((signal?: AbortSignal) => {
+          seen = signal;
+          return new Promise<void>(() => {});
+        }),
+      });
 
-    const response = await healthz("node", async () => services);
+      const response = await healthz("node", async () => services);
 
-    // With no deadline this call never returns and the test times out. There is
-    // no authorization step to check first: `/healthz` is deliberately
-    // unauthenticated (src/http/healthz.ts), so the probe result is the only
-    // thing this route produces.
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({
-      checks: { storage: "error" },
-    });
+      // With no deadline this call never returns and the test times out. There
+      // is no authorization step to check first: `/healthz` is deliberately
+      // unauthenticated (src/http/healthz.ts), so the probe result is the only
+      // thing this route produces.
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        checks: { [check]: "error" },
+      });
 
-    // The half a bare `Promise.race` leaves out. Answering the request is not
-    // the same as releasing the socket behind it, and the signal is the only
-    // thing that reaches the driver: without this the S3 client holds its
-    // connection and a pool client for as long as the endpoint stays silent.
-    //
-    // The reason as well as the flag. Cancellation happens in one place - the
-    // timeout callback, which calls `controller.abort(expired)` before it
-    // rejects; `withTimeout`'s `finally` only clears the timer. So the message
-    // is what identifies the deadline as what cancelled this, rather than some
-    // later abort, and it pins the wording an operator reads in the log.
-    expect(seen?.aborted).toBe(true);
-    expect((seen?.reason as Error | undefined)?.message).toBe(
-      `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
-    );
-  }, 10_000);
+      // The half a bare `Promise.race` leaves out. Answering the request is not
+      // the same as releasing the socket behind it, and the signal is the only
+      // thing that reaches the driver: without this the S3 client holds its
+      // connection and a pool client for as long as the endpoint stays silent.
+      //
+      // The reason as well as the flag. Cancellation happens in one place - the
+      // timeout callback, which calls `controller.abort(expired)` before it
+      // rejects; `withTimeout`'s `finally` only clears the timer. So the message
+      // is what identifies the deadline as what cancelled this, rather than some
+      // later abort, and it pins the wording an operator reads in the log.
+      expect(seen?.aborted).toBe(true);
+      expect((seen?.reason as Error | undefined)?.message).toBe(
+        `probe timed out after ${PROBE_TIMEOUT_MS}ms`,
+      );
+    },
+    10_000,
+  );
 });
 
 describe("the fixed-window arithmetic both limiters share", () => {
