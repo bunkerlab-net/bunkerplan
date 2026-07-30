@@ -1,5 +1,6 @@
 import "./dom-env.ts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { useState } from "hono/jsx";
 import { DangerZone } from "../../src/client/DangerZone.tsx";
 import {
   client,
@@ -47,6 +48,68 @@ describe("DangerZone", () => {
     expect(view.text()).toContain("It cannot be undone.");
   });
 
+  test("a panel mounted before the session resolves can still delete", async () => {
+    /*
+     * The account is latched on the first render that has one, not on the first
+     * render. `useRef(userId)` alone would freeze the unresolved `null` and
+     * leave this panel permanently unable to delete anything, because
+     * `deleteAccount` refuses when there is no id to compare against.
+     */
+    client.deleteUser = ok({ success: true });
+
+    function Resolving() {
+      const [userId, setUserId] = useState<string | null>(null);
+      return (
+        <>
+          <button id="resolve" type="button" onClick={() => setUserId(USER_ID)}>
+            resolve
+          </button>
+          <DangerZone handle={HANDLE} userId={userId} />
+        </>
+      );
+    }
+
+    const view = mount(<Resolving />);
+    await click(view.find("#resolve"));
+
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.byText("button", "Delete account"));
+
+    expect(navigations).toEqual(["/"]);
+  });
+
+  test("a later userId prop cannot redefine which account is intended", async () => {
+    /*
+     * The seeding above must not become "last render wins". A prop that changed
+     * to another account while this client still holds the first one would
+     * otherwise retarget the delete, and `deleteAccount` compares against
+     * whatever the ref holds.
+     */
+    client.deleteUser = ok({ success: true });
+
+    function Swapping() {
+      const [userId, setUserId] = useState<string | null>(USER_ID);
+      return (
+        <>
+          <button id="swap" type="button" onClick={() => setUserId("u2")}>
+            swap
+          </button>
+          <DangerZone handle={HANDLE} userId={userId} />
+        </>
+      );
+    }
+
+    const view = mount(<Swapping />);
+    await click(view.find("#swap"));
+
+    // The session is still the account this mounted for, so the delete goes
+    // through - which is only true if the swap did not take.
+    await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
+    await click(view.byText("button", "Delete account"));
+
+    expect(navigations).toEqual(["/"]);
+  });
+
   test("the delete button is dead until the handle matches exactly", async () => {
     const view = mount(<DangerZone handle={HANDLE} userId={USER_ID} />);
     const button = view.find<HTMLButtonElement>("button");
@@ -91,7 +154,9 @@ describe("DangerZone", () => {
     // `disabled` is a hint to a person, not a guard on the call.
     const button = view.find<HTMLButtonElement>("button");
     expect(button.disabled).toBe(true);
-    button.dispatchEvent(new Event("click", { bubbles: true }));
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
     await flush();
 
     expect(attempts).toBe(0);
@@ -144,7 +209,11 @@ describe("DangerZone", () => {
       expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
 
       // And the control genuinely does not answer a second press.
-      view.find("button").dispatchEvent(new Event("click", { bubbles: true }));
+      view
+        .find("button")
+        .dispatchEvent(
+          new MouseEvent("click", { bubbles: true, cancelable: true }),
+        );
       await flush();
       expect(attempts).toBe(1);
     } finally {
@@ -238,7 +307,11 @@ describe("DangerZone", () => {
     await flush();
     expect(view.find<HTMLButtonElement>("button").disabled).toBe(true);
 
-    view.find("button").dispatchEvent(new Event("click", { bubbles: true }));
+    view
+      .find("button")
+      .dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
     await flush();
     expect(attempt).toBe(1);
     expect(navigations).toEqual([]);
@@ -361,8 +434,12 @@ describe("DangerZone", () => {
     // is state, so the second handler would still read the value the first one
     // closed over. This is the one action in the app that cannot be undone.
     const button = view.find("button");
-    button.dispatchEvent(new Event("click", { bubbles: true }));
-    button.dispatchEvent(new Event("click", { bubbles: true }));
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
     await flush();
 
     expect(attempts).toBe(1);

@@ -338,7 +338,11 @@ describe("reading an object", () => {
   });
 
   test("an id the key mapping refuses never reaches the network", async () => {
-    await expect(storage().get("../../etc/passwd")).rejects.toThrow();
+    // The message, not merely "it threw": a network failure or a missing
+    // binding would also reject here, and that is a different bug.
+    await expect(storage().get("../../etc/passwd")).rejects.toThrow(
+      'refusing to address a non-plan id: "../../etc/passwd"',
+    );
 
     // Only meaningful once the rejection has settled: an un-awaited assertion
     // would read `sent` before the driver had the chance to reach the network.

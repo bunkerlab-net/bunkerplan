@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { unlockPlan } from "../src/client/api.ts";
 import {
   refundUnlockAttempt,
@@ -41,6 +41,26 @@ const post = (headers: Record<string, string> = {}) =>
     body: JSON.stringify({ code: "x" }),
   });
 
+/** What the gate logged, so the one case about that can read it. */
+const warnings: Array<{ fields: unknown; message: string }> = [];
+
+const logger = {
+  warn: (fields: unknown, message?: string) => {
+    warnings.push({ fields, message: message ?? "" });
+  },
+} as unknown as Parameters<typeof reserveUnlockAttempt>[3];
+
+beforeEach(() => {
+  warnings.length = 0;
+});
+
+/** The first three arguments; the helpers below supply the logger. */
+type GateArgs = [
+  Parameters<typeof reserveUnlockAttempt>[0],
+  Parameters<typeof reserveUnlockAttempt>[1],
+  Parameters<typeof reserveUnlockAttempt>[2],
+];
+
 /**
  * The reservation a passed gate handed back, or a failure naming what came
  * instead. The result is a union and every test below wants one side or the
@@ -48,9 +68,9 @@ const post = (headers: Record<string, string> = {}) =>
  * `undefined` somewhere later.
  */
 const reservationOf = async (
-  ...args: Parameters<typeof reserveUnlockAttempt>
+  ...args: GateArgs
 ): Promise<{ bucket: string; windowStart: number }> => {
-  const held = await reserveUnlockAttempt(...args);
+  const held = await reserveUnlockAttempt(...args, logger);
   if ("refused" in held) {
     throw new Error(`gate refused with ${held.refused.status}`);
   }
@@ -58,10 +78,8 @@ const reservationOf = async (
 };
 
 /** The refusal a closed gate produced, asserted as one. */
-const refusalOf = async (
-  ...args: Parameters<typeof reserveUnlockAttempt>
-): Promise<Response> => {
-  const held = await reserveUnlockAttempt(...args);
+const refusalOf = async (...args: GateArgs): Promise<Response> => {
+  const held = await reserveUnlockAttempt(...args, logger);
   if (!("refused" in held)) throw new Error("gate allowed the request");
   return held.refused;
 };
@@ -194,6 +212,21 @@ describe("the unlock rate limit", () => {
 
     expect((await refusalOf(limits, CONFIG, post())).status).toBe(429);
     expect(spent).toEqual([]);
+  });
+
+  test("says so in the log, because the symptom is otherwise silent", async () => {
+    // Every redemption on this deployment answers 429 and no reader can tell
+    // why. Configuration refuses to load without naming a header, so reaching
+    // here means the proxy in front is not sending the one it was told to
+    // trust - which is an operator's problem and needs saying once.
+    const { limits } = fakeLimits(true);
+
+    await refusalOf(limits, CONFIG, post());
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("no trusted client address header");
+    // Names the header it looked for, so the fix does not need a code read.
+    expect(warnings[0]?.fields).toEqual({ header: CONFIG.clientIpHeader });
   });
 
   test("refuses a blank header rather than reserving an empty bucket", async () => {

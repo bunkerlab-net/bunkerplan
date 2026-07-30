@@ -167,7 +167,15 @@ export function memoryPlans(
   seed: StoredPlan[] = [],
   handles: Record<string, string> = {},
 ): PlanRepo & { rows: Map<string, StoredPlan> } {
-  const rows = new Map(seed.map((row) => [row.id, row]));
+  /*
+   * Cloned, `grants` included. The repo mutates its rows - relabel, resize,
+   * visibility, a grant added - and holding the caller's objects would edit the
+   * fixture a test built, or a constant two tests share. A seed is an input, and
+   * an input a callee rewrites is a fake teaching the wrong lesson.
+   */
+  const rows = new Map(
+    seed.map((row) => [row.id, { ...row, grants: [...row.grants] }]),
+  );
   const owned = (id: string, userId: string): StoredPlan | undefined => {
     const row = rows.get(id);
     return row?.userId === userId ? row : undefined;

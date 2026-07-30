@@ -171,7 +171,9 @@ export async function mountAsync(node: Child): Promise<Mounted> {
 }
 
 export async function click(node: Element): Promise<void> {
-  node.dispatchEvent(new Event("click", { bubbles: true }));
+  node.dispatchEvent(
+    new MouseEvent("click", { bubbles: true, cancelable: true }),
+  );
   await flush();
 }
 
@@ -187,7 +189,9 @@ export async function click(node: Element): Promise<void> {
  */
 export async function keyboardClick(node: HTMLElement): Promise<void> {
   node.focus();
-  node.dispatchEvent(new Event("click", { bubbles: true }));
+  node.dispatchEvent(
+    new MouseEvent("click", { bubbles: true, cancelable: true }),
+  );
   await flush();
 }
 

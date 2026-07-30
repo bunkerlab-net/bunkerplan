@@ -71,11 +71,14 @@ Known and accepted, so please do not report these as new:
   document, and a plan can read its own `location.hash`, so the credential would
   be handed to HTML the reader did not write.
 
-  The `?code=` parameter on `/p/{id}` is kept, because a reader without a DOM
-  cannot send a fragment at all. A link used that way does reach the
-  deployment's own logs and that browser's history, and a plan served in the
-  same request can read `location.search`. Prefer `POST /api/plans/{id}/unlock`,
-  which takes the code in a JSON body and hands back the cookie.
+  The `?code=` parameter on `/p/{id}` is kept for a client that can only fetch
+  a URL. No client sends a fragment - that is what makes the share link safe -
+  so using one is a two-step: read the code out of the URL you were given, then
+  `POST /api/plans/{id}/unlock` with it in the JSON body and keep the cookie.
+  Anything that can make that request should, and a script holding the link
+  already can. The query form skips the two steps and pays for it: the code
+  reaches the deployment's own access log and that browser's history, and a plan
+  served in the same request can read `location.search`.
 
   Rotating the code (`POST /api/plans/{id}/share-code`) is the remedy in every
   case: the cookie is signed over a digest of the code current when it was

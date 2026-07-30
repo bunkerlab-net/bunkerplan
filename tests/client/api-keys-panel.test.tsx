@@ -353,7 +353,9 @@ describe("ApiKeysPanel creating", () => {
     const view = await mountAsync(<ApiKeysPanel />);
     const button = view.byText<HTMLButtonElement>("button", "Create key");
 
-    button.dispatchEvent(new Event("click", { bubbles: true }));
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
     await flush();
     expect(button.disabled).toBe(true);
 

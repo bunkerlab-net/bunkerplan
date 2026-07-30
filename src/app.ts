@@ -200,6 +200,7 @@ function registerPlanUnlock(app: Hono, getServices: GetServices): void {
       db.unlockRateLimits,
       config,
       c.req.raw,
+      logger,
     );
     if ("refused" in reservation) return reservation.refused;
 

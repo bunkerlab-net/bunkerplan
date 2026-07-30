@@ -123,7 +123,9 @@ describe("the landing page", () => {
 
     view
       .byText("button", "Create an account")
-      .dispatchEvent(new Event("click", { bubbles: true }));
+      .dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
     await flush();
 
     // Counted before swept: `every` over an empty list is true, so a page that

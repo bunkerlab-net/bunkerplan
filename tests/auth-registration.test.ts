@@ -112,7 +112,6 @@ describe("passkey registration", () => {
   });
 
   test("attestation creates the real user and signs them straight in", async () => {
-    cookies.length = 0;
     const { resolveUser, afterVerification } = passkeyOptions().registration;
     const provisional = await resolveUser();
     const created: unknown[] = [];
@@ -162,7 +161,6 @@ describe("passkey registration", () => {
   });
 
   test("a signed-in user adding a second passkey creates no new account", async () => {
-    cookies.length = 0;
     const { afterVerification } = passkeyOptions().registration;
     let touched = 0;
     const ctx = {

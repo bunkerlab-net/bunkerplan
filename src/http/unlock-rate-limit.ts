@@ -1,4 +1,5 @@
 import type { Config } from "../config.ts";
+import type { Logger } from "../log.ts";
 import type { RateLimitRepo } from "../services/types.ts";
 import { problem } from "./problem.ts";
 import { unlockBucketKey } from "./share-auth.ts";
@@ -75,9 +76,20 @@ export async function reserveUnlockAttempt(
   limits: RateLimitRepo,
   config: UnlockRateConfig,
   request: Request,
+  logger: Pick<Logger, "warn">,
 ): Promise<UnlockReservation> {
   const bucket = await bucketFor(config, request);
   if (bucket === null) {
+    /*
+     * Said out loud, because the symptom is silent: every redemption on this
+     * deployment answers 429 and no reader can tell why. Configuration refuses
+     * to load without naming a header, so reaching here means the proxy in
+     * front is not sending the one it was told to trust.
+     */
+    logger.warn(
+      { header: config.clientIpHeader },
+      "no trusted client address header, so every unlock is refused",
+    );
     return {
       refused: problem(429, "rate limit exceeded", { "retry-after": "1" }),
     };

@@ -135,14 +135,19 @@ function useAccountDeletion(
   /**
    * The account this panel was mounted for.
    *
-   * `useRef` keeps the first render's value, so a re-render carrying a
-   * different `userId` cannot quietly redefine what "intended" means. That is
-   * defence in depth rather than the load-bearing guard: a swapped session
-   * changes the `handle` prop too, and the typed confirmation stops the button
-   * on its own. The checks that do the work are in `deleteAccount` - the live
-   * session before the first call, and the ceremony's own answer after it.
+   * The first resolved id wins, and a later different one cannot replace it: a
+   * re-render carrying a new `userId` must not quietly redefine what "intended"
+   * means. Seeded rather than frozen outright because the caller may render this
+   * before the session resolves, and freezing `null` would leave the panel
+   * permanently unable to delete anything.
+   *
+   * That is defence in depth rather than the load-bearing guard: a swapped
+   * session changes the `handle` prop too, and the typed confirmation stops the
+   * button on its own. The checks that do the work are in `deleteAccount` - the
+   * live session before the first call, and the ceremony's own answer after it.
    */
-  const intended = useRef(userId);
+  const intended = useRef<string | null>(userId);
+  if (intended.current === null) intended.current = userId;
 
   const onDelete = async () => {
     /*

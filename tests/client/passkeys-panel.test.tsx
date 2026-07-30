@@ -243,7 +243,9 @@ describe("PasskeysPanel adding", () => {
     const view = await mountAsync(<PasskeysPanel />);
     const button = view.byText<HTMLButtonElement>("button", "Add a passkey");
 
-    button.dispatchEvent(new Event("click", { bubbles: true }));
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
     await flush();
     expect(button.disabled).toBe(true);
 
@@ -331,8 +333,12 @@ describe("PasskeysPanel deleting", () => {
     const view = await mountAsync(<PasskeysPanel />);
 
     const button = rowButton(view, 0);
-    button.dispatchEvent(new Event("click", { bubbles: true }));
-    button.dispatchEvent(new Event("click", { bubbles: true }));
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
     await flush();
 
     expect(deletions).toBe(1);

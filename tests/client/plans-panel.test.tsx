@@ -684,7 +684,9 @@ describe("PlansPanel row actions", () => {
 
     view
       .byText("button", "Delete")
-      .dispatchEvent(new Event("click", { bubbles: true }));
+      .dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
     await flush();
 
     expect(

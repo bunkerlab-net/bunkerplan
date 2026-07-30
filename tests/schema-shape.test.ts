@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getTableName, type Table } from "drizzle-orm";
+import { getTableName, is, SQL, type Table } from "drizzle-orm";
 import {
   PgDialect,
   getTableConfig as pgTableConfig,
@@ -75,8 +75,7 @@ const renderSql = (dialect: "pg" | "sqlite", value: unknown): string =>
     : new SQLiteSyncDialect().sqlToQuery(value as never).sql;
 
 /** A drizzle `SQL` default, as opposed to a literal one. */
-const isSqlDefault = (value: unknown): boolean =>
-  typeof value === "object" && value !== null && "queryChunks" in value;
+const isSqlDefault = (value: unknown): boolean => is(value, SQL);
 
 /**
  * Where the two dialects are meant to disagree, both sides written out.
@@ -146,12 +145,20 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
       ? pgTableConfig(table as never)
       : sqliteTableConfig(table as never);
 
-  const composite = config.primaryKeys.flatMap((key) =>
-    key.columns.map((column) => column.name),
-  );
+  /*
+   * Order matters inside a composite key - it decides which prefix lookups the
+   * index behind it can serve - so each constraint keeps the order it was
+   * declared in, joined into one token. Only the constraints are sorted against
+   * each other, which is what makes two dialects comparable without pretending
+   * their column order is interchangeable.
+   */
+  const composite = config.primaryKeys
+    .map((key) => key.columns.map((column) => column.name).join(","))
+    .sort();
   const inline = config.columns
     .filter((column) => column.primary)
-    .map((column) => column.name);
+    .map((column) => column.name)
+    .sort();
 
   return {
     name: getTableName(table),
@@ -170,7 +177,7 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
           : "-",
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
-    primaryKey: [...composite, ...inline].sort(),
+    primaryKey: [...composite, ...inline],
     indexes: config.indexes
       .map((index) => ({
         // The `unique` flag is the rule the database enforces. Without it an
@@ -306,17 +313,37 @@ describe("the recorded dialect differences", () => {
 
 describe("cascading from the account", () => {
   const cascading = [
-    ["plan", "user_id", pgPlan.plan, sqlitePlan.plan],
-    ["plan_grant", "user_id", pgPlan.planGrant, sqlitePlan.planGrant],
+    ["plan", "user_id", "user.id", pgPlan.plan, sqlitePlan.plan],
+    [
+      "plan_grant",
+      "user_id",
+      "user.id",
+      pgPlan.planGrant,
+      sqlitePlan.planGrant,
+    ],
+    /*
+     * The other half of a grant. Deleting a plan must take its grants with it,
+     * or a later plan minted with a recycled id would inherit them - and the
+     * read gate would hand that document to accounts the new owner never named.
+     */
+    [
+      "plan_grant",
+      "plan_id",
+      "plan.id",
+      pgPlan.planGrant,
+      sqlitePlan.planGrant,
+    ],
     [
       "upload_rate_limit",
       "key",
+      "user.id",
       pgRateLimit.uploadRateLimit,
       sqliteRateLimit.uploadRateLimit,
     ],
     [
       "account_closing",
       "user_id",
+      "user.id",
       pgAccountClosing.accountClosing,
       sqliteAccountClosing.accountClosing,
     ],
@@ -325,17 +352,17 @@ describe("cascading from the account", () => {
   // The column is the second element so `%s.%s` names `table.column`; with the
   // tables there the title interpolated a Drizzle object.
   test.each(cascading)(
-    "%s.%s goes with the user",
-    (_name, column, pg, sqlite) => {
+    "%s.%s goes with %s",
+    (_name, column, references, pg, sqlite) => {
       for (const [dialect, table] of [
         ["pg", pg],
         ["sqlite", sqlite],
       ] as const) {
-        // Nothing prunes these tables, so without the cascade a deleted account
-        // leaves its rows behind for good.
+        // Nothing prunes these tables, so without the cascade a deleted row
+        // leaves its dependents behind for good.
         expect(shapeOf(dialect, table).foreignKeys).toContainEqual({
           columns: [column],
-          references: ["user.id"],
+          references: [references],
           onDelete: "cascade",
         });
       }
@@ -400,10 +427,9 @@ describe("the plan table", () => {
   ] as const)(
     "%s keys a grant by the pair, so it cannot be duplicated",
     (dialect, table) => {
-      expect(shapeOf(dialect, table).primaryKey).toEqual([
-        "plan_id",
-        "user_id",
-      ]);
+      // One constraint, in its declared order: `plan_id` first is what lets the
+      // key's own index answer "who is this plan shared with" without a scan.
+      expect(shapeOf(dialect, table).primaryKey).toEqual(["plan_id,user_id"]);
       // And indexes the grantee, which is how the read gate checks one.
       expect(shapeOf(dialect, table).indexes).toContainEqual({
         unique: false,

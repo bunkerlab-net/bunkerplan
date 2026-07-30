@@ -122,11 +122,27 @@ const generated = [["pg"], ["sqlite"]] as const satisfies ReadonlyArray<
 >;
 
 /**
- * The foreign keys drizzle-kit would emit for one table.
+ * The table a dialect calls `name`, and its config, in one place.
  *
- * The dialect is resolved here rather than threaded through `describe.each`:
- * the two `getTableConfig` functions take different table types, so a tuple
- * carrying both has no common signature to call.
+ * The pair is what needs resolving together: the schema module and the
+ * `getTableConfig` that can read it come from the same dialect, and picking one
+ * without the other is how a `pg` table reaches the SQLite reader.
+ */
+function tableOf(dialect: Dialect, name: string) {
+  const schema = dialect === "pg" ? pgSchema : sqliteSchema;
+  const table = schema[name as "session"];
+  if (table === undefined) {
+    // A table renamed by `auth generate` would otherwise reach the dialect
+    // config as `undefined` and fail somewhere inside Drizzle, naming nothing.
+    throw new Error(`no ${dialect} auth table named "${name}"`);
+  }
+  return dialect === "pg"
+    ? pgTableConfig(table as never)
+    : sqliteTableConfig(table as never);
+}
+
+/**
+ * The foreign keys drizzle-kit would emit for one table.
  *
  * `shapeOf` in tests/schema-shape.test.ts projects references the same way and
  * is deliberately not shared with this. That one sorts, because it compares two
@@ -136,18 +152,7 @@ const generated = [["pg"], ["sqlite"]] as const satisfies ReadonlyArray<
  * its callers want, to save nine lines in a test.
  */
 function foreignKeysOf(dialect: Dialect, name: string) {
-  const schema = dialect === "pg" ? pgSchema : sqliteSchema;
-  const table = schema[name as "session"];
-  if (table === undefined) {
-    // A table renamed by `auth generate` would otherwise reach the dialect
-    // config as `undefined` and fail somewhere inside Drizzle, naming nothing.
-    throw new Error(`no ${dialect} auth table named "${name}"`);
-  }
-  const config =
-    dialect === "pg"
-      ? pgTableConfig(table as never)
-      : sqliteTableConfig(table as never);
-  return config.foreignKeys.map((key) => {
+  return tableOf(dialect, name).foreignKeys.map((key) => {
     const reference = key.reference();
     return {
       columns: reference.columns.map((column) => column.name),
@@ -191,11 +196,7 @@ describe.each(generated)("every %s auth table", (dialect) => {
   });
 
   test("a session is found by its token, which is what every request does", () => {
-    const schema = dialect === "pg" ? pgSchema : sqliteSchema;
-    const columns =
-      dialect === "pg"
-        ? pgTableConfig(schema.session as never).columns
-        : sqliteTableConfig(schema.session as never).columns;
+    const { columns } = tableOf(dialect, "session");
 
     expect(columns.find((column) => column.name === "token")?.isUnique).toBe(
       true,

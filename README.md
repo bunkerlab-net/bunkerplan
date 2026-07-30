@@ -33,7 +33,8 @@ bun run dev
 | `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it   |
-| `bun run test`                         | Builds, then the whole suite. Skips the container-backed backends unless they are up - see Tests        |
+| `bun run test`                         | Builds, then the whole suite, one process per file. Skips the container-backed backends unless they are up - see Tests |
+| `bun run test:coverage`                | The same suite in one shared process, with coverage measured - see Tests for why the topology differs    |
 | `bun run test:backends`                | Postgres, Valkey, and MinIO on localhost, so nothing skips                                              |
 | `bun run check`                        | Biome lint and format                                                                                   |
 | `bun run typecheck`                    | Builds, then `tsc --noEmit`                                                                             |

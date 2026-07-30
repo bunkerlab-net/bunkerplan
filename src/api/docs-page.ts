@@ -9,35 +9,20 @@ import { API_TITLE } from "./openapi.ts";
 export const SCALAR_SCRIPT_PATH = "/scalar/standalone.js";
 
 /**
- * `standalone.js` is an IIFE, not a module: it defines `window.Scalar` and
- * nothing else. `createApiReference` is the whole contract this page depends
- * on, and tests/docs-page.test.ts holds the vendored bundle to it.
+ * The bootstrap that calls into that bundle, served rather than inlined.
+ *
+ * The app policy is `script-src 'self'`, which refuses an inline `<script>`
+ * outright - so the call that mounts the reference has to arrive as a file.
+ * `public/api-docs.js` holds it, along with the options and why they are set.
  */
-const CONFIG = {
-  /**
-   * A URL rather than the document inline, so the browser caches the spec and
-   * the page itself stays a few hundred bytes.
-   */
-  url: "/api/openapi.json",
-  /**
-   * Scalar's default theme pulls fourteen `@font-face` files from
-   * fonts.scalar.com. Nothing else this app serves reaches off-origin, and a
-   * self-hosted deployment on a private network would render without them
-   * anyway, so the reference uses the system stack instead.
-   */
-  withDefaultFonts: false,
-  /**
-   * Scalar's AI chat, which fetches `/vector/registry/curated` and
-   * `/vector/registry/search` from api.scalar.com on load - two outbound
-   * requests, made before anyone asks for anything, from a page behind the
-   * same origin as the dashboard. Off.
-   */
-  agent: { disabled: true },
-};
+export const DOCS_BOOT_PATH = "/api-docs.js";
 
 /**
- * The page at /api/docs: a mount point and the vendored bundle. Everything in
- * it is a compile-time constant, so it is built once rather than per request.
+ * The page at /api/docs: a mount point and two served scripts. Everything in it
+ * is a compile-time constant, so it is built once rather than per request.
+ *
+ * No inline script, and nothing here should add one: it would be refused by the
+ * policy and the page would render blank, which no server-side test can see.
  */
 export const DOCS_PAGE = `<!doctype html>
 <html lang="en">
@@ -50,9 +35,7 @@ export const DOCS_PAGE = `<!doctype html>
   <body>
     <div id="app"></div>
     <script src="${SCALAR_SCRIPT_PATH}"></script>
-    <script>
-      Scalar.createApiReference('#app', ${JSON.stringify(CONFIG)})
-    </script>
+    <script src="${DOCS_BOOT_PATH}"></script>
   </body>
 </html>
 `;

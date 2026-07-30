@@ -996,6 +996,29 @@ describe("routes that do not exist", () => {
   });
 });
 
+describe("the plan fake owns its rows", () => {
+  /*
+   * A seed is an input. This repository mutates its rows - relabel, resize,
+   * visibility, a grant added - and holding the caller's objects would edit the
+   * fixture a test built, or a constant two tests share, and the contamination
+   * would show up as an unrelated suite failing depending on order.
+   */
+  test("a seed the caller still holds is not edited by the repository", async () => {
+    const seed = storedPlan({ label: "as seeded", grants: [] });
+    const plans = memoryPlans([seed], { "brisk-heron": GRANTEE });
+
+    await plans.relabel(PLAN_ID, OWNER, "renamed");
+    await plans.resize(PLAN_ID, OWNER, 4096);
+    await plans.grantByHandle(PLAN_ID, OWNER, "brisk-heron");
+
+    expect(seed.label).toBe("as seeded");
+    expect(seed.grants).toEqual([]);
+    // And the repository did take the writes, so this is isolation not inertia.
+    expect(plans.rows.get(PLAN_ID)?.label).toBe("renamed");
+    expect(plans.rows.get(PLAN_ID)?.grants).not.toEqual([]);
+  });
+});
+
 describe("the security headers the middleware pins", () => {
   /*
    * Spelled out rather than compared against `APP_CSP`. Asserting the header
@@ -1061,6 +1084,26 @@ describe("the security headers the middleware pins", () => {
     expect(
       directives.some((directive) => directive.startsWith("sandbox")),
     ).toBe(false);
+  });
+
+  test("no directive admits a wildcard source", async () => {
+    /*
+     * The presence checks above pass for `script-src 'self' *`, because the
+     * directive is still there - and that policy allows every origin on the
+     * internet to run script on the page that renders someone's plan. Asserted
+     * as an absence, so a source added later has to be a real origin.
+     */
+    const response = await buildApp({}).fetch("/dashboard");
+    const policy = response.headers.get("content-security-policy") ?? "";
+
+    const sources = policy
+      .split(";")
+      .flatMap((directive) => directive.trim().split(/\s+/).slice(1));
+
+    expect(sources.length).toBeGreaterThan(0);
+    expect(sources).not.toContain("*");
+    expect(sources.filter((source) => source.includes("*"))).toEqual([]);
+    expect(sources).not.toContain("'unsafe-eval'");
   });
 });
 
