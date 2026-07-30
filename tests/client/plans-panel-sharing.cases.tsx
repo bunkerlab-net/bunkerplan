@@ -351,10 +351,17 @@ export function registerSharingCases(): void {
 
         await click(view.byText("button", "Create code"));
 
-        // `#code=`, not `?code=`: a fragment is never sent to a server, so the
-        // link people paste keeps the code out of access logs and proxies.
+        /*
+         * `/s/{id}#code=`, and both halves matter.
+         *
+         * A fragment is never sent to a server, so the code in a pasted link
+         * reaches no access log and no proxy. And `/s/{id}` rather than the
+         * plan's own URL, because `/p/{id}` answers a reader who already has
+         * access with the uploaded document - untrusted HTML, which can read
+         * its own `location.hash`.
+         */
         expect(view.find(".snippet code").textContent).toBe(
-          `https://plans.test/p/${PLAN_ID}#code=abcd1234efgh5678`,
+          `https://plans.test/s/${PLAN_ID}#code=abcd1234efgh5678`,
         );
         expect(view.text()).toContain(
           "This is the only time the code is shown.",
@@ -376,7 +383,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Create code"));
 
         expect(view.find(".snippet code").textContent).toBe(
-          `https://plans.test/p/${PLAN_ID}#code=a%20b%26c%3Dd`,
+          `https://plans.test/s/${PLAN_ID}#code=a%20b%26c%3Dd`,
         );
       });
 
@@ -389,7 +396,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Copy"));
 
         expect(written).toEqual([
-          `https://plans.test/p/${PLAN_ID}#code=abcd1234efgh5678`,
+          `https://plans.test/s/${PLAN_ID}#code=abcd1234efgh5678`,
         ]);
         expect(view.maybe('.sharing [role="alert"]')).toBeNull();
       });

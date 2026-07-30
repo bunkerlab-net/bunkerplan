@@ -736,6 +736,114 @@ describe("redeeming a code", () => {
   });
 });
 
+/**
+ * The page a share link points at.
+ *
+ * A share code rides in the fragment so it reaches no access log, no proxy and
+ * no `Referer`. It cannot ride on `/p/{id}`, because that path answers a reader
+ * who already has access with the uploaded document - untrusted HTML, which can
+ * read its own `location.hash`. `/s/{id}` is the app's own page: it spends the
+ * code and then sends the reader to the plan.
+ *
+ * The fragment never reaches this route at all, which is the point. What these
+ * assert is that the route always answers with the app's own page - whatever the
+ * reader's authorisation - so there is no state in which a fragment could land
+ * on plan HTML instead.
+ */
+describe("the share-link relay", () => {
+  const CODE = "sHaReCoDe1234567";
+  const DOCUMENT = "<p>the plan itself</p>";
+
+  const shared = async (over: Record<string, unknown> = {}) =>
+    buildApp({
+      plans: memoryPlans([
+        storedPlan({ shareCodeHash: await hashShareCode(CODE) }),
+      ]),
+      storage: memoryStorage({ [PLAN_ID]: DOCUMENT }),
+      ...over,
+    });
+
+  const propsOf = (markup: string): Record<string, unknown> => {
+    const json = /id="page-props">([^<]*)</.exec(markup)?.[1] ?? "{}";
+    return JSON.parse(json) as Record<string, unknown>;
+  };
+
+  test("renders the app's own page, not the plan", async () => {
+    const app = await shared();
+
+    const response = await app.fetch(`/s/${PLAN_ID}`);
+    const markup = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(markup).toContain("This plan is private.");
+    // The document is what must not be here: it is the thing that could read a
+    // fragment this page is holding.
+    expect(markup).not.toContain(DOCUMENT);
+    expect(propsOf(markup)).toMatchObject({
+      name: "gate",
+      planId: PLAN_ID,
+      relay: true,
+      hasCode: true,
+    });
+  });
+
+  test("answers an authorised reader the same way", async () => {
+    // The case the fragment makes dangerous anywhere else. `/p/{id}` would hand
+    // this reader the document, so if the share link pointed there the code in
+    // their address bar would be sitting on untrusted HTML. This route does not
+    // consult authorisation at all, so there is no such branch to get wrong.
+    const app = await shared({ sessionUser: OWNER });
+
+    const response = await app.fetch(`/s/${PLAN_ID}`);
+    const markup = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(markup).not.toContain(DOCUMENT);
+    expect(propsOf(markup)).toMatchObject({ relay: true });
+  });
+
+  test("never puts the stored digest on the page, only whether there is one", async () => {
+    const hash = await hashShareCode(CODE);
+    const app = await shared();
+
+    const markup = await (await app.fetch(`/s/${PLAN_ID}`)).text();
+
+    // The digest is what would let a holder forge this plan's unlock cookie.
+    expect(markup).not.toContain(hash);
+    expect(propsOf(markup)).toMatchObject({ hasCode: true });
+  });
+
+  test("says there is no code when the plan has none", async () => {
+    const app = buildApp({
+      plans: memoryPlans([storedPlan({ shareCodeHash: null })]),
+      storage: memoryStorage({ [PLAN_ID]: DOCUMENT }),
+    });
+
+    const markup = await (await app.fetch(`/s/${PLAN_ID}`)).text();
+
+    expect(propsOf(markup)).toMatchObject({ hasCode: false, relay: true });
+  });
+
+  test("is not cached: it is one step in redeeming a credential", async () => {
+    const app = await shared();
+
+    const response = await app.fetch(`/s/${PLAN_ID}`);
+
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("an unknown id renders the site's own 404, as the plan path does", async () => {
+    const app = buildApp({ plans: memoryPlans([]) });
+
+    const response = await app.fetch("/s/zzzzzzzzzzzzzzzz");
+
+    // The same disclosure as `/p/{unknown}`: this route reveals that a plan
+    // exists and nothing else, which that path already does.
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain("Nothing lives at this URL");
+  });
+});
+
 describe("auth and docs", () => {
   test("everything under the auth prefix is handed to Better Auth", async () => {
     const seen: string[] = [];
@@ -851,6 +959,37 @@ describe("the security headers the middleware pins", () => {
         expect(directives).toContain(directive);
       }
     }
+  });
+
+  test("the share-link relay gets the app policy, because it has to hydrate", async () => {
+    /*
+     * `/s/{id}` is one character away from the plan prefix and does the opposite
+     * job: it is the app's own page, and it redeems a share code from the URL
+     * fragment in the browser. Under the plan sandbox it could run no script at
+     * all, so every share link would quietly stop working while still rendering
+     * something that looks right.
+     *
+     * Asserted on the headers rather than the body, because that is the failure
+     * a body test cannot see - widening `PLAN_PATH_PREFIX` to `/` or `/s` would
+     * leave this markup unchanged.
+     */
+    const app = buildApp({
+      plans: memoryPlans([storedPlan({ shareCodeHash: null })]),
+    });
+
+    const response = await app.fetch(`/s/${PLAN_ID}`);
+    const directives = (response.headers.get("content-security-policy") ?? "")
+      .split(";")
+      .map((directive) => directive.trim());
+
+    for (const directive of REQUIRED_DIRECTIVES) {
+      expect(directives).toContain(directive);
+    }
+    // The sandbox is what the plan path adds and this path must not have: it is
+    // an opaque origin with no scripting.
+    expect(
+      directives.some((directive) => directive.startsWith("sandbox")),
+    ).toBe(false);
   });
 });
 

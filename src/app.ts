@@ -240,6 +240,51 @@ function registerAuthAndDocs(app: Hono, getServices: GetServices): void {
   );
 }
 
+/**
+ * Where a share link points, and the reason it is not `/p/{planId}`.
+ *
+ * The code travels in the fragment so it reaches no access log, no proxy and no
+ * `Referer` - but `/p/{planId}` answers an authorised reader with the uploaded
+ * document, and that document is untrusted HTML which can read its own
+ * `location.hash`. This page is the app's own, under the app policy because the
+ * prefix is not `/p/`: it spends the code and then sends the reader to the plan,
+ * so the credential is never handed to a document the reader did not write.
+ *
+ * That policy is load-bearing rather than incidental - the page has to hydrate
+ * to redeem anything - so tests/app-routes.test.ts pins the headers this path
+ * gets, not just its body.
+ *
+ * Deliberately not gated on access. It reveals exactly what `/p/{planId}`
+ * already does - a real id renders a page, an unknown one renders the 404 - and
+ * it cannot consult the fragment to decide anything, because the server never
+ * receives it. That is also what makes it safe: there is no authorisation branch
+ * in which a fragment could land on plan HTML instead.
+ */
+function registerShareRelay(app: Hono, deps: AppDeps): void {
+  const { getServices, assets } = deps;
+
+  app.get("/s/:planId", async (c) => {
+    const { config, db } = await getServices();
+    const planId = c.req.param("planId");
+    const row = await db.plans.findAccess(planId);
+    if (row === null) return c.html(renderNotFound(assets), 404);
+
+    // Only whether a code exists. `shareCodeHash` is what would let a holder
+    // forge this plan's unlock cookie, so it never reaches a response body.
+    return c.html(
+      renderPlanGate(
+        assets,
+        planId,
+        row.shareCodeHash !== null,
+        config.publicBaseUrl,
+        { relay: true },
+      ),
+      200,
+      { "cache-control": "no-store" },
+    );
+  });
+}
+
 /** Published plans, the rendered pages, and the self-hosting probe. */
 function registerSite(app: Hono, deps: AppDeps): void {
   const { getServices, runtime, assets } = deps;
@@ -330,6 +375,7 @@ export function createApp(deps: AppDeps): Hono {
   registerPlanItem(app, deps.getServices);
   registerPlanSharing(app, deps.getServices);
   registerPlanUnlock(app, deps.getServices);
+  registerShareRelay(app, deps);
   registerSite(app, deps);
 
   return app;

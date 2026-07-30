@@ -33,6 +33,20 @@ export interface GateProps extends BasePageProps {
   name: "gate";
   planId: string;
   hasCode: boolean;
+  /**
+   * True on `/s/{id}`, the trusted page a share link points at.
+   *
+   * The share code travels in the fragment, and `/p/{id}` serves the uploaded
+   * document itself - untrusted HTML, which can read its own `location.hash`.
+   * So the link lands here instead: this page is the app's own, spends the code,
+   * and only then sends the reader to the plan. A reader who arrives with no
+   * code in the fragment is forwarded straight there, because there is nothing
+   * for this page to do and `/p/{id}` is what decides whether they may read it.
+   *
+   * False on `/p/{id}`, where the same component is the refusal page: there,
+   * forwarding on an empty fragment would reload the page it is already on.
+   */
+  relay: boolean;
 }
 
 export type PageProps = LandingProps | DashboardProps | GateProps;

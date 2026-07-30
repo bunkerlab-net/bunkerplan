@@ -43,12 +43,15 @@ useAuthStub();
 
 const PLAN_ID = "abc123";
 
-const gate = (over: { hasCode?: boolean } = {}) => (
+const gate = (over: { hasCode?: boolean; relay?: boolean } = {}) => (
   <PlanGate
     name="gate"
     planId={PLAN_ID}
     hasCode={over.hasCode ?? true}
-    path={`/p/${PLAN_ID}`}
+    // The refusal page unless a test says otherwise; `/s/{id}` is the relay a
+    // share link lands on, and it is covered on its own below.
+    path={over.relay === true ? `/s/${PLAN_ID}` : `/p/${PLAN_ID}`}
+    relay={over.relay ?? false}
     origin="https://plans.test"
   />
 );
@@ -139,7 +142,7 @@ describe("unlocking with a code", () => {
     standOn("/");
   });
 
-  test("a code is traded for the cookie and the page reloaded bare", async () => {
+  test("a code is traded for the cookie and the plan loaded bare", async () => {
     // The URL someone is handed: the code is in the query, and the fragment
     // may mean something to the document.
     standOn(`/p/${PLAN_ID}?code=the-secret#section-3`);
@@ -153,23 +156,18 @@ describe("unlocking with a code", () => {
       PLAN_ID,
       "abcd1234",
     ]);
-    // Replaced, not assigned, and stripped of the query: reloading the URL as
-    // it stands would keep the code in history and put it in the `Referer` of
-    // everything the plan goes on to fetch. The hash is not a secret and is
-    // kept.
-    expect(replacements).toEqual([`/p/${PLAN_ID}#section-3`]);
-    expect(navigations).toEqual([]);
-  });
-
-  test("a plan URL with no query or hash reloads as itself", async () => {
-    standOn(`/p/${PLAN_ID}`);
-    api.unlockPlan = async () => undefined;
-    const view = await mountAsync(gate());
-
-    await type(view.find<HTMLInputElement>('input[type="text"]'), "abcd1234");
-    await submitForm(view.find("form"));
-
+    /*
+     * Replaced rather than assigned, and built from the plan id rather than the
+     * path this page was served at: the same component renders at `/s/{id}`,
+     * where reloading the current path would come straight back here.
+     *
+     * Nothing of the old URL survives. The query held the code and reloading it
+     * would keep that in history and in the `Referer` of everything the plan
+     * fetches; the fragment goes too, because by here it cannot hold anything
+     * this page did not already take out.
+     */
     expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+    expect(navigations).toEqual([]);
   });
 
   test("a pasted code is trimmed, because the server compares a digest", async () => {
@@ -546,5 +544,86 @@ describe("a link that brought its own code", () => {
     expect(countOf("unlockPlan")).toBe(0);
     expect(view.maybe('[role="alert"]')).toBeNull();
     expect(view.find<HTMLInputElement>('input[type="text"]').value).toBe("");
+  });
+});
+
+/**
+ * The relay at `/s/{id}`, which is where a share link actually points.
+ *
+ * Same component, rendered at the app's own path rather than the plan's, so the
+ * code in the fragment is never held by a page that also serves untrusted HTML.
+ * Its extra job is to get out of the way: whenever there is nothing to spend it
+ * hands the reader to `/p/{id}`, which is what decides whether they may read it.
+ */
+describe("the share-link relay", () => {
+  const standOn = (url: string): void => {
+    history.replaceState(null, "", url);
+  };
+
+  afterEach(() => {
+    standOn("/");
+  });
+
+  test("spends the fragment code and sends the reader to the plan", async () => {
+    standOn(`/s/${PLAN_ID}#code=abcd1234`);
+    api.unlockPlan = async () => undefined;
+
+    await mountAsync(gate({ relay: true }));
+
+    expect(calls.filter((c) => c.method === "unlockPlan")[0]?.args).toEqual([
+      PLAN_ID,
+      "abcd1234",
+    ]);
+    // To the plan, not back to `/s/{id}` - and the code is gone from the URL
+    // before the navigation, so the document never sees it.
+    expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+    expect(window.location.hash).toBe("");
+  });
+
+  test("forwards a bare visit rather than claiming the plan is private", async () => {
+    // No code to spend, so nothing for this page to do. The reader may hold
+    // access already - a session, a grant, a cookie from an earlier redemption -
+    // and `/p/{id}` is what knows.
+    standOn(`/s/${PLAN_ID}`);
+
+    await mountAsync(gate({ relay: true }));
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+  });
+
+  test("strips a revoked code and forwards rather than dead-ending", async () => {
+    /*
+     * A link outlives the sharing it was made under: the owner can remove the
+     * code and leave the plan private. The fragment then cannot be spent, and
+     * leaving the reader here would show them "this plan is private" with no box
+     * to type into and no way onward - while they may hold access anyway.
+     */
+    standOn(`/s/${PLAN_ID}#code=revoked1234`);
+
+    await mountAsync(gate({ relay: true, hasCode: false }));
+
+    expect(countOf("unlockPlan")).toBe(0);
+    // Stripped even though it bought nothing: a dead code is still a secret
+    // that was.
+    expect(window.location.hash).toBe("");
+    expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+  });
+
+  test("a refused code keeps the reader here, with the box and the reason", async () => {
+    standOn(`/s/${PLAN_ID}#code=wrongcode123`);
+    api.unlockPlan = async () => {
+      throw new Error("wrong code");
+    };
+
+    const view = await mountAsync(gate({ relay: true }));
+
+    // Not forwarded: there is something to do here, which is try again.
+    expect(replacements).toEqual([]);
+    expect(view.find('[role="alert"]').textContent).toBe("wrong code");
+    expect(view.find<HTMLInputElement>('input[type="text"]').value).toBe(
+      "wrongcode123",
+    );
+    expect(window.location.hash).toBe("");
   });
 });

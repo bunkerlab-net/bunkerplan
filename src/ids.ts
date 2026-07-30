@@ -18,14 +18,18 @@ import { customAlphabet } from "nanoid";
 const planAlphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
 
 /**
- * Plans are served from `/p/{id}` (src/routes/p.$planId.tsx), never from the
- * root, so no reserved-word list is needed: an id cannot collide with an app
- * route, and a route added later cannot shadow an already-published plan.
+ * Plans are served from `/p/{id}`, never from the root, so no reserved-word list
+ * is needed: an id cannot collide with an app route, and a route added later
+ * cannot shadow an already-published plan.
  *
  * That holds only while `/p/` stays exclusively the plan namespace. A static
- * route declared under it - `/p/new` - would out-rank `/p/$planId` and shadow
- * that id, which is the very failure this move exists to remove. Put app
- * routes anywhere else.
+ * route declared under it - `/p/new` - would out-rank `/p/{planId}` and shadow
+ * that id, which is the very failure this move exists to remove. Put app routes
+ * anywhere else.
+ *
+ * `/s/{id}` is the second such prefix, and carries the same rule: it is the
+ * share-link relay, keyed by the same id, and a static route under it would
+ * shadow one plan's share link. See src/app.ts.
  */
 export const newPlanId = customAlphabet(planAlphabet);
 

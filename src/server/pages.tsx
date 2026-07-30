@@ -142,9 +142,23 @@ export function renderPlanGate(
   planId: string,
   hasCode: boolean,
   origin: string,
+  /**
+   * The share-link relay at `/s/{planId}`, which spends a fragment code and
+   * then sends the reader to the plan.
+   *
+   * Defaulted off, so the bare call is the refusal page this has always
+   * rendered: `/p/{planId}` at 401, where the reader types a code instead.
+   */
+  { relay = false }: { relay?: boolean } = {},
 ): string {
-  const path = `/p/${planId}`;
-  const page: PageProps = { name: "gate", path, origin, planId, hasCode };
+  const page: PageProps = {
+    name: "gate",
+    path: `${relay ? "/s" : "/p"}/${planId}`,
+    origin,
+    planId,
+    hasCode,
+    relay,
+  };
   return document(
     <Document assets={assets} page={page}>
       <PlanGate {...page} />

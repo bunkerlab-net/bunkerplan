@@ -41,8 +41,8 @@ const HTTP_METHODS: Record<string, true> = {
  *
  * `/api/auth/*` belongs to Better Auth: its surface follows the plugin set,
  * and hand-describing it here is the drift the document exists to avoid. The
- * other two are the documentation itself, and the last three are pages rather
- * than API endpoints.
+ * other two are the documentation itself, and the rest are pages rather than
+ * API endpoints.
  */
 const UNDOCUMENTED: Record<string, true> = {
   // The security-header middleware, which is not an endpoint.
@@ -52,6 +52,14 @@ const UNDOCUMENTED: Record<string, true> = {
   "/api/openapi.json": true,
   "/": true,
   "/dashboard": true,
+  /*
+   * The share-link relay: a page, and one an API client never calls. It exists
+   * because a share code rides in a fragment and `/p/{id}` answers an
+   * authorised reader with untrusted HTML that could read its own
+   * `location.hash`. What a client needs to know is how to compose the link,
+   * and that is on `PUT /api/plans` where the code is handed out.
+   */
+  "/s/{id}": true,
 };
 
 /** Hono's `/api/plans/:id` is the document's `/api/plans/{id}`. */
@@ -183,6 +191,7 @@ describe("coverage of the routes the app actually serves", () => {
       "/dashboard",
       "/healthz",
       "/p/{id}",
+      "/s/{id}",
     ]);
   });
 

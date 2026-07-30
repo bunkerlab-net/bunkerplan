@@ -57,16 +57,26 @@ Known and accepted, so please do not report these as new:
   holding its URL, by design. A private one is not: it still needs its share
   code, the cookie a redemption left, an API key whose owner may read it, or a
   session for the owner or a granted account.
-- **`?code=` is visible wherever a URL is, and still exists.** The share link
-  the dashboard hands out carries the code as `#code=`, and a fragment is never
-  sent to a server: it reaches no access log, no proxy, and no `Referer`. The
-  gate page redeems it and strips it from the address bar before it can fail, so
-  a wrong code does not leave it in history either. The `?code=` parameter is
-  kept because a reader without a DOM cannot send a fragment, and one used that
-  way does reach the deployment's logs and that browser's history. Rotating the
-  code (`POST /api/plans/{id}/share-code`) is the remedy: the cookie is signed
-  over a digest of the code current when it was minted, so rotation invalidates
-  every cookie issued under the old one.
+- **A share code in a URL is visible wherever that URL is, so the link people
+  paste does not put it in one a server sees.** The dashboard hands out
+  `/s/{id}#code=…`. A fragment is never sent to a server, so it reaches no
+  access log, no proxy and no `Referer`; `/s/{id}` is the app's own page, under
+  the app policy, and it strips the code from the address bar before it tries to
+  redeem it - so a wrong code or a dropped connection does not leave it in
+  history either. It is deliberately not `/p/{id}#code=`: that path answers a
+  reader who already holds access with the uploaded document, and a plan can read
+  its own `location.hash`, so the credential would be handed to HTML the reader
+  did not write.
+
+  The `?code=` parameter on `/p/{id}` is kept, because a reader without a DOM
+  cannot send a fragment at all. A link used that way does reach the
+  deployment's own logs and that browser's history, and a plan served in the
+  same request can read `location.search`. Prefer `POST /api/plans/{id}/unlock`,
+  which takes the code in a JSON body and hands back the cookie.
+
+  Rotating the code (`POST /api/plans/{id}/share-code`) is the remedy in every
+  case: the cookie is signed over a digest of the code current when it was
+  minted, so rotation invalidates every cookie issued under the old one.
 
 ## Supported versions
 

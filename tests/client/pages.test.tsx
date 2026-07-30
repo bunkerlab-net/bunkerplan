@@ -327,7 +327,14 @@ describe("the 404", () => {
 describe("Page routing", () => {
   test("dispatches on the name the server serialised", async () => {
     const view = await mountAsync(
-      <Page name="gate" path="/p/abc" origin={ORIGIN} planId="abc" hasCode />,
+      <Page
+        name="gate"
+        path="/p/abc"
+        origin={ORIGIN}
+        planId="abc"
+        hasCode
+        relay={false}
+      />,
     );
 
     expect(view.find(".page-title").textContent).toBe("This plan is private.");
@@ -342,6 +349,7 @@ describe("Page routing", () => {
         origin={ORIGIN}
         planId="abc"
         hasCode={false}
+        relay={false}
       />,
     );
 

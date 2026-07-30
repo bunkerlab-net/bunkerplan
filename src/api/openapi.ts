@@ -224,12 +224,17 @@ function createPlanOperation(
       "`?visibility=code` stores the plan private and mints a share code, " +
       `returned once as \`code\` in the response body (${codeFormat}) ` +
       "and never readable afterwards.\n\n" +
-      "For a link a person will open, append `#code=` to `url`. A fragment is " +
-      "never sent to a server, so the code stays out of access logs and out " +
-      "of every `Referer`, and the gate page spends it on arrival and strips " +
-      "it from the address bar. For a reader without a browser, append " +
-      "`?code=` instead - a fragment cannot be sent by one - or redeem the " +
-      "code through `POST /api/plans/{id}/unlock` and keep the cookie.",
+      "For a link a person will open, put the code in the fragment of `/s/" +
+      "{id}` - the same id as in `url` - giving " +
+      "`https://host/s/{id}#code=CODE`. A fragment is never sent to a server, " +
+      "so the code stays out of access logs, out of proxies and out of every " +
+      "`Referer`; `/s/{id}` is this app's own page, and it spends the code and " +
+      "then sends the reader to the plan. It is deliberately not `url`: " +
+      "`/p/{id}` answers a reader who already has access with the uploaded " +
+      "document, and that document can read its own `location.hash`.\n\n" +
+      "For a reader without a browser, append `?code=` to `url` instead - a " +
+      "fragment cannot be sent by one - or redeem the code through " +
+      "`POST /api/plans/{id}/unlock` and keep the cookie.",
     parameters: [LABEL_QUERY_PARAM, VISIBILITY_QUERY_PARAM, GRANTS_QUERY_PARAM],
     requestBody: UPLOAD_BODY,
     responses: {

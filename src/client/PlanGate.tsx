@@ -72,22 +72,47 @@ function codeInFragment(hash: string): string | null {
  * Once, on mount. `redeem` latches, so a re-render cannot spend it twice.
  */
 function useLinkCode(
+  planId: string,
   hasCode: boolean,
+  relay: boolean,
   onCode: (code: string) => void,
   redeem: (code: string) => void,
 ): void {
   useEffect(() => {
     const fromLink = codeInFragment(window.location.hash);
-    if (fromLink === null) return;
 
-    onCode(fromLink);
-    window.history.replaceState(null, "", window.location.pathname);
-    if (hasCode) redeem(fromLink);
+    if (fromLink !== null) {
+      onCode(fromLink);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+
+    // Spent only when there is a code to spend and a code on the plan to match
+    // it. `redeem` navigates on success, so nothing below runs in that case.
+    if (fromLink !== null && hasCode) {
+      redeem(fromLink);
+      return;
+    }
+
+    /*
+     * Nothing was spent, and on the relay that means there is nothing for this
+     * page to do: hand the reader to the plan, which is what decides whether
+     * they may read it. Either they can - a session, a grant, a cookie from an
+     * earlier redemption - or they get its own 401 gate.
+     *
+     * Both empty-handed cases land here, and the second is the one worth
+     * naming: a link whose code was revoked arrives with a fragment this page
+     * cannot use, and leaving the reader on `/s/{id}` would show them "this
+     * plan is private" with no box to type into and no way on, while they may
+     * hold access already.
+     *
+     * On `/p/{id}` this page IS that decision, so forwarding would reload it.
+     */
+    if (relay) window.location.replace(`/p/${planId}`);
   }, []);
 }
 
 /** The code box, and the unlock it performs. */
-function useUnlock(planId: string, hasCode: boolean) {
+function useUnlock(planId: string, hasCode: boolean, relay: boolean) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -135,17 +160,14 @@ function useUnlock(planId: string, hasCode: boolean) {
         // response set the cookie, so the plan is now an ordinary request - and
         // it must be one, because the plan renders under its own sandboxed CSP.
         //
-        // To the bare path, and replacing this entry rather than adding one: a
-        // `?code=` got here in the address bar, and reloading would keep it in
-        // history and in the `Referer` of everything the document goes on to
-        // load. The cookie is what grants access from here. Taken from
-        // `pathname` rather than rebuilt from `planId`, so there is no string to
-        // get wrong; the fragment is kept, because by this point it holds no
-        // code - the effect below removed that before spending it - and what is
-        // left is not secret and may mean something to the document.
-        window.location.replace(
-          window.location.pathname + window.location.hash,
-        );
+        // To the plan, replacing this entry rather than adding one. Built from
+        // `planId` rather than taken from `pathname`, because this component is
+        // rendered at two paths and only one of them is the plan: from `/s/{id}`
+        // reloading where we are would come straight back here. Any fragment is
+        // dropped, and by here it holds no code anyway - `useLinkCode` took that
+        // out before spending it - so nothing secret was going to travel either
+        // way.
+        window.location.replace(`/p/${planId}`);
       } catch (cause) {
         setError(messageOf(cause, "could not unlock the plan"));
         inFlight.current = false;
@@ -159,22 +181,28 @@ function useUnlock(planId: string, hasCode: boolean) {
     redeem(trimmed);
   };
 
-  useLinkCode(hasCode, setCode, redeem);
+  useLinkCode(planId, hasCode, relay, setCode, redeem);
 
   return { code, setCode, submittable: trimmed !== "", error, busy, submit };
 }
 
 /**
- * What a visitor sees when a plan exists but they are not allowed it yet.
+ * What a visitor sees when a plan exists but they are not allowed it yet, and
+ * the page a share link lands on.
  *
- * Served at 401, not 200, and that is load-bearing: the plan CSP is pinned
- * onto `/p/*` responses at 200 and 304, and under it this page could neither
- * sign in nor submit a code. See src/http/security-headers.ts.
+ * On `/p/{planId}` it is served at 401, not 200, and that is load-bearing: the
+ * plan CSP is pinned onto `/p/*` responses at 200 and 304, and under it this
+ * page could neither sign in nor submit a code. See
+ * src/http/security-headers.ts.
+ *
+ * On `/s/{planId}` it is the trusted page the share link points at, under the
+ * app policy because that prefix is not `/p/`. `relay` is what tells the two
+ * apart; see `GateProps`.
  *
  * There are only two ways through, so those are the only two controls: a share
  * code, and the account that owns or was granted the plan.
  */
-export function PlanGate({ planId, hasCode, path }: GateProps) {
+export function PlanGate({ planId, hasCode, path, relay }: GateProps) {
   const { data: session, isPending } = useSession();
   // Back to the plan on success, not the dashboard - the plan is what they
   // came for.
@@ -183,6 +211,7 @@ export function PlanGate({ planId, hasCode, path }: GateProps) {
   const { code, setCode, submittable, error, busy, submit } = useUnlock(
     planId,
     hasCode,
+    relay,
   );
 
   return (

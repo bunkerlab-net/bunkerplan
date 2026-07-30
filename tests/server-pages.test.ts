@@ -186,6 +186,7 @@ describe("the plan gate", () => {
       hasCode: true,
       path: "/p/abc123",
       origin: ORIGIN,
+      relay: false,
     });
     expect(markup).toContain("Have a code?");
   });
@@ -253,6 +254,25 @@ describe("the plan gate", () => {
       hasCode: true,
       path: "/p/abc123",
       origin: ORIGIN,
+      relay: false,
+    });
+  });
+
+  test("the relay renders the same page at its own path", () => {
+    // `/s/{id}` is where a share link points, because a fragment code must not
+    // land on `/p/{id}` - that path answers an authorised reader with the
+    // uploaded document, which can read its own `location.hash`.
+    const markup = renderPlanGate(ASSETS, "abc123", true, ORIGIN, {
+      relay: true,
+    });
+
+    expect(pageProps(markup)).toEqual({
+      name: "gate",
+      planId: "abc123",
+      hasCode: true,
+      path: "/s/abc123",
+      origin: ORIGIN,
+      relay: true,
     });
   });
 });

@@ -259,7 +259,7 @@ function ShareCodeBlock(
         )}
       </div>
       {code !== null && props.hasShareCode && (
-        <ShareLink url={plan.url} code={code} />
+        <ShareLink url={plan.url} id={plan.id} code={code} />
       )}
       {code === null && props.hasShareCode && (
         <p className="muted">
@@ -276,17 +276,38 @@ function ShareCodeBlock(
  * for - the same shape `ApiKeysPanel`'s `Reveal` uses for the other secret
  * this app shows exactly once.
  */
-function ShareLink({ url, code }: { url: string; code: string }) {
-  // A fragment, not `?code=`: a fragment is never sent to a server, so the code
-  // in the link people paste into chat reaches no access log and no proxy on
-  // the way. The gate page spends it on arrival. `?code=` remains for a reader
-  // without a DOM, which cannot send a fragment - SECURITY.md records why the
-  // two exist.
-  //
-  // Encoded even though the alphabet is base62 and needs none: the link is
-  // built here, and a future alphabet change must not silently start
-  // producing broken URLs.
-  const link = `${url}#code=${encodeURIComponent(code)}`;
+function ShareLink({
+  url,
+  id,
+  code,
+}: {
+  url: string;
+  id: string;
+  code: string;
+}) {
+  /*
+   * `/s/{id}#code=`, and both halves of that are deliberate.
+   *
+   * The fragment, because a fragment is never sent to a server: the code in the
+   * link people paste into chat reaches no access log, no proxy and no
+   * `Referer`. And `/s/{id}` rather than the plan's own URL, because `/p/{id}`
+   * answers a reader who already has access with the uploaded document - and
+   * untrusted HTML can read its own `location.hash`. `/s/{id}` is the app's own
+   * page: it spends the code, then sends the reader to the plan.
+   *
+   * `?code=` on `/p/{id}` remains for a reader without a DOM, which cannot send
+   * a fragment at all. SECURITY.md records why both exist.
+   *
+   * Rebuilt through `URL` rather than by patching the string: the plan URL's
+   * origin is the configured one, and that is the part worth keeping.
+   *
+   * Encoded even though the alphabet is base62 and needs none: the link is
+   * built here, and a future alphabet change must not silently start producing
+   * broken URLs.
+   */
+  const relay = new URL(url);
+  relay.pathname = `/s/${id}`;
+  const link = `${relay.toString()}#code=${encodeURIComponent(code)}`;
   const [copyFailed, setCopyFailed] = useState(false);
 
   // `writeText` rejects on a denied permission or an insecure context, and
