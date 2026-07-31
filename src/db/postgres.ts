@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
+import type { Logger } from "../log.ts";
 import type { Db } from "../services/types.ts";
 import { createPgAccountClosingRepo } from "./account-closing.pg.ts";
 import { pgSchema } from "./pg-shared.ts";
@@ -122,7 +123,10 @@ async function probeOnce(pool: pg.Pool, signal?: AbortSignal): Promise<void> {
   }
 }
 
-export function createPostgresDb(connectionString: string): Db {
+export function createPostgresDb(
+  connectionString: string,
+  logger: Pick<Logger, "warn">,
+): Db {
   const pool = new pg.Pool({
     connectionString,
     max: POOL_MAX,
@@ -130,6 +134,20 @@ export function createPostgresDb(connectionString: string): Db {
     statement_timeout: STATEMENT_TIMEOUT_MS,
     query_timeout: STATEMENT_TIMEOUT_MS,
   });
+
+  /*
+   * Required, not diagnostic. `pg` emits this when a client sitting idle in
+   * the pool fails - Postgres restarting, a network drop, an idle timeout on a
+   * proxy in between - and `error` is the one event name Node throws for when
+   * nothing is listening. Without this, a database blip takes the process down
+   * rather than the connection: the pool discards the client and the next
+   * request opens another, which is a recovery nobody is present for if the
+   * default handler already ran.
+   */
+  pool.on("error", (cause) => {
+    logger.warn({ err: cause }, "idle postgres client failed");
+  });
+
   const db = drizzle(pool, { schema: pgSchema });
   return {
     adapter: db,

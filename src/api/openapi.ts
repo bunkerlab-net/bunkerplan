@@ -542,7 +542,7 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
         413: "The body is larger than a code could make it.",
       }),
       // Spelled out rather than through `failures`, which documents the
-      // problem+json every *returned* refusal carries. This one is thrown -
+      // JSON `ErrorBody` every *returned* refusal carries. This one is thrown -
       // the route has no handler of its own and the app installs no
       // `onError` - so what reaches the client is Hono's default, which is
       // plain text. Documenting it as JSON would be a wire contract nothing

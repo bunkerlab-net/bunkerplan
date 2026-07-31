@@ -211,18 +211,6 @@ describe("the plan gate", () => {
     expect(markup).not.toContain("Have a code?");
   });
 
-  test("the relay renders at its own path", () => {
-    // The one option with a default, and the only thing that moves `path`.
-    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, {
-      hasCode: true,
-      relay: true,
-    });
-
-    expect(pageProps(markup)).toEqual(
-      gateProps({ hasCode: true, relay: true }),
-    );
-  });
-
   test("is not indexed - it names a private plan", () => {
     const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true });
 
@@ -292,14 +280,9 @@ describe("the plan gate", () => {
       relay: true,
     });
 
-    expect(pageProps(markup)).toEqual({
-      name: "gate",
-      planId: "abc123",
-      hasCode: true,
-      path: "/s/abc123",
-      origin: ORIGIN,
-      relay: true,
-    });
+    expect(pageProps(markup)).toEqual(
+      gateProps({ hasCode: true, relay: true }),
+    );
     // The same page, so the same refusal to be indexed - and this one is
     // reached by a URL people paste, which is exactly the one a crawler is
     // most likely to find. Social tags here would put a plan id in a preview.

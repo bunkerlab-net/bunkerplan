@@ -29,6 +29,9 @@ export function getServices(): Promise<Services> {
 
 async function initialise(): Promise<Services> {
   const config = loadConfig(process.env);
+  // Before the drivers, because the Postgres pool needs somewhere to report an
+  // idle client failing - see src/db/postgres.ts.
+  const logger = createLogger(config);
 
   let db: Db;
   if (config.dbDriver === "postgres") {
@@ -36,7 +39,7 @@ async function initialise(): Promise<Services> {
     // loadConfig already rejects a missing DATABASE_URL for this driver; the
     // compiler cannot see that cross-field invariant.
     const connectionString = config.databaseUrl ?? "";
-    db = createPostgresDb(connectionString);
+    db = createPostgresDb(connectionString, logger);
   } else if (config.dbDriver === "sqlite") {
     const { createBunSqliteDb } = await import("../db/bun-sqlite.ts");
     db = createBunSqliteDb(config.sqlitePath);
@@ -68,7 +71,6 @@ async function initialise(): Promise<Services> {
     );
   }
 
-  const logger = createLogger(config);
   const auth = createAuth({ config, db, kv, storage, logger });
   return { config, auth, logger, storage, kv, db };
 }

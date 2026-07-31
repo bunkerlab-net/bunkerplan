@@ -295,9 +295,12 @@ describe.each(tables)("%s", (name, pg, sqlite) => {
     "%s marks every column that cannot be null",
     (dialect) => {
       const shape = shapeFor(dialect);
+      // Sorted: the order here is whatever order the column record happens to
+      // enumerate in, which is not part of the schema's meaning. The set is.
       const nullable = shape.columns
         .filter((column) => !column.notNull && !column.primary)
-        .map((column) => column.name);
+        .map((column) => column.name)
+        .sort();
 
       // `label` and `share_code_hash` are the only optional values in the
       // application tables; everything else is required at write time.

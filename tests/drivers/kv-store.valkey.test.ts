@@ -16,7 +16,7 @@ describeKvStore("Valkey", valkeyKv, { skip });
  * buy four waits or share one through a hook.
  *
  * The budget is its own, and deliberately not `FIXTURE_TIMEOUT_MS`: this waits
- * 4s against 3s ttls and runs a handful of commands, so 30s is already far
+ * 3s against 2s ttls and runs a handful of commands, so 30s is already far
  * past slow and a hang shows up while someone is still watching. A container
  * starting cold is what the two-minute budget elsewhere is for; nothing here
  * starts one.
@@ -28,26 +28,26 @@ test.skipIf(skip)(
     const key = (name: string) => `${unique}:expiry:${name}`;
 
     try {
-      await kv.set(key("elapses"), "transient", 3);
       await kv.set(key("permanent"), "kept");
-      await kv.set(key("alongside"), "dropped", 3);
 
       // Better Auth refreshes a session by writing the record again. A rewrite
       // that dropped the ttl would stop sessions expiring; one that kept the
       // original would kill a session the user just renewed.
-      await kv.set(key("extended"), "v1", 3);
+      await kv.set(key("extended"), "v1", 2);
       await kv.set(key("extended"), "v2", 60);
-      await kv.set(key("unexpired"), "v1", 3);
+      await kv.set(key("unexpired"), "v1", 2);
       await kv.set(key("unexpired"), "v2");
 
-      // Readable now, so what follows is about the ttl firing rather than
-      // about a write that never landed. Three seconds rather than one is
-      // what buys this: nine round trips have to finish inside the ttl or the
-      // key is already gone here, and the assertion blames the wrong thing.
+      // The two keys the wait is actually about, written last and read
+      // immediately: everything above is out of the way, so the ttl only has
+      // to outlast two round trips rather than nine. Readable here means what
+      // follows is about expiry rather than a write that never landed.
+      await kv.set(key("elapses"), "transient", 2);
+      await kv.set(key("alongside"), "dropped", 2);
       expect(await kv.get(key("elapses"))).toBe("transient");
       expect(await kv.get(key("alongside"))).toBe("dropped");
 
-      await Bun.sleep(4_000);
+      await Bun.sleep(3_000);
 
       // The short-lived keys are gone, and only those.
       expect(await kv.get(key("elapses"))).toBeNull();

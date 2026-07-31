@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import realPg from "pg";
+import type { Logger } from "../src/log.ts";
 import { type Arm, armWhileFileRuns } from "./armed-mock.ts";
 
 /**
@@ -59,6 +60,9 @@ function stubClient() {
 
 const arm: Arm = { on: false };
 
+/** Every pool the driver has built, so a test can reach the last one. */
+const poolsMade: realPg.Pool[] = [];
+
 /**
  * A real pool that answers from the stub only while armed.
  *
@@ -73,6 +77,11 @@ const arm: Arm = { on: false };
  * on a promise nobody reads - the contract suite's included.
  */
 class PoolTrap extends realPg.Pool {
+  constructor(config?: realPg.PoolConfig) {
+    super(config);
+    poolsMade.push(this);
+  }
+
   override connect(): Promise<realPg.PoolClient>;
   override connect(
     callback: (
@@ -121,6 +130,15 @@ const { createPostgresDb } = await import("../src/db/postgres.ts");
 
 const DSN = "postgres://stub@127.0.0.1:1/stub";
 
+/** What the pool reports an idle client failure to; read by the test below. */
+const warnings: unknown[] = [];
+const logger: Pick<Logger, "warn"> = {
+  warn: (fields: unknown) => {
+    warnings.push(fields);
+  },
+};
+const pgDb = () => createPostgresDb(DSN, logger);
+
 /**
  * Waits for the probe to reach an observable point, without advancing a clock.
  *
@@ -145,7 +163,7 @@ const reaches = async (ready: () => boolean) => {
 
 describe("the Postgres health probe", () => {
   test("returns its connection to the pool on the answering path", async () => {
-    await createPostgresDb(DSN).probe(new AbortController().signal);
+    await pgDb().probe(new AbortController().signal);
 
     expect(asked).toEqual(["select 1"]);
     expect(released).toEqual([{ destroyed: false }]);
@@ -155,7 +173,7 @@ describe("the Postgres health probe", () => {
     // `Db.probe` declares it optional and nothing forces a caller to pass one.
     // Dereferencing it unguarded throws here, after a client is already
     // checked out - which is the leak this path exists to prevent.
-    await createPostgresDb(DSN).probe();
+    await pgDb().probe();
 
     expect(asked).toEqual(["select 1"]);
     expect(released).toEqual([{ destroyed: false }]);
@@ -168,7 +186,7 @@ describe("the Postgres health probe", () => {
     const refused = new Error("timeout exceeded when trying to connect");
     connect = () => Promise.reject(refused);
 
-    await expect(createPostgresDb(DSN).probe()).rejects.toBe(refused);
+    await expect(pgDb().probe()).rejects.toBe(refused);
 
     expect(asked).toEqual([]);
     expect(released).toEqual([]);
@@ -182,9 +200,7 @@ describe("the Postgres health probe", () => {
       throw new Error("terminating connection due to administrator command");
     };
 
-    await expect(createPostgresDb(DSN).probe()).rejects.toThrow(
-      "administrator command",
-    );
+    await expect(pgDb().probe()).rejects.toThrow("administrator command");
 
     expect(released).toEqual([{ destroyed: true }]);
   });
@@ -195,7 +211,7 @@ describe("the Postgres health probe", () => {
     // healthy server is bounded already; this is the case that is not.
     respond = () => new Promise(() => {});
     const controller = new AbortController();
-    const probing = createPostgresDb(DSN).probe(controller.signal);
+    const probing = pgDb().probe(controller.signal);
     // The query is in flight, which is the state the abort has to interrupt.
     await reaches(() => asked.length === 1);
 
@@ -224,7 +240,7 @@ describe("the Postgres health probe", () => {
         arrive = resolve;
       });
     const controller = new AbortController();
-    const probing = createPostgresDb(DSN).probe(controller.signal);
+    const probing = pgDb().probe(controller.signal);
     // Waiting on the client, which is the state this test is about.
     await reaches(() => connects === 1);
 
@@ -246,11 +262,34 @@ describe("the Postgres health probe", () => {
 
   test("does not take a connection at all when already abandoned", async () => {
     const reason = new Error("gave up before asking");
-    await expect(
-      createPostgresDb(DSN).probe(AbortSignal.abort(reason)),
-    ).rejects.toBe(reason);
+    await expect(pgDb().probe(AbortSignal.abort(reason))).rejects.toBe(reason);
 
     expect(connects).toBe(0);
     expect(released).toEqual([]);
+  });
+
+  test("an idle client failing is reported, not thrown at the process", async () => {
+    /*
+     * `error` is the one event name Node throws for when nothing is listening,
+     * and `pg` emits it when a client sitting idle in the pool dies - Postgres
+     * restarting, a proxy timing out. Unhandled, that ends the process; the
+     * pool would otherwise have discarded the client and carried on.
+     *
+     * Emitted directly because the alternative is killing a real backend from
+     * a unit test. What is under test is that a listener is attached at all.
+     */
+    warnings.length = 0;
+    const db = pgDb();
+    const pool = poolsMade.at(-1);
+    if (pool === undefined) throw new Error("no pool was constructed");
+
+    const failure = new Error(
+      "terminating connection due to administrator command",
+    );
+    expect(() => pool.emit("error", failure)).not.toThrow();
+
+    expect(warnings).toEqual([{ err: failure }]);
+    // Still usable: the pool discards the dead client, it does not close.
+    expect(typeof db.probe).toBe("function");
   });
 });

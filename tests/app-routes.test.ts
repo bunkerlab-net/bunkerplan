@@ -769,9 +769,9 @@ describe("redeeming a code", () => {
     );
 
     expect(response.status).toBe(500);
-    // Plain text, not the problem+json every returned refusal carries: this
-    // one is thrown and the app installs no `onError`, so Hono answers. The
-    // OpenAPI document says so, and this is what holds it to that.
+    // Plain text, not the JSON `ErrorBody` every returned refusal carries:
+    // this one is thrown and the app installs no `onError`, so Hono answers.
+    // The OpenAPI document says so, and this is what holds it to that.
     expect(response.headers.get("content-type")).toStartWith("text/plain");
     // The bucket that was charged, and the window that charged it - the only
     // pair it may go back to; see the note on `windowStart` in
@@ -1148,6 +1148,9 @@ describe("the security headers the middleware pins", () => {
     for (const path of ["/", "/api/plans", "/nope"]) {
       const response = await app.fetch(path);
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      // The one that stops the dashboard being framed for a clickjacked
+      // passkey ceremony - `DENY` exactly, since `SAMEORIGIN` would allow it.
+      expect(response.headers.get("x-frame-options")).toBe("DENY");
       // Split into whole directives rather than matched as substrings: a
       // policy reading `not-base-uri 'none'` contains the text and forbids
       // nothing.

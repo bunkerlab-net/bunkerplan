@@ -242,11 +242,13 @@ confusing 403 much later.
   Express middleware and cannot run on Workers.
 - **Account deletion is immediate and irreversible.** There is no email
   confirmation because addresses are synthetic (`…@passkey.invalid`) and cannot
-  receive mail. Three safeguards stand in: Better Auth's fresh-session
-  requirement (re-prompting for the passkey), a type-the-handle confirmation in
-  the UI, and the `x-expected-account` header, which the request must carry and
-  the server compares against the session that made it - see API below, and
-  expect a script that omits it to be refused.
+  receive mail. Three safeguards stand in: Better Auth's session-freshness
+  window, which is its default 24 hours here and re-prompts for the passkey
+  only once a session is older than that - not on every deletion; a
+  type-the-handle confirmation in the UI; and the `x-expected-account` header,
+  which the request must carry and the server compares against the session
+  that made it - see API below, and expect a script that omits it to be
+  refused.
 
 ## API
 

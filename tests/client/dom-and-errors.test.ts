@@ -167,6 +167,11 @@ describe("controlValue", () => {
   });
 
   test("an event with no target throws", () => {
+    // The class and the message, as the sibling above: a `TypeError` from
+    // somewhere else inside would satisfy the class alone.
     expect(() => controlValue(new Event("change"))).toThrow(TypeError);
+    expect(() => controlValue(new Event("change"))).toThrow(
+      "handler is not bound to a form control",
+    );
   });
 });
