@@ -250,7 +250,8 @@ describe.each(generated)("every %s auth table", (dialect) => {
  * foreign key catches.
  */
 describe.each(generated)("the %s relational graph", (dialect) => {
-  const schema = dialect === "pg" ? pgSchema : sqliteSchema;
+  // The same plain copies the table lookup uses, for the same reason.
+  const schema = dialect === "pg" ? pgTables : sqliteTables;
 
   /**
    * Invokes a `relations()` declaration the way drizzle does.

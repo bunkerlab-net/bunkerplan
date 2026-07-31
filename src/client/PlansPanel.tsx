@@ -32,8 +32,8 @@ import { useCopy } from "./use-copy.ts";
  */
 function describeSharing(plan: PlanSummary): string {
   if (plan.visibility === "public") return "Public";
-  if (plan.hasShareCode && plan.hasGrants) return "Private + user share + Code";
-  if (plan.hasShareCode) return "Private + Code";
+  if (plan.hasShareCode && plan.hasGrants) return "Private + user share + code";
+  if (plan.hasShareCode) return "Private + code";
   return plan.hasGrants ? "Private + user share" : "Private";
 }
 

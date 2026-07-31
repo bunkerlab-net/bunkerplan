@@ -16,18 +16,28 @@ export function useCopy(value: string): {
   copy: () => void;
   copyFailed: boolean;
 } {
-  const [copyFailed, setCopyFailed] = useState(false);
+  const [failedFor, setFailedFor] = useState<string | null>(null);
 
   const copy = () => {
     void (async () => {
       try {
         await navigator.clipboard.writeText(value);
-        setCopyFailed(false);
+        // Only this attempt's own value. A copy of the previous secret can
+        // still be in flight when a new one is on screen, and clearing
+        // unconditionally would let it hide a failure it knows nothing about.
+        setFailedFor((failed) => (failed === value ? null : failed));
       } catch {
-        setCopyFailed(true);
+        setFailedFor(value);
       }
     })();
   };
 
-  return { copy, copyFailed };
+  /*
+   * Keyed on the value rather than a bare boolean, because `ShareLink` stays
+   * mounted across a regenerate: the code swaps while the block rendering it
+   * never goes false, so a boolean would leave the last code's failure sitting
+   * under a link nobody has tried to copy. Comparing beats an effect - there
+   * is no render in between to clear it in.
+   */
+  return { copy, copyFailed: failedFor === value };
 }

@@ -51,10 +51,11 @@ function Reveal({
         </button>
       </div>
       {copyFailed && (
-        // `role="alert"`, as ShareLink does: nothing moved focus, so a reader
-        // who pressed Copy and heard nothing would believe it worked - and the
-        // key is shown once.
-        <p className="muted" role="alert">
+        // `error` and `role="alert"`, as ShareLink's does: nothing moved
+        // focus, so a reader who pressed Copy and heard nothing would believe
+        // it worked - and the key is shown once. `muted` said the opposite of
+        // what this is.
+        <p className="error" role="alert">
           Copying failed - select the key above instead.
         </p>
       )}

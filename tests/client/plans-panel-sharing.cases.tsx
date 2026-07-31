@@ -1,3 +1,4 @@
+import "./dom-env.ts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PlansPanel } from "../../src/client/PlansPanel.tsx";
 import {
@@ -8,7 +9,6 @@ import {
   plan,
   sharing,
 } from "./api-stub.ts";
-import { ORIGIN } from "./dom-env.ts";
 import type { Mounted } from "./harness.tsx";
 import {
   click,
@@ -368,13 +368,44 @@ export function registerSharingCases(): void {
          * its own `location.hash`.
          */
         expect(view.find(".snippet code").textContent).toBe(
-          `${ORIGIN}/s/${PLAN_ID}#code=abcd1234efgh5678`,
+          `${window.location.origin}/s/${PLAN_ID}#code=abcd1234efgh5678`,
         );
         expect(view.text()).toContain(
           "This is the only time the code is shown.",
         );
         // The standing note is replaced by the link, not shown beside it.
         expect(view.text()).not.toContain("It cannot be read back");
+      });
+
+      test("a copy failure does not follow the next code", async () => {
+        /*
+         * Regenerating swaps the code while this block stays mounted - the
+         * condition rendering it never goes false - so a failure held as a
+         * bare boolean would sit under a link nobody has tried to copy, and
+         * tell its owner a copy they never made did not work.
+         */
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            writeText: async () => {
+              throw new Error("permission denied");
+            },
+          },
+        });
+        codeState(false);
+        const view = await openEditor();
+
+        await click(view.byText("button", "Create code"));
+        await click(view.byText("button", "Copy"));
+        expect(view.text()).toContain("Could not reach the clipboard");
+
+        api.rotateShareCode = async () => "zyxw9876vuts5432";
+        await click(view.byText("button", "Regenerate"));
+
+        expect(view.find(".snippet code").textContent).toBe(
+          `${window.location.origin}/s/${PLAN_ID}#code=zyxw9876vuts5432`,
+        );
+        expect(view.text()).not.toContain("Could not reach the clipboard");
       });
 
       test("the code is escaped into the link rather than concatenated raw", async () => {
@@ -390,7 +421,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Create code"));
 
         expect(view.find(".snippet code").textContent).toBe(
-          `${ORIGIN}/s/${PLAN_ID}#code=a%20b%26c%3Dd`,
+          `${window.location.origin}/s/${PLAN_ID}#code=a%20b%26c%3Dd`,
         );
       });
 
@@ -403,7 +434,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Copy"));
 
         expect(written).toEqual([
-          `${ORIGIN}/s/${PLAN_ID}#code=abcd1234efgh5678`,
+          `${window.location.origin}/s/${PLAN_ID}#code=abcd1234efgh5678`,
         ]);
         expect(view.maybe('.sharing [role="alert"]')).toBeNull();
       });

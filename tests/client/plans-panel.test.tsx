@@ -226,11 +226,11 @@ describe("PlansPanel listing", () => {
     ],
     [
       { visibility: "private", hasShareCode: true, hasGrants: false },
-      "Private + Code",
+      "Private + code",
     ],
     [
       { visibility: "private", hasShareCode: true, hasGrants: true },
-      "Private + user share + Code",
+      "Private + user share + code",
     ],
   ];
 
