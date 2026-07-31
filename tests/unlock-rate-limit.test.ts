@@ -173,12 +173,18 @@ describe("the unlock rate limit", () => {
       CONFIG,
       post({ "cf-connecting-ip": "203.0.113.9" }),
     );
+    // A second repo rather than a write onto the first: the reservation is
+    // taken from one that works, and the refund offered to one that does not,
+    // which is the shape the failure actually has.
     const unreachable = new Error("the counter store is unreachable");
-    limits.refund = async () => {
-      throw unreachable;
+    const failing: RateLimitRepo = {
+      ...limits,
+      refund: async () => {
+        throw unreachable;
+      },
     };
 
-    await expect(refundUnlockAttempt(limits, held)).rejects.toBe(unreachable);
+    await expect(refundUnlockAttempt(failing, held)).rejects.toBe(unreachable);
   });
 
   test("buckets one address together and two apart", async () => {

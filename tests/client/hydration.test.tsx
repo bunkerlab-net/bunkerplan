@@ -52,18 +52,24 @@ const roots: Array<{ unmount: () => void }> = [];
 afterEach(async () => {
   const mounted = hosts.splice(0);
   const failures: unknown[] = [];
-  try {
-    // Each on its own: one tree throwing from a cleanup must not leave the
-    // rest mounted into the next test, which is a failure that lands
-    // somewhere else entirely.
-    for (const root of roots.splice(0)) {
-      try {
-        root.unmount();
-      } catch (cause) {
-        failures.push(cause);
-      }
+  const attempt = async (step: () => unknown) => {
+    try {
+      await step();
+    } catch (cause) {
+      failures.push(cause);
     }
-    await flush();
+  };
+  try {
+    // Flushed before the unmount as well as after, as the harness does it: a
+    // test that hydrated and asserted without ever flushing leaves its first
+    // effects queued, and those would otherwise run after the tree came down.
+    //
+    // Every step attempted, so one tree throwing from a cleanup cannot leave
+    // the rest mounted into the next test - a failure that lands somewhere
+    // else entirely.
+    await attempt(() => flush());
+    for (const root of roots.splice(0)) await attempt(() => root.unmount());
+    await attempt(() => flush());
   } finally {
     // Hosts go whatever happened above, as the harness does it: a `<div>` left
     // on `document.body` is one the next test's queries can still find.
