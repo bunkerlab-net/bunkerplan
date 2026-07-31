@@ -50,7 +50,8 @@ interface Shape {
   foreignKeys: Array<{
     columns: string[];
     references: string[];
-    onDelete: string | undefined;
+    onDelete: string;
+    onUpdate: string;
   }>;
   checks: Array<{ name: string; value: string }>;
   /**
@@ -129,10 +130,13 @@ const canonical = (
   columns: Shape["columns"],
 ): Shape["columns"] =>
   columns.map((column) => {
-    const recorded = DIALECT_DIFFERENCES[`${table}.${column.name}`];
+    const key = `${table}.${column.name}`;
+    const recorded = DIALECT_DIFFERENCES[key];
     if (recorded === undefined) return column;
 
-    expect({ type: column.type, default: column.default }).toEqual(
+    // Named, because this runs inside a `map` over every column: without it a
+    // failure says two shapes differ and leaves the reader to find which one.
+    expect({ type: column.type, default: column.default }, key).toEqual(
       recorded[dialect],
     );
     return { ...column, type: "(recorded)", default: "(recorded)" };
@@ -218,7 +222,13 @@ function shapeOf(dialect: "pg" | "sqlite", table: Table): Shape {
           references: reference.foreignColumns.map(
             (column) => `${getTableName(column.table)}.${column.name}`,
           ),
-          onDelete: key.onDelete,
+          // `?? "no action"` on both: that is the SQL default, and Drizzle's
+          // pg config records it explicitly where the SQLite one leaves it
+          // unset. Comparing the spellings would report drift on every foreign
+          // key in the schema; comparing the meanings still catches one side
+          // saying `cascade` where the other says nothing.
+          onDelete: key.onDelete ?? "no action",
+          onUpdate: key.onUpdate ?? "no action",
         };
       })
       .sort(byRecord),
@@ -394,6 +404,10 @@ describe("cascading from the account", () => {
           columns: [column],
           references: [references],
           onDelete: "cascade",
+          // The SQL default, normalised above: ids here are immutable, so no
+          // dialect has ever been asked what an update should do. Pinned so
+          // that one side gaining a rule shows up as the drift it is.
+          onUpdate: "no action",
         });
       }
     },

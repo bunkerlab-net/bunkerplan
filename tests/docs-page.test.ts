@@ -17,11 +17,17 @@ describe("the /api/docs page", () => {
    * visibly broken once something executes it.
    */
   test("carries no inline script, which the app policy would refuse", () => {
-    const scripts = DOCS_PAGE.match(/<script\b[^>]*>/g) ?? [];
+    // Whole elements, not opening tags: a `src` attribute says where the code
+    // came from but not that the element is empty, and `<script src=...>x()`
+    // executes `x()` under a policy that has no nonce for it.
+    const scripts = [
+      ...DOCS_PAGE.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g),
+    ];
 
     expect(scripts.length).toBeGreaterThan(0);
-    for (const tag of scripts) {
-      expect(tag).toContain(" src=");
+    for (const [, attributes, body] of scripts) {
+      expect(attributes).toContain(" src=");
+      expect(body?.trim()).toBe("");
     }
   });
 

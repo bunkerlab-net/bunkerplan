@@ -298,13 +298,13 @@ describe("a code-shared plan", () => {
       storage: memoryStorage({ [PLAN_ID]: DOCUMENT, [other]: DOCUMENT }),
     });
     const opened = await app.fetch(`/p/${other}?code=${CODE}`);
+    // The source unlock has to have produced a real cookie before anything is
+    // derived from it: a refusal here would earn the same 401 below without
+    // testing anything, and `cookiePair` would throw about the wrong thing.
+    expect(opened.status).toBe(200);
+
     const minted = cookiePair(opened, other);
     const value = minted.slice(minted.indexOf("=") + 1);
-
-    // The source unlock has to have produced a real cookie: an empty value
-    // would earn the same 401 below without testing anything.
-    expect(opened.status).toBe(200);
-    expect(minted.startsWith(`${shareCookieName(other)}=`)).toBe(true);
     expect(value.length).toBeGreaterThan(0);
 
     /*

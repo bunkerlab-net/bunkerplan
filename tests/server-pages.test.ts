@@ -261,14 +261,7 @@ describe("the plan gate", () => {
       `<script type="application/json" id="${PAGE_PROPS_ID}">`,
     );
     // A payload that will not parse means a page that never hydrates.
-    expect(pageProps(markup)).toEqual({
-      name: "gate",
-      planId: "abc123",
-      hasCode: true,
-      path: "/p/abc123",
-      origin: ORIGIN,
-      relay: false,
-    });
+    expect(pageProps(markup)).toEqual(gateProps({ hasCode: true }));
   });
 
   test("the relay renders the same page at its own path", () => {

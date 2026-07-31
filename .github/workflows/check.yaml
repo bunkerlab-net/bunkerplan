@@ -134,7 +134,13 @@ jobs:
       # that changed is what else is in the process with it. It reports its own
       # coverage figure, which is why `src/kv/valkey.ts` reads low in the run
       # above and 100% here.
+      #
+      # `!cancelled()` because the split must not cost information: without it
+      # a single failure in the step above skips this one, and a pull request
+      # that used to report on every backend would report on all but Valkey.
+      # Still skipped when someone cancels the run.
       - name: Test Valkey
+        if: ${{ !cancelled() }}
         run: BUNKERPLAN_PREBUILT=1 bun test --isolate ./tests/drivers/kv-store.valkey.test.ts
         env:
           TEST_VALKEY_URL: redis://127.0.0.1:6379

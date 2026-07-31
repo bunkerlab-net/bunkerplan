@@ -91,12 +91,16 @@ compose MinIO.
 
 CI sets them, so a pull request always runs the full matrix - across two steps
 rather than one: the main step carries Postgres and MinIO, and Valkey gets a
-step of its own for the reason below. Nothing here
-can reach data you care about: the backends run under their own Compose
-project (`bunkerplan-test`), separate from the self-hosting stack below, so
-`test:backends:down -v` cannot take your local Postgres, Valkey, or MinIO
-volumes with it. Postgres then works in a scratch schema and MinIO in a bucket
-created for the run, both dropped afterwards.
+step of its own for the reason below. It brings the same images up as native
+service containers rather than through Compose, so the runner waits on their
+health gates instead of a script polling ports.
+
+Locally, nothing here can reach data you care about: `test:backends` runs
+under its own Compose project (`bunkerplan-test`), separate from the
+self-hosting stack below, so `test:backends:down -v` cannot take your local
+Postgres, Valkey, or MinIO volumes with it. Either way Postgres works in a
+scratch schema and MinIO in a bucket created for the run, both dropped
+afterwards.
 
 One command, `bun run test`. It builds first, because the suite serves the
 real Workers bundle on Miniflare; `BUNKERPLAN_PREBUILT=1` is what stops each

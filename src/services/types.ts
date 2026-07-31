@@ -106,7 +106,8 @@ export interface RateLimitRepo {
    * Rejects if the store cannot be reached - it is not swallowed here, because
    * a budget quietly failing to recover is the thing an operator needs told.
    * Containment belongs to the caller: src/app.ts catches it, logs the bucket
-   * and window, and still answers the reader whose redemption already worked.
+   * and window, and lets the original outcome stand - the reader's `204`, or
+   * the error that caused the refund in the first place.
    */
   refund(key: string, windowStart: number): Promise<void>;
 }

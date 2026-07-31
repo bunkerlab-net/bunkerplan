@@ -91,7 +91,9 @@ useAuthStub();
  */
 async function hydrate(document_: string): Promise<HTMLElement> {
   const page = document.createElement("div");
-  page.innerHTML = document_.replace("<!doctype html>", "");
+  // Case-insensitive: the doctype is not case-sensitive in HTML, and one left
+  // in the string would be parsed as a stray comment node inside this `div`.
+  page.innerHTML = document_.replace(/^<!doctype html>/i, "");
   for (const node of page.querySelectorAll(
     'script[type="module"], link[rel="stylesheet"], link[rel="icon"], link[rel="apple-touch-icon"]',
   )) {

@@ -187,11 +187,14 @@ function registerPlanSharing(app: Hono, getServices: GetServices): void {
  * table, because `upload_rate_limit.key` is a foreign key onto `user.id` and
  * there is no user here.
  *
- * The budget is checked before the attempt and spent only after one that
- * failed. A correct code costs nothing, because what is being rationed is
- * guessing: the share link is opened by everyone it was sent to, and charging
- * those meant a link pasted into one channel locked out the colleagues behind
- * the same egress address. See src/http/unlock-rate-limit.ts.
+ * The budget is taken before the attempt and given back by one that turned
+ * out to be a redemption - reserve first, refund on success, rather than
+ * charging afterwards. A caller that walks away mid-request has therefore
+ * already been counted, which is the safe direction. A correct code still
+ * costs nothing in the end, because what is being rationed is guessing: the
+ * share link is opened by everyone it was sent to, and charging those meant a
+ * link pasted into one channel locked out the colleagues behind the same
+ * egress address. See src/http/unlock-rate-limit.ts.
  */
 function registerPlanUnlock(app: Hono, getServices: GetServices): void {
   app.post("/api/plans/:id/unlock", async (c) => {

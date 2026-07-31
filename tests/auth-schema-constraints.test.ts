@@ -306,21 +306,26 @@ describe.each(generated)("the %s relational graph", (dialect) => {
   ])("%s joins on %s", (name, column) => {
     const relation = configOf(name)["user"] as
       | {
-          config: {
+          config?: {
             fields: Array<{ name: string }>;
             references: Array<{ name: string }>;
           };
         }
       | undefined;
 
-    // Asserted first: a renamed or removed declaration otherwise throws a bare
-    // TypeError on the next line, which does not say which one went missing.
+    // Both asserted first: a renamed declaration leaves `relation` undefined
+    // and a v2 adapter would leave `config` undefined, and either otherwise
+    // throws a bare TypeError below that names neither.
     expect(relation, `${name} declares no "user" relation`).toBeDefined();
+    expect(
+      relation?.config,
+      `${name}'s "user" relation carries no v1 config`,
+    ).toBeDefined();
 
-    expect(relation?.config.fields.map((field) => field.name)).toEqual([
+    expect(relation?.config?.fields.map((field) => field.name)).toEqual([
       column,
     ]);
-    expect(relation?.config.references.map((field) => field.name)).toEqual([
+    expect(relation?.config?.references.map((field) => field.name)).toEqual([
       "id",
     ]);
   });
