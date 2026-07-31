@@ -204,12 +204,12 @@ describe("useSession", () => {
       error: null,
       isPending: false,
     };
-    const view = mount(<Probe />);
-    await flush();
     // Not a synchronous seed: the first paint is pending (below), and the
     // stored session arrives when the effect reads it. Both orderings matter -
     // the first keeps hydration matching the server, the second is what puts
     // the visitor's name on screen without a second round trip.
+    const view = mount(<Probe />);
+    await flush();
 
     expect(view.text()).toBe("swift-otter");
   });

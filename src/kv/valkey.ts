@@ -38,6 +38,14 @@ export function createValkeyKv(url: string): ValkeyKv {
     },
 
     async probe() {
+      /*
+       * No abort signal, unlike the Postgres probe. That one takes a client
+       * out of a pool and can destroy it alone; this driver holds a single
+       * connection for the process, so the only way to abandon a command
+       * mid-flight is `disconnect()` - which would drop the reads and writes
+       * every other request is making through it. A `PING` that outlasts its
+       * caller's patience is cheaper than that.
+       */
       await client.ping();
     },
 

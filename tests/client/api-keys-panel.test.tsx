@@ -102,7 +102,8 @@ describe("ApiKeysPanel listing", () => {
 
     const cells = view.all("tbody td");
     expect(cells[0]?.textContent).toBe("-");
-    expect(cells[1]?.textContent).toBe("-…");
+    // No ellipsis: nothing was truncated, so nothing should say it was.
+    expect(cells[1]?.textContent).toBe("-");
   });
 
   test("an expiry is rendered as a date rather than as a timestamp", async () => {

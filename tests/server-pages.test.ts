@@ -187,41 +187,40 @@ describe("the dashboard page", () => {
 });
 
 describe("the plan gate", () => {
+  /** Every prop the gate serialises, so a test can name only what it varies. */
+  const gateProps = (over: { hasCode: boolean; relay?: boolean }) => ({
+    name: "gate",
+    planId: "abc123",
+    origin: ORIGIN,
+    relay: false,
+    ...over,
+    path: `${over.relay === true ? "/s" : "/p"}/abc123`,
+  });
+
   test("carries the plan id and whether there is a code to enter", () => {
     const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true });
 
-    expect(pageProps(markup)).toEqual({
-      name: "gate",
-      planId: "abc123",
-      hasCode: true,
-      path: "/p/abc123",
-      origin: ORIGIN,
-      relay: false,
-    });
+    expect(pageProps(markup)).toEqual(gateProps({ hasCode: true }));
     expect(markup).toContain("Have a code?");
   });
 
   test("a plan with no code offers no code box", () => {
     const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: false });
 
-    expect(pageProps(markup)).toMatchObject({ hasCode: false });
+    expect(pageProps(markup)).toEqual(gateProps({ hasCode: false }));
     expect(markup).not.toContain("Have a code?");
   });
 
-  test("leaving relay out is the refusal page, not the relay", () => {
-    // `relay` is the only defaulted option, and `/p/{id}` at 401 is what it
-    // defaults to. `hasCode` has no default on purpose: every caller reads it
-    // off the row, so there is nothing for the page to assume.
-    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: false });
-
-    expect(pageProps(markup)).toEqual({
-      name: "gate",
-      planId: "abc123",
-      hasCode: false,
-      path: "/p/abc123",
-      origin: ORIGIN,
-      relay: false,
+  test("the relay renders at its own path", () => {
+    // The one option with a default, and the only thing that moves `path`.
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, {
+      hasCode: true,
+      relay: true,
     });
+
+    expect(pageProps(markup)).toEqual(
+      gateProps({ hasCode: true, relay: true }),
+    );
   });
 
   test("is not indexed - it names a private plan", () => {

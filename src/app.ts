@@ -206,9 +206,9 @@ function registerPlanUnlock(app: Hono, getServices: GetServices): void {
 
     /*
      * A redemption was never the thing being rationed, so a count that did not
-     * buy a guess goes back. Both endings qualify: a `200`, and a throw - the
-     * budget rations guessing, and a route that fell over told nobody whether
-     * the code was right.
+     * buy a guess goes back. Both endings qualify: the `204`, and a throw -
+     * the budget rations guessing, and a route that fell over told nobody
+     * whether the code was right.
      *
      * Every other ending keeps its count, and not only the wrong-code `401`.
      * A `404` is an unknown plan id, which is the same enumeration by another

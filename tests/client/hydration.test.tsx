@@ -11,7 +11,7 @@ import {
 } from "../../src/server/pages.tsx";
 import { useApiStub } from "./api-stub.ts";
 import { navigations, replacements, useAuthStub } from "./auth-stub.ts";
-import { flush } from "./harness.tsx";
+import { flush, unmountTrees } from "./harness.tsx";
 
 /**
  * The handshake between the two renders, driven exactly as `entry.tsx` does
@@ -33,8 +33,19 @@ const ASSETS: AssetManifest = {
 
 const ORIGIN = "https://plans.test";
 
-const hosts: HTMLElement[] = [];
-const roots: Array<{ unmount: () => void }> = [];
+/**
+ * One entry per host, registered before anything that can throw.
+ *
+ * `unmount` starts as a no-op and is filled in once `hydrateRoot` has returned
+ * one: a document missing `#page-props` throws below with the host already on
+ * `document.body`, and that host still has to come off.
+ */
+interface Tree {
+  host: HTMLElement;
+  unmount: () => void;
+}
+
+const trees: Tree[] = [];
 
 /**
  * Unmounted, not merely detached.
@@ -50,37 +61,13 @@ const roots: Array<{ unmount: () => void }> = [];
  * last, disarmed last.
  */
 afterEach(async () => {
-  const mounted = hosts.splice(0);
-  const failures: unknown[] = [];
-  const attempt = async (step: () => unknown) => {
-    try {
-      await step();
-    } catch (cause) {
-      failures.push(cause);
-    }
-  };
   try {
-    // Flushed before the unmount as well as after, as the harness does it: a
-    // test that hydrated and asserted without ever flushing leaves its first
-    // effects queued, and those would otherwise run after the tree came down.
-    //
-    // Every step attempted, so one tree throwing from a cleanup cannot leave
-    // the rest mounted into the next test - a failure that lands somewhere
-    // else entirely.
-    await attempt(() => flush());
-    for (const root of roots.splice(0)) await attempt(() => root.unmount());
-    await attempt(() => flush());
+    await unmountTrees(trees.splice(0));
   } finally {
-    // Hosts go whatever happened above, as the harness does it: a `<div>` left
-    // on `document.body` is one the next test's queries can still find.
-    for (const host of mounted) host.remove();
     // The relay test moves the browser to `/s/{id}`, and the stub captures the
     // forward instead of following it, so nothing else puts this back.
     window.history.replaceState(null, "", "/");
   }
-  // Raised after the cleanup, so a reported failure cannot also be the reason
-  // something was left behind.
-  if (failures.length > 0) throw failures[0];
 });
 
 useApiStub();
@@ -111,7 +98,8 @@ async function hydrate(document_: string): Promise<HTMLElement> {
     node.remove();
   }
   document.body.appendChild(page);
-  hosts.push(page);
+  const tree: Tree = { host: page, unmount: () => {} };
+  trees.push(tree);
 
   const props = page.querySelector(`#${PAGE_PROPS_ID}`);
   const root = page.querySelector<HTMLElement>(`#${ROOT_ID}`);
@@ -124,12 +112,11 @@ async function hydrate(document_: string): Promise<HTMLElement> {
     throw new Error(`the server document carries no #${ROOT_ID} element`);
   }
 
-  roots.push(
-    hydrateRoot(
-      root,
-      <Page {...(JSON.parse(props.textContent ?? "{}") as PageProps)} />,
-    ),
+  const hydrated = hydrateRoot(
+    root,
+    <Page {...(JSON.parse(props.textContent ?? "{}") as PageProps)} />,
   );
+  tree.unmount = () => hydrated.unmount();
   await flush();
   return root;
 }
@@ -243,7 +230,8 @@ describe("attributes across the two renderers", () => {
       '<input type="text" spellcheck="false" data-kept="false">' +
       '<button type="button" aria-expanded="false">s</button>';
     document.body.appendChild(host);
-    hosts.push(host);
+    const tree: Tree = { host, unmount: () => {} };
+    trees.push(tree);
 
     const Box = () => (
       <>
@@ -253,7 +241,8 @@ describe("attributes across the two renderers", () => {
         </button>
       </>
     );
-    roots.push(hydrateRoot(host, <Box />));
+    const hydrated = hydrateRoot(host, <Box />);
+    tree.unmount = () => hydrated.unmount();
     await flush();
 
     // Both were on the server's markup and are now gone.
@@ -272,10 +261,12 @@ describe("attributes across the two renderers", () => {
     const host = document.createElement("div");
     host.innerHTML = '<input type="text" spellcheck="true" aria-busy="true">';
     document.body.appendChild(host);
-    hosts.push(host);
+    const tree: Tree = { host, unmount: () => {} };
+    trees.push(tree);
 
     const Box = () => <input type="text" spellcheck={true} aria-busy={true} />;
-    roots.push(hydrateRoot(host, <Box />));
+    const hydrated = hydrateRoot(host, <Box />);
+    tree.unmount = () => hydrated.unmount();
     await flush();
 
     /*

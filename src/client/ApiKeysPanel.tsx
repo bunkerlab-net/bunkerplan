@@ -281,8 +281,12 @@ function KeysTable(props: {
             <tr key={item.id}>
               <td>{item.name ?? "-"}</td>
               {/* `start` is the first characters of the full key, prefix
-                  included - do not prepend `prefix` again. */}
-              <td className="mono">{item.start ?? "-"}…</td>
+                  included - do not prepend `prefix` again. The ellipsis is
+                  what says the value is truncated, so it goes with the value:
+                  "-…" would claim a placeholder had been cut short. */}
+              <td className="mono">
+                {item.start === null ? "-" : `${item.start}…`}
+              </td>
               <td>
                 {item.expiresAt === null
                   ? "Never"

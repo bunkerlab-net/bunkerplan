@@ -37,6 +37,60 @@ const mounted: Entry[] = [];
 let registered = false;
 
 /**
+ * Brings a set of mounted trees down, in the order that leaves nothing behind.
+ *
+ * Shared with tests/client/hydration.test.tsx, which mounts through
+ * `hydrateRoot` rather than `mount` and so keeps its own list. Two copies of
+ * this drifted apart twice - each needed the same flush ordering and the same
+ * attempt-everything fix, found separately - which is what makes it worth one
+ * function taking the trees as an argument.
+ */
+export async function unmountTrees(
+  trees: ReadonlyArray<{ host: HTMLElement; unmount: () => void }>,
+): Promise<void> {
+  const failures: unknown[] = [];
+  /** Every step is attempted; the first thing that went wrong is raised. */
+  const attempt = async (step: () => unknown) => {
+    try {
+      await step();
+    } catch (cause) {
+      failures.push(cause);
+    }
+  };
+  try {
+    if (trees.length > 0) {
+      // Flushed before the unmount as well as after: a test that mounted and
+      // asserted without ever flushing leaves its first effects queued, and
+      // those would otherwise run *after* the tree came down - subscribing to
+      // something with no cleanup left to cancel it.
+      //
+      // A flush that throws must not skip the unmounts below. Leaving trees
+      // mounted into the next test is the failure this exists to prevent, and
+      // it is a worse one than whatever the flush hit.
+      await attempt(() => flush());
+      for (const tree of trees) await attempt(() => tree.unmount());
+      // `root.unmount()` is what runs the subtree's effect cleanups. Dropping
+      // the host element does not, and neither does rendering the tree away
+      // through a parent's own state - measured, both.
+      await attempt(() => flush());
+    }
+  } finally {
+    // Hosts go whatever happened above: a `<div>` left on `document.body` is
+    // one the next test's queries can still find, which is a suite failing on
+    // another suite's markup.
+    for (const tree of trees) tree.host.remove();
+  }
+  if (failures.length > 0) {
+    // The first is the cause, and the rest ride along: two trees failing to
+    // come down is a different story from one, and dropping the others would
+    // send the next reader looking for a single culprit.
+    throw new AggregateError(failures, "the harness could not tear down", {
+      cause: failures[0],
+    });
+  }
+}
+
+/**
  * Unmounts every tree this file mounted. Call it once, at the top of a suite
  * that mounts anything.
  *
@@ -56,46 +110,12 @@ export function useHarness(): void {
   });
   afterEach(async () => {
     const entries = mounted.splice(0);
-    const failures: unknown[] = [];
-    /** Every step is attempted; the first thing that went wrong is raised. */
-    const attempt = async (step: () => unknown) => {
-      try {
-        await step();
-      } catch (cause) {
-        failures.push(cause);
-      }
-    };
     try {
-      if (entries.length > 0) {
-        // Flushed before the unmount as well as after: a test that mounted and
-        // asserted without ever flushing leaves its first effects queued, and
-        // those would otherwise run *after* the tree came down - subscribing to
-        // something with no cleanup left to cancel it.
-        //
-        // A flush that throws must not skip the unmounts below. Leaving trees
-        // mounted into the next test is the failure this hook exists to
-        // prevent, and it is a worse one than whatever the flush hit.
-        await attempt(() => flush());
-        for (const entry of entries) await attempt(() => entry.unmount());
-        // `root.unmount()` is what runs the subtree's effect cleanups.
-        // Dropping the host element does not, and neither does rendering the
-        // tree away through a parent's own state - measured, both.
-        await attempt(() => flush());
-      }
+      await unmountTrees(entries);
     } finally {
-      // Hosts go whatever happened above: a `<div>` left on `document.body` is
-      // one the next test's queries can still find, which is a suite failing on
-      // another suite's markup.
-      for (const entry of entries) entry.host.remove();
+      // Cleared whatever the teardown did, so the next test's `mount` is not
+      // refused by a flag this one left standing.
       registered = false;
-    }
-    if (failures.length > 0) {
-      // The first is the cause, and the rest ride along: two trees failing to
-      // come down is a different story from one, and dropping the others would
-      // send the next reader looking for a single culprit.
-      throw new AggregateError(failures, "the harness could not tear down", {
-        cause: failures[0],
-      });
     }
   });
 }

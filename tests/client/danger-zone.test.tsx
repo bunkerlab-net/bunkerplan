@@ -61,7 +61,9 @@ describe("DangerZone", () => {
       <DangerZone handle={HANDLE} userId={USER_ID} {...over} />,
     );
     await type(view.find<HTMLInputElement>("#confirm-handle"), HANDLE);
-    await click(view.find("button"));
+    // By its label, not by position: a button added above this one would
+    // otherwise silently retarget every test that goes through here.
+    await click(view.byText("button", "Delete account"));
     return view;
   };
   /** Cleanup for the one test that replaces `location.assign`. Idempotent. */
