@@ -203,10 +203,10 @@ describe("PlansPanel listing", () => {
   /**
    * Every state a row can actually be in, and the label each shows.
    *
-   * "Public + code" is absent because the repository will not produce it:
-   * going public nulls the hash, and a code can only be written to a private
-   * row. Public and granted is reachable - a grant made while private survives
-   * the switch - and reads as Public, because it is.
+   * A public plan reads as "Public" whatever else is set on it. A retained code
+   * and a grant list are both reachable while public, and neither gates
+   * anything, because anyone holding the URL can already open it. The label
+   * answers who may read the plan, so it names them again once it is private.
    */
   const SHARING: ReadonlyArray<
     readonly [
@@ -216,6 +216,8 @@ describe("PlansPanel listing", () => {
   > = [
     [{ visibility: "public", hasShareCode: false, hasGrants: false }, "Public"],
     [{ visibility: "public", hasShareCode: false, hasGrants: true }, "Public"],
+    [{ visibility: "public", hasShareCode: true, hasGrants: false }, "Public"],
+    [{ visibility: "public", hasShareCode: true, hasGrants: true }, "Public"],
     [
       { visibility: "private", hasShareCode: false, hasGrants: false },
       "Private",

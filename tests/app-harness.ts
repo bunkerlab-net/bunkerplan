@@ -173,26 +173,8 @@ export function memoryPlans(
    * fixture a test built, or a constant two tests share. A seed is an input, and
    * an input a callee rewrites is a fake teaching the wrong lesson.
    */
-  /*
-   * The state the database will not hold: `setVisibility` nulls the hash on
-   * the way out of private and `setShareCodeHash` only writes to a private
-   * row, so no SQL path produces a public plan with a code. A row that did
-   * would let a test assert against a plan production cannot make, which is
-   * the one thing a fake must never allow - so both writers check, the seed
-   * and the insert alike.
-   */
-  const legal = <
-    T extends { visibility: PlanVisibility; shareCodeHash: string | null },
-  >(
-    row: T,
-  ): T => {
-    if (row.visibility === "public" && row.shareCodeHash !== null) {
-      throw new Error("a public plan cannot carry a share code");
-    }
-    return row;
-  };
   const rows = new Map(
-    seed.map((row) => [row.id, legal({ ...row, grants: [...row.grants] })]),
+    seed.map((row) => [row.id, { ...row, grants: [...row.grants] }]),
   );
   const owned = (id: string, userId: string): StoredPlan | undefined => {
     const row = rows.get(id);
@@ -221,10 +203,6 @@ export function memoryPlans(
      * through this signature, so there is nothing here to preserve.
      */
     insert: async (row, maxPlans): Promise<PlanInsert> => {
-      // Before the duplicate check, so a row that could not legally exist is
-      // refused whether or not its id happens to be taken - the check is about
-      // the shape, and "duplicate" would otherwise let one through unlooked at.
-      legal(row);
       if (rows.has(row.id)) return "duplicate";
       const held = [...rows.values()].filter(
         (item) => item.userId === row.userId,
@@ -294,18 +272,16 @@ export function memoryPlans(
     setVisibility: async (id, userId, visibility) => {
       const row = owned(id, userId);
       if (row === undefined) return false;
-      // Neither visibility leaves a code on a public plan.
-      if (visibility === "public" || row.visibility === "public") {
-        row.shareCodeHash = null;
-      }
+      // Visibility alone: a share code and the grants outlive every flip.
       row.visibility = visibility;
       return true;
     },
     setShareCodeHash: async (id, userId, hash) => {
       const row = owned(id, userId);
       if (row === undefined) return false;
-      // Setting one requires the plan to be private; clearing is always
-      // allowed, so a public row can still be tidied.
+      // Minting requires the plan to be private, because a public plan needs no
+      // new code; clearing is how a retained one is destroyed, at any
+      // visibility.
       if (hash !== null && row.visibility === "public") return false;
       row.shareCodeHash = hash;
       return true;

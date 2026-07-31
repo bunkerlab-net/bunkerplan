@@ -104,8 +104,10 @@ describe.skipIf(skip)("0010 against rows already stored", () => {
         `insert into "user" (id, name, email, email_verified, created_at, updated_at)
          values ('owner', 'owner', 'owner@x', false, now(), now())`,
       );
-      // The shape written before public retired the code, and the shape the
-      // whole code-sharing feature is, side by side.
+      // The shape `0010` was written to sweep, and the shape the whole
+      // code-sharing feature is, side by side. Asserted as the migration
+      // shipped: issue #22 later made a public plan's retained code legal, but
+      // a migration is history and this pins what it did.
       await run(
         `insert into plan (id, user_id, size, visibility, share_code_hash)
          values ('legacy', 'owner', 1, 'public', 'deadbeef'),

@@ -22,9 +22,10 @@ import { useCopy } from "./use-copy.ts";
 /**
  * What the Sharing column says at a glance.
  *
- * Public is public: a plan cannot carry a code while it is public, because
- * `setVisibility` nulls the hash on the way out of private and `setShareCodeHash`
- * only writes to a private row - so there is no "Public + code" to render.
+ * Public is public: a public plan reads as "Public" whatever else is set on
+ * it, because anyone holding the URL can open it and nothing below that
+ * narrows it. A retained share code and a grant list are still there, and the
+ * label names them again the moment the plan goes private.
  *
  * A private plan can carry both a code and named accounts at once. That is a
  * real state, not an accident, so it is named rather than collapsed into
@@ -93,10 +94,9 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
   }
 
   // A public plan is readable by anyone holding the URL, so neither a code nor
-  // a grant gates anything. Grants stay on screen rather than vanishing - they
+  // a grant gates anything. Both stay on screen rather than vanishing - they
   // are real state that applies again the moment this goes private - but
-  // nothing here acts while public. The code is genuinely gone: going public
-  // retires it, rather than leaving a bearer secret to reactivate later.
+  // nothing here acts while public.
   const inert = state.visibility === "public";
   const shared = { plan, guard, reload: load, locked: busy || inert };
 
@@ -107,7 +107,6 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
         visibility={state.visibility}
         busy={busy}
         inert={inert}
-        hasShareCode={state.hasShareCode}
         onChoose={(visibility) =>
           void guard(async () => {
             setState(await setVisibility(plan.id, visibility));
@@ -164,8 +163,6 @@ function VisibilityChoice(props: {
   visibility: PlanVisibility;
   busy: boolean;
   inert: boolean;
-  /** Names the consequence on the control that causes it, before it is used. */
-  hasShareCode: boolean;
   onChoose: (visibility: PlanVisibility) => void;
 }) {
   // Several editors can be open at once, so the heading id carries the plan.
@@ -197,17 +194,16 @@ function VisibilityChoice(props: {
             <span>
               {option === "private"
                 ? "Private - you, granted accounts, and anyone with the code"
-                : props.hasShareCode
-                  ? "Public - anyone holding the URL. Retires the share code."
-                  : "Public - anyone holding the URL"}
+                : "Public - anyone holding the URL"}
             </span>
           </label>
         ))}
       </div>
       {props.inert && (
         <p className="muted" id={inertId}>
-          Anyone holding the URL can open this plan, so the accounts below grant
-          nothing extra. Make it private to use them.
+          Anyone holding the URL can open this plan, so nothing below grants
+          extra access. Any share code and account grants are kept, and apply
+          again when you make it private.
         </p>
       )}
     </div>
@@ -227,10 +223,10 @@ function ShareCodeBlock(
   const { plan, guard, reload, locked } = props;
   const [code, setCode] = useState<string | null>(null);
 
-  // Going public retires the code, so a plaintext held here can outlive what it
-  // opens. Dropped rather than left in state: showing it would hand the owner a
-  // link that no longer works, which is worse than showing nothing. The render
-  // below is gated too, because this runs after it.
+  // Removing the code is the only thing that makes this false: a visibility
+  // flip keeps it. So the plaintext is dropped exactly when the credential it
+  // opens has really been destroyed, and a public plan goes on showing the link
+  // that will matter again as soon as it is private.
   useEffect(() => {
     if (!props.hasShareCode) setCode(null);
   }, [props.hasShareCode]);

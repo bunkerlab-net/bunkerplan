@@ -155,11 +155,13 @@ describe.each([
   ["statement by statement", false],
 ])("0009 against a public plan carrying a share code (%s)", (_, wrap) => {
   /**
-   * Until public retired the code, flipping a plan public left its digest in
-   * place: dormant while public, live again the moment the plan went private.
-   * Rows in that shape already exist, so the migration has to repair them - and
-   * has to leave a private plan's own code alone, which is the state the whole
-   * code-sharing feature is.
+   * A migration is history and is asserted as written, not as the rule stands
+   * now. `0009` swept the digest off public rows because at the time a public
+   * plan was not allowed to carry one; issue #22 reversed that, and a flip now
+   * keeps the code. Nothing here changes: the statement shipped, it ran, and
+   * what it did to a database that applied it is what this pins. What the
+   * migration must still not do is touch a private plan's own code, which is
+   * the state the whole code-sharing feature is.
    */
   test("clears a public plan's code and keeps a private one's", () => {
     const db = migrate(
