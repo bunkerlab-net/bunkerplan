@@ -156,6 +156,27 @@ describe("the unlock rate limit", () => {
     expect(returned).toEqual([[held.bucket, WINDOW_START]]);
   });
 
+  test("a refund that fails reaches the caller rather than being swallowed", async () => {
+    /*
+     * The one sign refunds are failing at all. Containment lives at the call
+     * site in src/app.ts, which catches this and logs it - so a redemption
+     * still answers 200, and an operator still learns the budget is drifting
+     * down. Swallowing it here would take the log with it.
+     */
+    const { limits } = fakeLimits(true);
+    const held = await reservationOf(
+      limits,
+      CONFIG,
+      post({ "cf-connecting-ip": "203.0.113.9" }),
+    );
+    const unreachable = new Error("the counter store is unreachable");
+    limits.refund = async () => {
+      throw unreachable;
+    };
+
+    await expect(refundUnlockAttempt(limits, held)).rejects.toBe(unreachable);
+  });
+
   test("buckets one address together and two apart", async () => {
     const bucketFrom = async (address: string) => {
       const { limits } = fakeLimits(true);

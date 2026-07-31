@@ -98,8 +98,8 @@ export interface Harness {
  * would rebuild the same tree - `scripts/build.ts` opens with `rm -rf dist`,
  * so the repeats are destructive as well as slow.
  *
- * Still unconditional for a direct `bun test <file>` run, where nothing has
- * built and a stale `dist` would test the previous commit.
+ * Still unconditional for a direct run - `bun test ./tests/e2e/plans.test.ts`
+ * - where nothing has built and a stale `dist` would test the previous commit.
  */
 async function build(): Promise<void> {
   if (process.env["BUNKERPLAN_PREBUILT"] === "1") return;

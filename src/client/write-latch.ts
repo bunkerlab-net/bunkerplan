@@ -62,6 +62,13 @@ export function useWriteLatch(
   ): Promise<boolean> => {
     if (inFlight.current) return false;
     inFlight.current = true;
+    /*
+     * The previous attempt's refusal is not about this one. Cleared before the
+     * call rather than after a success, so a retry does not run under the
+     * message that described the last failure - and a second failure replaces
+     * it rather than looking like the same one never went away.
+     */
+    setError(null);
     setBusy(true);
     try {
       const result = await operation();
@@ -72,7 +79,6 @@ export function useWriteLatch(
         setError(messageOf(result.error, fallback));
         return false;
       }
-      setError(null);
       onData?.(result.data ?? null);
       await refresh();
       return true;

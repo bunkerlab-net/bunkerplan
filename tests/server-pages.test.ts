@@ -208,6 +208,22 @@ describe("the plan gate", () => {
     expect(markup).not.toContain("Have a code?");
   });
 
+  test("the bare call is the refusal page, with no code box", () => {
+    // The defaults are the common case - `/p/{id}` at 401 - so a call that
+    // names neither option must not quietly become the relay, or offer a box
+    // for a code the plan does not have.
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN);
+
+    expect(pageProps(markup)).toEqual({
+      name: "gate",
+      planId: "abc123",
+      hasCode: false,
+      path: "/p/abc123",
+      origin: ORIGIN,
+      relay: false,
+    });
+  });
+
   test("is not indexed - it names a private plan", () => {
     const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: true });
 

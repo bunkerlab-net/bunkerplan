@@ -49,6 +49,16 @@ const reported = new WeakSet<UnlockRateConfig>();
  *
  * The bucket stored is a keyed digest of the address, not the address - see
  * `unlockBucketKey`. That changes nothing about the counting.
+ *
+ * The value is used whole, and a comma-separated list is not picked apart.
+ * `CLIENT_IP_HEADER` must name a header the proxy *overwrites*, which
+ * src/config.ts refuses to start without and docs/self-hosting.md states
+ * twice - a header the proxy appends to is the misconfiguration SECURITY.md
+ * puts out of scope by name. Splitting one here would make that setup look
+ * supported while quietly picking an entry: the first is client-controlled and
+ * forges a bucket per request, and the last is only right for proxies that
+ * append rather than prepend. Refusing to guess is the behaviour; the operator
+ * names one header and it carries one address.
  */
 async function bucketFor(
   config: UnlockRateConfig,

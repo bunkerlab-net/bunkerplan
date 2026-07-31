@@ -189,8 +189,8 @@ mock.module("../../src/client/auth.ts", () => stubs);
  * Installed once at module scope rather than per suite, which is the same
  * shape as the `mock.module` registrations above and for the same reason: the
  * patch cannot be taken back cleanly once other files hold references, so what
- * varies per file is the gate, not the installation. Nothing here reads
- * `window.location` at import time.
+ * varies per file is the gate, not the installation. The patch binds the real
+ * methods at import; it reads no URL, origin or path until something navigates.
  */
 export const navigations: string[] = [];
 

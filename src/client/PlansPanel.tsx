@@ -17,6 +17,7 @@ import {
   uploadPlan,
 } from "./api.ts";
 import { inputOf } from "./dom.ts";
+import { useCopy } from "./use-copy.ts";
 
 /**
  * What the Sharing column says at a glance.
@@ -329,22 +330,7 @@ function ShareLink({
   relay.search = "";
   relay.hash = `code=${encodeURIComponent(code)}`;
   const link = relay.toString();
-  const [copyFailed, setCopyFailed] = useState(false);
-
-  // `writeText` rejects on a denied permission or an insecure context, and
-  // this is the one secret the app shows once - a copy that quietly did
-  // nothing would lose it. The link is on screen either way, so the fallback
-  // is to say so rather than to retry.
-  const copy = () => {
-    void (async () => {
-      try {
-        await navigator.clipboard.writeText(link);
-        setCopyFailed(false);
-      } catch {
-        setCopyFailed(true);
-      }
-    })();
-  };
+  const { copy, copyFailed } = useCopy(link);
 
   return (
     <>

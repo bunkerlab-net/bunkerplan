@@ -50,11 +50,14 @@ const roots: Array<{ unmount: () => void }> = [];
  * last, disarmed last.
  */
 afterEach(async () => {
+  const mounted = hosts.splice(0);
   try {
     for (const root of roots.splice(0)) root.unmount();
     await flush();
-    for (const host of hosts.splice(0)) host.remove();
   } finally {
+    // Hosts go whatever happened above, as the harness does it: a `<div>` left
+    // on `document.body` is one the next test's queries can still find.
+    for (const host of mounted) host.remove();
     // The relay test moves the browser to `/s/{id}`, and the stub captures the
     // forward instead of following it, so nothing else puts this back.
     window.history.replaceState(null, "", "/");

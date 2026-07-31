@@ -3,6 +3,7 @@ import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
 import { EmptyOrLoading } from "./EmptyOrLoading.tsx";
 import { messageOf } from "./errors.ts";
+import { useCopy } from "./use-copy.ts";
 import { useWriteLatch } from "./write-latch.ts";
 
 interface KeyRow {
@@ -33,25 +34,7 @@ function Reveal({
   value: string;
   onDismiss: () => void;
 }) {
-  const [copyFailed, setCopyFailed] = useState(false);
-
-  /*
-   * `writeText` rejects on a denied permission or an insecure context, and is
-   * absent entirely on an older browser - and this is the one secret the app
-   * shows once. A copy that quietly did nothing, or threw past the handler,
-   * would take the only copy of the key with it. The value is on screen either
-   * way, so the fallback is to say so rather than to retry.
-   */
-  const copy = () => {
-    void (async () => {
-      try {
-        await navigator.clipboard.writeText(value);
-        setCopyFailed(false);
-      } catch {
-        setCopyFailed(true);
-      }
-    })();
-  };
+  const { copy, copyFailed } = useCopy(value);
 
   return (
     <div className="notice">
@@ -68,7 +51,12 @@ function Reveal({
         </button>
       </div>
       {copyFailed && (
-        <p className="muted">Copying failed - select the key above instead.</p>
+        // `role="alert"`, as ShareLink does: nothing moved focus, so a reader
+        // who pressed Copy and heard nothing would believe it worked - and the
+        // key is shown once.
+        <p className="muted" role="alert">
+          Copying failed - select the key above instead.
+        </p>
       )}
     </div>
   );

@@ -205,6 +205,15 @@ describe("deleting an account", () => {
     expect(typeof options.user.deleteUser.beforeDelete).toBe("function");
   });
 
+  test("no verification callback, so no delete arrives without the header", () => {
+    // `sendDeleteAccountVerification` would delete on a link followed from an
+    // inbox - a request that carries no `x-expected-account` and cannot. See
+    // the note in src/auth/options.ts.
+    expect("sendDeleteAccountVerification" in options.user.deleteUser).toBe(
+      false,
+    );
+  });
+
   test("the hook runs with the id, before Better Auth deletes anything", async () => {
     const swept: string[] = [];
     const withHook = buildAuthOptions({

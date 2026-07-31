@@ -228,6 +228,16 @@ export function buildAuthOptions(input: AuthOptionsInput) {
       deleteUser: {
         enabled: true,
         /*
+         * `sendDeleteAccountVerification` is deliberately absent, and adding it
+         * would open a path around the check below. That flow deletes on a link
+         * followed from an inbox, in a request that carries no
+         * `x-expected-account` and cannot - so the hook would have nothing to
+         * compare and would refuse every one of them, or would have to be
+         * loosened to let them through. Addresses here are synthetic
+         * (`…@passkey.invalid`) and receive no mail, so the flow buys nothing
+         * either way.
+         */
+        /*
          * Two jobs, in this order.
          *
          * The first is the only place the intended account can be confirmed
