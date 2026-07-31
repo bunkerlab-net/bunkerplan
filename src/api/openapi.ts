@@ -497,9 +497,11 @@ const unlockDescription = (codeFormat: string): string =>
   "`/p/{id}` serves it with no parameter and no session. " +
   `${codeFormat} Throttled per client address, set by UNLOCK_RATE_MAX ` +
   "and UNLOCK_RATE_WINDOW_SEC.\n\n" +
-  "A redemption is refunded, and so is a `500` - neither spent a guess, and " +
-  "a failure disclosed nothing about the code. Every refusal keeps its " +
-  "count: a wrong code, an unknown plan, a body this endpoint cannot read. " +
+  "A redemption gets its count back, and so does a `500` - neither spent a " +
+  "guess, and a failure disclosed nothing about the code. Returning it is " +
+  "best-effort: if that fails the count stays spent, which errs towards " +
+  "refusing. Every refusal keeps its count: a wrong code, an unknown plan, " +
+  "a body this endpoint cannot read. " +
   "A correct code costs nothing, " +
   "because a share link is opened by everyone it was sent to and charging " +
   "those would refuse a room of colleagues behind one egress address. What " +
@@ -538,6 +540,10 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
         401: "The code did not match.",
         404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
         413: "The body is larger than a code could make it.",
+        500:
+          "The redemption could not be completed. Releasing its reservation " +
+          "is attempted, because a failure said nothing about the code - and " +
+          "if that release fails too, the count stays spent.",
       }),
       "429": {
         ...json(

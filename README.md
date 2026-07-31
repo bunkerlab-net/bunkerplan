@@ -89,7 +89,9 @@ reads it - and `bun run test` alone runs the full matrix. `.env.example`
 documents all five, including the two S3 credentials that default to the
 compose MinIO.
 
-CI sets them, so a pull request always runs the full matrix. Nothing here
+CI sets them, so a pull request always runs the full matrix - across two steps
+rather than one: the main step carries Postgres and MinIO, and Valkey gets a
+step of its own for the reason below. Nothing here
 can reach data you care about: the backends run under their own Compose
 project (`bunkerplan-test`), separate from the self-hosting stack below, so
 `test:backends:down -v` cannot take your local Postgres, Valkey, or MinIO

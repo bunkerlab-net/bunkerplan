@@ -383,6 +383,10 @@ describe("a code-shared plan", () => {
       },
       body: JSON.stringify({ code: CODE }),
     });
+    // The redemption itself, before the cookie it minted is trusted: a 401
+    // here would leave `cookiePair` throwing about a missing cookie rather
+    // than the test naming what actually failed.
+    expect(unlocked.status).toBe(204);
     const cookie = cookiePair(unlocked, PLAN_ID);
 
     const response = await app.fetch(`/p/${PLAN_ID}`, { headers: { cookie } });

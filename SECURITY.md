@@ -74,8 +74,9 @@ Known and accepted, so please do not report these as new:
   be handed to HTML the reader did not write.
 
   The `?code=` parameter on `/p/{id}` is kept for a client that can only fetch
-  a URL. No client sends a fragment - that is what makes the share link safe -
-  so using one is a two-step: read the code out of the URL you were given, then
+  a URL. No client *sends* a fragment - HTTP requests carry the path and query
+  only, which is what makes the share link safe - so using one is a two-step:
+  read the code out of the URL you were given, then
   `POST /api/plans/{id}/unlock` with it in the JSON body and keep the cookie.
   Anything that can make that request should, and a script holding the link
   already can. The query form skips the two steps and pays for it: the code

@@ -51,8 +51,18 @@ const roots: Array<{ unmount: () => void }> = [];
  */
 afterEach(async () => {
   const mounted = hosts.splice(0);
+  const failures: unknown[] = [];
   try {
-    for (const root of roots.splice(0)) root.unmount();
+    // Each on its own: one tree throwing from a cleanup must not leave the
+    // rest mounted into the next test, which is a failure that lands
+    // somewhere else entirely.
+    for (const root of roots.splice(0)) {
+      try {
+        root.unmount();
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
     await flush();
   } finally {
     // Hosts go whatever happened above, as the harness does it: a `<div>` left
@@ -62,6 +72,9 @@ afterEach(async () => {
     // forward instead of following it, so nothing else puts this back.
     window.history.replaceState(null, "", "/");
   }
+  // Raised after the cleanup, so a reported failure cannot also be the reason
+  // something was left behind.
+  if (failures.length > 0) throw failures[0];
 });
 
 useApiStub();
@@ -209,11 +222,12 @@ describe("the dashboard", () => {
  * app has to be written as a string for that reason, and this is what says
  * why.
  *
- * These record what the pinned hono actually does; they are not a wish. The
- * mismatch below is the bug the string workaround exists for, so asserting
- * that the two renderers agree would fail today and delete the only warning
- * anyone gets if the workaround is dropped. If hono fixes this, these fail -
- * which is the point, and the moment to reconsider the workaround.
+ * These record what hono 4.12.32 - the pinned version, and the one
+ * `hono/jsx/dom/client` hydrates with here - actually does; they are not a
+ * wish. The mismatch below is the bug the string workaround exists for, so
+ * asserting that the two renderers agree would fail today and delete the only
+ * warning anyone gets if the workaround is dropped. If hono fixes this, these
+ * fail - which is the point, and the moment to reconsider the workaround.
  */
 describe("attributes across the two renderers", () => {
   test("a false boolean is dropped, and a string is kept", async () => {
