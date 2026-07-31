@@ -95,8 +95,7 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
 
   // A public plan is readable by anyone holding the URL, so neither a code nor
   // a grant gates anything. Both stay on screen rather than vanishing - they
-  // are real state that applies again the moment this goes private - but
-  // nothing here acts while public.
+  // are real state that applies again the moment this goes private.
   const inert = state.visibility === "public";
   const shared = { plan, guard, reload: load, locked: busy || inert };
 
@@ -113,7 +112,11 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
           })
         }
       />
-      <ShareCodeBlock {...shared} hasShareCode={state.hasShareCode} />
+      <ShareCodeBlock
+        {...shared}
+        busy={busy}
+        hasShareCode={state.hasShareCode}
+      />
       <GrantsBlock {...shared} grants={state.grants} />
     </div>
   );
@@ -147,9 +150,10 @@ function SharingPlaceholder(props: {
 }
 
 /**
- * What both mutating blocks need to act and then refresh. `locked` already
- * folds in the public-plan case, so neither block needs `inert` itself - only
- * `VisibilityChoice`, which is the one that explains it.
+ * What both mutating blocks need to act and then refresh. `locked` folds in the
+ * public-plan case, so a block gated entirely by visibility needs nothing else.
+ * `ShareCodeBlock` takes `busy` as well, because one of its controls has to keep
+ * working while public - see there.
  */
 interface BlockProps {
   plan: PlanSummary;
@@ -218,6 +222,19 @@ function VisibilityChoice(props: {
 function ShareCodeBlock(
   props: BlockProps & {
     hasShareCode: boolean;
+    /**
+     * `locked` without the public-plan case folded in.
+     *
+     * Removing a code has to work while the plan is public. The code survives a
+     * flip now, so a dashboard that disabled this would leave the only way to
+     * destroy one running through private - flip back, remove, flip again - on a
+     * plan the owner may not want private even briefly. `DELETE /share-code` is
+     * allowed at any visibility for exactly this reason.
+     *
+     * Minting stays on `locked`: a public plan is refused a new code (409), so
+     * that control would fail if it were offered.
+     */
+    busy: boolean;
   },
 ) {
   const { plan, guard, reload, locked } = props;
@@ -260,7 +277,7 @@ function ShareCodeBlock(
           <button
             type="button"
             className="btn-text btn-text-clay"
-            disabled={locked}
+            disabled={props.busy}
             onClick={clear}
           >
             Remove

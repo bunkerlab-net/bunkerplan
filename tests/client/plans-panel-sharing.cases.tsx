@@ -561,6 +561,32 @@ export function registerSharingCases(): void {
           view.byText<HTMLButtonElement>("button", "Create code").disabled,
         ).toBe(true);
       });
+
+      test("a public plan can still remove the code it kept", async () => {
+        // The code survives a flip to public, so this is the only control that
+        // destroys one. Disabled here, the owner would have to make the plan
+        // private, remove, and make it public again to be rid of a credential.
+        let state = sharing({ visibility: "public", hasShareCode: true });
+        api.getSharing = async () => state;
+        api.clearShareCode = async () => {
+          state = sharing({ visibility: "public", hasShareCode: false });
+        };
+        const view = await openEditor();
+
+        expect(
+          view.byText<HTMLButtonElement>("button", "Regenerate").disabled,
+        ).toBe(true);
+        expect(
+          view.byText<HTMLButtonElement>("button", "Remove").disabled,
+        ).toBe(false);
+
+        await click(view.byText("button", "Remove"));
+
+        expect(argsOf("clearShareCode")).toEqual([PLAN_ID]);
+        expect(
+          view.all("button").map((node) => node.textContent),
+        ).not.toContain("Remove");
+      });
     });
 
     describe("grants", () => {

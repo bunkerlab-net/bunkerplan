@@ -605,21 +605,32 @@ export function describePlanRepo(
        * The whole of issue #22: an owner opens a code-shared plan up, closes it
        * again, and the link already handed out still works. Nothing writes the
        * hash by hand between the flips - the transitions are what is on trial.
+       *
+       * The grant rides along because `setVisibility` names one table and the
+       * repo has two. A statement that reached `plan_grant` would revoke every
+       * named account on a flip, which no assertion about the hash would catch.
        */
-      test("a code survives a round trip through public", async () => {
+      test("a code and its grants survive a round trip through public", async () => {
         const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        const grantee = await fixture.seedUser(handle);
         const coded = row(owner, {
           visibility: "private",
           shareCodeHash: "e".repeat(64),
         });
         await plans.insert(coded, 10);
+        expect(await plans.grantByHandle(coded.id, owner, handle)).toBe(
+          "granted",
+        );
 
         expect(await plans.setVisibility(coded.id, owner, "public")).toBe(true);
-        // Still there while public, where it gates nothing: access is granted
-        // on `visibility` before the hash is read.
+        // Both still there while public, where neither gates anything: access is
+        // granted on `visibility` before either is read.
         expect((await plans.findAccess(coded.id))?.shareCodeHash).toBe(
           "e".repeat(64),
         );
+        expect(await plans.hasGrant(coded.id, grantee)).toBe(true);
+        expect(await plans.listGrantHandles(coded.id, owner)).toEqual([handle]);
 
         expect(await plans.setVisibility(coded.id, owner, "private")).toBe(
           true,
@@ -629,6 +640,8 @@ export function describePlanRepo(
           visibility: "private",
           shareCodeHash: "e".repeat(64),
         });
+        expect(await plans.hasGrant(coded.id, grantee)).toBe(true);
+        expect(await plans.listGrantHandles(coded.id, owner)).toEqual([handle]);
       });
 
       test("a plan that was already private keeps its code", async () => {

@@ -418,7 +418,7 @@ function rotateShareCodeOperation(codeFormat: string): Record<string, unknown> {
       ...failures({
         401: UNAUTHORISED,
         404: NOT_FOUND,
-        409: "The plan is public, so it needs no share code.",
+        409: "A new share code cannot be minted while the plan is public.",
       }),
     },
   };
