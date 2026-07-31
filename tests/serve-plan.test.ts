@@ -32,17 +32,23 @@ const CODE = "sHaReCoDe1234567";
 /**
  * The `name=value` pair a response set, without the attributes after it.
  *
- * What a browser would send back, which is what these tests replay. Throws
- * rather than returning "" for a response that set nothing: every caller
- * replays the result and asserts on what it opens, and an empty cookie earns
- * the same 401 as a wrong one - passing the test without testing anything.
+ * What a browser would send back, which is what these tests replay. Named
+ * rather than "the first `Set-Cookie`": these responses can carry more than
+ * one, and taking whichever came first would replay a different plan's cookie
+ * - or a session's - while the test reads as though it proved this plan's.
+ *
+ * Throws rather than returning "" for a response that set nothing: every
+ * caller replays the result and asserts on what it opens, and an empty cookie
+ * earns the same 401 as a wrong one - passing the test without testing
+ * anything.
  */
-const cookiePair = (response: Response): string => {
-  const pair = (response.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
-  if (pair === "" || pair.endsWith("=")) {
-    throw new Error("the response set no share cookie");
+const cookiePair = (response: Response, planId: string): string => {
+  const name = shareCookieName(planId);
+  for (const header of response.headers.getSetCookie()) {
+    const pair = header.split(";")[0] ?? "";
+    if (pair.startsWith(`${name}=`) && !pair.endsWith("=")) return pair;
   }
-  return pair;
+  throw new Error(`the response set no ${name} cookie`);
 };
 
 const serve = (
@@ -261,7 +267,7 @@ describe("a code-shared plan", () => {
   test("the cookie alone opens it next time", async () => {
     const app = await gated();
     const opened = await app.fetch(`/p/${PLAN_ID}?code=${CODE}`);
-    const cookie = cookiePair(opened);
+    const cookie = cookiePair(opened, PLAN_ID);
 
     const response = await app.fetch(`/p/${PLAN_ID}`, { headers: { cookie } });
 
@@ -289,7 +295,7 @@ describe("a code-shared plan", () => {
       storage: memoryStorage({ [PLAN_ID]: DOCUMENT, [other]: DOCUMENT }),
     });
     const opened = await app.fetch(`/p/${other}?code=${CODE}`);
-    const minted = cookiePair(opened);
+    const minted = cookiePair(opened, other);
     const value = minted.slice(minted.indexOf("=") + 1);
 
     // The source unlock has to have produced a real cookie: an empty value
@@ -325,7 +331,7 @@ describe("a code-shared plan", () => {
     const owner = buildApp({ sessionUser: OWNER, plans, storage });
     const reader = buildApp({ plans, storage });
     const opened = await reader.fetch(`/p/${PLAN_ID}?code=${CODE}`);
-    const cookie = cookiePair(opened);
+    const cookie = cookiePair(opened, PLAN_ID);
     return { owner, reader, cookie };
   };
 
@@ -377,7 +383,7 @@ describe("a code-shared plan", () => {
       },
       body: JSON.stringify({ code: CODE }),
     });
-    const cookie = cookiePair(unlocked);
+    const cookie = cookiePair(unlocked, PLAN_ID);
 
     const response = await app.fetch(`/p/${PLAN_ID}`, { headers: { cookie } });
 

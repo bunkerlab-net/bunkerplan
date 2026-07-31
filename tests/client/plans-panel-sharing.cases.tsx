@@ -1,4 +1,3 @@
-import "./dom-env.ts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PlansPanel } from "../../src/client/PlansPanel.tsx";
 import {
@@ -9,6 +8,7 @@ import {
   plan,
   sharing,
 } from "./api-stub.ts";
+import { ORIGIN } from "./dom-env.ts";
 import type { Mounted } from "./harness.tsx";
 import {
   click,
@@ -368,7 +368,7 @@ export function registerSharingCases(): void {
          * its own `location.hash`.
          */
         expect(view.find(".snippet code").textContent).toBe(
-          `https://plans.test/s/${PLAN_ID}#code=abcd1234efgh5678`,
+          `${ORIGIN}/s/${PLAN_ID}#code=abcd1234efgh5678`,
         );
         expect(view.text()).toContain(
           "This is the only time the code is shown.",
@@ -390,7 +390,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Create code"));
 
         expect(view.find(".snippet code").textContent).toBe(
-          `https://plans.test/s/${PLAN_ID}#code=a%20b%26c%3Dd`,
+          `${ORIGIN}/s/${PLAN_ID}#code=a%20b%26c%3Dd`,
         );
       });
 
@@ -403,7 +403,7 @@ export function registerSharingCases(): void {
         await click(view.byText("button", "Copy"));
 
         expect(written).toEqual([
-          `https://plans.test/s/${PLAN_ID}#code=abcd1234efgh5678`,
+          `${ORIGIN}/s/${PLAN_ID}#code=abcd1234efgh5678`,
         ]);
         expect(view.maybe('.sharing [role="alert"]')).toBeNull();
       });

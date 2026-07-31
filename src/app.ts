@@ -226,7 +226,17 @@ function registerPlanUnlock(app: Hono, getServices: GetServices): void {
       try {
         await refundUnlockAttempt(db.unlockRateLimits, reservation);
       } catch (cause) {
-        logger.warn({ err: cause }, "unlock reservation was not refunded");
+        // The bucket and window, so a budget that never recovers can be found
+        // rather than only known about. The bucket is already a keyed digest
+        // of the address, not the address - see `unlockBucketKey`.
+        logger.warn(
+          {
+            err: cause,
+            bucket: reservation.bucket,
+            windowStart: reservation.windowStart,
+          },
+          "unlock reservation was not refunded",
+        );
       }
     };
 
@@ -312,6 +322,10 @@ function registerShareRelay(app: Hono, deps: AppDeps): void {
 
     // Only whether a code exists. `shareCodeHash` is what would let a holder
     // forge this plan's unlock cookie, so it never reaches a response body.
+    // No `X-Robots-Tag`: `renderPlanGate` omits `social`, which is what makes
+    // `Document` emit `<meta name="robots" content="noindex">` - the gate is
+    // the page being served here, so a crawler reading it reads that. Pinned
+    // by tests/server-pages.test.ts.
     return c.html(
       renderPlanGate(assets, planId, config.publicBaseUrl, {
         hasCode: row.shareCodeHash !== null,

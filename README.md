@@ -149,13 +149,15 @@ is the trap. A single pass says nothing about a failure that happens some of
 the time. Repeat it instead:
 
 ```sh
-TEST_DATABASE_URL=$$MIWQNAUYA1TZ:L$$ \
-  TEST_VALKEY_URL=redis://localhost:6379 \
-  TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
-  TEST_S3_ACCESS_KEY_ID=bunkerplan \
-  TEST_S3_SECRET_ACCESS_KEY=bunkerplan-secret \
-  BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
+BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
 ```
+
+That command carries no variables of its own, so it needs them in the
+environment: uncomment them in your local environment file, which `bun test`
+reads, or `export` the ones the setup block above passes per-command. All of
+them, not just the one for the driver under suspicion - the point is to keep
+the other files in the picture. Without them the drivers skip and the repeat
+proves nothing, five times.
 
 Repetition narrows it, it does not decide it. A genuine regression tends to
 fail every repetition and to fail on its own assertion; the flake tends to

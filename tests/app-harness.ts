@@ -349,7 +349,7 @@ export function memoryStorage(
       // A copy, because a real bucket keeps the bytes it was handed: retaining
       // the caller's buffer lets a later mutation of it silently rewrite a
       // stored document and the etag derived from it.
-      objects.set(id, new Uint8Array(body as Uint8Array));
+      objects.set(id, new Uint8Array(body));
     },
     get: async (id): Promise<PlanObject | null> => {
       const bytes = objects.get(id);

@@ -235,6 +235,11 @@ describe("the Postgres health probe", () => {
     // The caller's own reason, so a handler can tell why it never did.
     await expect(probing).rejects.toBe(reason);
 
+    // Waited for rather than read straight after the rejection: the release
+    // runs in the abandoned promise's own `then`, which is a separate job from
+    // the one that settles `probing`. Reading here would be reading whichever
+    // landed first.
+    await reaches(() => released.length === 1);
     expect(asked).toEqual([]);
     expect(released).toEqual([{ destroyed: true }]);
   });

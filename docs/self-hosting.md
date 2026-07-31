@@ -223,8 +223,8 @@ confusing 403 much later.
 - **Security headers are applied in `src/http/security-headers.ts`**, reached
   from the one middleware both targets share: `X-Content-Type-Options`,
   `Referrer-Policy`, `X-Frame-Options: DENY`, HSTS over TLS, and `APP_CSP`.
-  That policy is `default-src 'self'` with `script-src 'self'`, `img-src
-'self'`, `connect-src 'self'`, `style-src 'self' 'unsafe-inline'`,
+  That policy is `default-src 'self'` with `script-src 'self'`,
+  `img-src 'self'`, `connect-src 'self'`, `style-src 'self' 'unsafe-inline'`,
   `base-uri 'none'`, `object-src 'none'`, `form-action 'self'` and
   `frame-ancestors 'none'`. All of them, `APP_CSP` included, are set only when
   absent, so a route that already chose a header keeps it. The exception is

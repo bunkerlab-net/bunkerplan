@@ -1,6 +1,13 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 /**
+ * The origin every client suite runs at. Exported so a test asserting on a
+ * built URL names the same constant the environment was registered with,
+ * rather than a second copy of it that can drift.
+ */
+export const ORIGIN = "https://plans.test";
+
+/**
  * Installs a browser environment on the test process.
  *
  * Imported for its side effect, and imported *first* by every client suite:
@@ -15,5 +22,5 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
  * `window` would make that branch unreachable.
  */
 if (!GlobalRegistrator.isRegistered) {
-  GlobalRegistrator.register({ url: "https://plans.test/" });
+  GlobalRegistrator.register({ url: `${ORIGIN}/` });
 }
