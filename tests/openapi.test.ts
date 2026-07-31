@@ -37,12 +37,13 @@ const HTTP_METHODS: Record<string, true> = {
 };
 
 /**
- * Routes the document deliberately leaves out.
+ * Routes the document deliberately leaves out whole.
  *
  * `/api/auth/*` belongs to Better Auth: its surface follows the plugin set,
  * and hand-describing it here is the drift the document exists to avoid. The
  * other two are the documentation itself, and the rest are pages rather than
- * API endpoints.
+ * API endpoints. Routes left out because a key cannot call them are in
+ * `SESSION_ONLY` instead.
  */
 const UNDOCUMENTED: Record<string, true> = {
   // The security-header middleware, which is not an endpoint.
@@ -71,6 +72,31 @@ const UNDOCUMENTED: Record<string, true> = {
    */
   "/s/{id}": true,
 };
+
+/**
+ * Session-only operations, which the document describes nowhere: it publishes
+ * the API-key surface, and a `session` security scheme would offer a reader
+ * holding a key a cookie only a browser can obtain. Listed per method, because
+ * `/api/plans/{id}` carries both kinds - a key replaces, relabels, and deletes;
+ * only widening a plan's audience needs the dashboard.
+ *
+ * Spelled out rather than derived, so widening one of these to accept a key is
+ * a deliberate edit here as well as in src/http/*, and a new session-only
+ * route has to be classified rather than quietly omitted.
+ */
+const SESSION_ONLY: Record<string, Set<string>> = {
+  "/api/plans/{id}/sharing": new Set(["get", "put"]),
+  "/api/plans/{id}/share-code": new Set(["post", "delete"]),
+  "/api/plans/{id}/grants": new Set(["post"]),
+  "/api/plans/{id}/grants/{handle}": new Set(["delete"]),
+};
+
+/** The methods on `path` the document is expected to describe. */
+function expected(path: string, served: Set<string>): string[] {
+  const excluded = SESSION_ONLY[path];
+  const kept = [...served].filter((method) => excluded?.has(method) !== true);
+  return kept.sort();
+}
 
 /** Hono's `/api/plans/:id` is the document's `/api/plans/{id}`. */
 function documented(path: string): string {
@@ -106,6 +132,22 @@ function servedRoutes(): Map<string, Set<string>> {
   }
   return routes;
 }
+
+/**
+ * Operations that ask for nothing, and why. Everything else in the document
+ * must ask for the key: an operation that quietly regresses to `security: []`
+ * publishes "no credential needed here", which is the inverse of the truth and
+ * is a plausible edit, because two neighbours legitimately carry it.
+ */
+const PUBLIC_OPERATIONS: Record<string, Array<Record<string, unknown>>> = {
+  // Redeeming a share code authorises on the code in the body.
+  "post /api/plans/{id}/unlock": [],
+  // A self-hosting probe.
+  "get /healthz": [],
+  // A public plan needs nothing; a private one takes the key, the code, or the
+  // unlock cookie - the last two are parameters rather than schemes.
+  "get /p/{id}": [{}, { apiKey: [] }],
+};
 
 describe("the published document", () => {
   // Validated after a round trip through JSON, which is the form that is
@@ -144,11 +186,11 @@ describe("the published document", () => {
       return schema.properties["code"]?.description ?? "";
     };
 
-    for (const name of ["PlanCreated", "ShareCodeCreated"]) {
-      expect(codeOf(name)).toContain(`${CONFIG.shareCodeLength} characters`);
-      // The repository default must not leak through in its place.
-      expect(codeOf(name)).not.toContain("16 characters");
-    }
+    expect(codeOf("PlanCreated")).toContain(
+      `${CONFIG.shareCodeLength} characters`,
+    );
+    // The repository default must not leak through in its place.
+    expect(codeOf("PlanCreated")).not.toContain("16 characters");
 
     const createPlan = doc.paths["/api/plans"]?.["put"] as {
       description: string;
@@ -179,6 +221,82 @@ describe("the published document", () => {
   test("carries no synthetic shared-definitions entry", () => {
     expect(Object.keys(doc.components.schemas)).not.toContain("__shared");
   });
+
+  /**
+   * The document is scoped to what an API key can call, so `apiKey` is the
+   * only credential any operation may ask for. A `session` scheme creeping
+   * back in - or an operation naming one that is not declared - is what this
+   * catches.
+   */
+  test("offers no credential but the API key", () => {
+    expect(Object.keys(doc.components.securitySchemes)).toEqual(["apiKey"]);
+
+    const named = new Set<string>();
+    const seen = new Set<string>();
+    for (const [path, item] of Object.entries(doc.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        if (HTTP_METHODS[method] !== true) continue;
+        seen.add(`${method} ${path}`);
+        const { security } = operation as {
+          security?: Array<Record<string, unknown>>;
+        };
+        // Every operation declares one: the document has no top-level
+        // `security`, so an omission would inherit nothing and mean nothing.
+        expect(security).toBeDefined();
+        // Per operation, not as a union: a union stays green while one
+        // operation drops its requirement, as long as another still names it.
+        expect(security).toEqual(
+          PUBLIC_OPERATIONS[`${method} ${path}`] ?? [{ apiKey: [] }],
+        );
+        // `{}` is "no credential needed here" and names no scheme at all.
+        for (const alternative of security ?? []) {
+          for (const name of Object.keys(alternative)) named.add(name);
+        }
+      }
+    }
+
+    expect(seen.size).toBeGreaterThan(0);
+    // The same staleness guard `SESSION_ONLY` gets: an exemption whose
+    // operation is gone stops exempting anything and starts waiting to excuse
+    // whatever is added at that method and path next.
+    for (const key of Object.keys(PUBLIC_OPERATIONS)) {
+      expect(seen).toContain(key);
+    }
+    expect([...named]).toEqual(["apiKey"]);
+  });
+
+  /**
+   * The other half of "every `$ref` resolves": a component nothing points at.
+   * `componentSchemas` emits the response shapes of the session-only routes
+   * too, and a rendered reference lists components whether an operation names
+   * one or not - so an orphan would put `PlanSharing` in front of a reader who
+   * has just been told sharing lives elsewhere.
+   */
+  test("publishes no component nothing points at", () => {
+    const refs = new Set(
+      [...JSON.stringify(doc).matchAll(/"\$ref":"([^"]+)"/g)].map((match) =>
+        (match[1] ?? "").slice("#/components/schemas/".length),
+      ),
+    );
+
+    expect(refs.size).toBeGreaterThan(0);
+    expect(Object.keys(doc.components.schemas).sort()).toEqual(
+      [...refs].sort(),
+    );
+
+    // Named rather than only implied, because the two sides above are equal by
+    // construction: these are the shapes `componentSchemas` still emits for the
+    // session-only handlers, and none of them may reach the document.
+    for (const name of [
+      "PlanSharing",
+      "ShareCodeCreated",
+      "GrantRequest",
+      "GrantResult",
+      "SharingRequest",
+    ]) {
+      expect(doc.components.schemas[name]).toBeUndefined();
+    }
+  });
 });
 
 describe("coverage of the routes the app actually serves", () => {
@@ -205,10 +323,32 @@ describe("coverage of the routes the app actually serves", () => {
     ]);
   });
 
+  /**
+   * A stale entry is as bad as a missing one: it would keep excusing a path the
+   * app no longer serves, and if a route were widened to accept a key while its
+   * entry stayed, the document would go on under-describing the key surface with
+   * every other test green.
+   *
+   * Containment, not equality: the map is per method precisely so a path may
+   * carry both kinds, and a new session-only method on one of these paths is
+   * caught by the coverage tests below rather than here.
+   */
+  test("names only session-only operations the app still serves", () => {
+    for (const [path, methods] of Object.entries(SESSION_ONLY)) {
+      const served = routes.get(path);
+      expect(served).toBeDefined();
+      for (const method of methods) expect(served).toContain(method);
+    }
+  });
+
   test("every served route is described or deliberately excluded", () => {
     const described = new Set(Object.keys(doc.paths));
-    for (const path of routes.keys()) {
+    for (const [path, methods] of routes) {
       if (UNDOCUMENTED[path] === true) continue;
+      if (expected(path, methods).length === 0) {
+        expect(described).not.toContain(path);
+        continue;
+      }
       expect(described).toContain(path);
     }
   });
@@ -220,7 +360,7 @@ describe("coverage of the routes the app actually serves", () => {
       const listed = Object.keys(item).filter(
         (key) => HTTP_METHODS[key] === true,
       );
-      expect(listed.sort()).toEqual([...methods].sort());
+      expect(listed.sort()).toEqual(expected(path, methods));
     }
   });
 

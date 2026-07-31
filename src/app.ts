@@ -17,7 +17,7 @@ import {
 import { problem } from "./http/problem.ts";
 import { relabelPlan } from "./http/relabel-plan.ts";
 import { replacePlan } from "./http/replace-plan.ts";
-import { resolveSessionUserId, resolveUserId } from "./http/require-user.ts";
+import { resolveUserId } from "./http/require-user.ts";
 import { applySecurityHeaders } from "./http/security-headers.ts";
 import { servePlan } from "./http/serve-plan.ts";
 import {
@@ -93,12 +93,16 @@ function registerPlanItem(app: Hono, getServices: GetServices): void {
     );
   });
 
-  // Session-only, unlike PUT and DELETE: an API key authorises upload and
-  // delete, and the label it can set is the one it supplies on upload.
+  // A key or a session, like PUT and DELETE beside it: a caller that may
+  // replace the document or destroy the plan outright is not one to refuse a
+  // rename over, and `?label=` already lets a key name a plan at upload.
+  //
+  // Unmetered, as `DELETE` is: the upload allowance covers upload and replace
+  // only. What bounds this one is the 4 KB body cap in src/http/relabel-plan.ts.
   app.patch("/api/plans/:id", async (c) => {
     const { auth, db } = await getServices();
 
-    const userId = await resolveSessionUserId(auth, c.req.raw);
+    const userId = await resolveUserId(auth, c.req.raw);
     if (userId === null) return problem(401, "authentication required");
 
     return await relabelPlan(db.plans, c.req.raw, c.req.param("id"), userId);

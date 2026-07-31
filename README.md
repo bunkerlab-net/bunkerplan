@@ -10,8 +10,9 @@ Upload a standalone HTML document, get a URL at `https://{host}/p/{id}`.
   visitor registers with nothing but a passkey, and one WebAuthn prompt signs
   them straight in.
 - **API keys** for automation - as many as you want, expiry optional. A key
-  authorises upload, replacement, delete, and reading any plan its owner may
-  read; it cannot change who a plan is shared with.
+  authorises upload, replacement, renaming, delete, listing its owner's plans,
+  and reading any plan its owner may read; it can share a plan as it uploads it,
+  but cannot change how an existing plan is shared.
 - **Runs on Cloudflare or your own box** from one source tree: R2/D1/KV on
   Workers, any S3-compatible store + Postgres/SQLite + Valkey when self-hosted.
 
@@ -188,6 +189,16 @@ answer with (`src/api/schemas.ts`), so a response shape that drifts from the
 published spec fails `tsc`, and `tests/openapi.test.ts` fails a route that
 ships undescribed. `servers` and the upload cap come from the running
 deployment, not from this repository's defaults.
+
+It describes what an API key can call - upload, replace, rename, list, delete,
+and read - plus the operations that need no credential: redeeming a share code,
+the health probe, and reading a plan whose gate is already open. The
+sharing-management routes - visibility, share codes, grants - are session-only
+because a leaked key must not be able to widen a plan that already exists, and
+are left out so nothing in the reference asks a client for a cookie only a
+browser can get. `/api/auth/*` is out for its own reason: Better Auth owns it.
+`tests/openapi.test.ts` names each omission, so widening one to accept a key is
+a deliberate edit there too.
 
 Scalar's browser bundle is copied out of a devDependency into `public/scalar/`
 on `postinstall`, so the page loads nothing off-origin and nothing from a CDN.
