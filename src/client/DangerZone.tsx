@@ -120,12 +120,14 @@ async function deleteAccount(intended: string | null): Promise<DeleteOutcome> {
      * up, and this is the authoritative record of who was just signed in.
      *
      * Read straight - no `?.`, no `?? null` standing in for an absent id.
-     * @better-auth/passkey declares `signIn.passkey` as a union of objects
-     * with no `undefined` member (dist/client.d.mts), and every path through
-     * its `signInPasskey` returns one of them, so past the error above the id
-     * is a `string`. A branch for a missing one would be handling a state the
-     * dependency cannot produce, and would have to guess whether to call it a
-     * refusal or the wrong account.
+     * `@better-auth/passkey` 1.6.25 (`dist/client.d.mts`) declares
+     * `signIn.passkey` as a five-arm union discriminated on `error`: every arm
+     * carrying `error: null` also carries `data: { session, user }`, and every
+     * arm with an error carries `data: null`. The check above eliminates the
+     * error arms, so `data` is non-null here and `user.id` is a `string` -
+     * which is why this typechecks without a cast. A branch for a missing id
+     * would be handling a state the dependency cannot produce, and would have
+     * to guess whether to call it a refusal or the wrong account.
      */
     if (reauth.data.user.id !== intended) {
       return { kind: "blocked", message: WRONG_ACCOUNT };

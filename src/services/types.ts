@@ -102,6 +102,11 @@ export interface RateLimitRepo {
    * than merely checking that some window is still open. A request whose window
    * rolled while it was in flight has nothing to give back: the count it took
    * went with that window, and the row now holds a budget somebody else opened.
+   *
+   * Rejects if the store cannot be reached - it is not swallowed here, because
+   * a budget quietly failing to recover is the thing an operator needs told.
+   * Containment belongs to the caller: src/app.ts catches it, logs the bucket
+   * and window, and still answers the reader whose redemption already worked.
    */
   refund(key: string, windowStart: number): Promise<void>;
 }
