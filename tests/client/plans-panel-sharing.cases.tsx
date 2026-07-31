@@ -384,14 +384,7 @@ export function registerSharingCases(): void {
          * bare boolean would sit under a link nobody has tried to copy, and
          * tell its owner a copy they never made did not work.
          */
-        Object.defineProperty(navigator, "clipboard", {
-          configurable: true,
-          value: {
-            writeText: async () => {
-              throw new Error("permission denied");
-            },
-          },
-        });
+        clipboard({ allow: false });
         codeState(false);
         const view = await openEditor();
 

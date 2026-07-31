@@ -322,6 +322,14 @@ function registerShareRelay(app: Hono, deps: AppDeps): void {
 
     // Only whether a code exists. `shareCodeHash` is what would let a holder
     // forge this plan's unlock cookie, so it never reaches a response body.
+    //
+    // Not a decision about access, and deliberately not branched on
+    // `row.visibility`: this page renders the same for every reader, and the
+    // client forwards to `/p/{id}` whenever there is nothing to spend - a
+    // public plan, a revoked code, a bare visit. `/p/{id}` is what knows.
+    // Branching here would be the authorisation branch the note above says
+    // this route does not have, on the one page that may hold a fragment.
+    //
     // No `X-Robots-Tag`: `renderPlanGate` omits `social`, which is what makes
     // `Document` emit `<meta name="robots" content="noindex">` - the gate is
     // the page being served here, so a crawler reading it reads that. Pinned

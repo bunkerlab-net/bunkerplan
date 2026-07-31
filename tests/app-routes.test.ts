@@ -769,6 +769,10 @@ describe("redeeming a code", () => {
     );
 
     expect(response.status).toBe(500);
+    // Plain text, not the problem+json every returned refusal carries: this
+    // one is thrown and the app installs no `onError`, so Hono answers. The
+    // OpenAPI document says so, and this is what holds it to that.
+    expect(response.headers.get("content-type")).toStartWith("text/plain");
     // The bucket that was charged, and the window that charged it - the only
     // pair it may go back to; see the note on `windowStart` in
     // src/services/types.ts. Read from `consume`, not from `refunded` itself,

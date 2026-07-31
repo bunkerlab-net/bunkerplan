@@ -44,9 +44,12 @@ const CODE = "sHaReCoDe1234567";
  */
 const cookiePair = (response: Response, planId: string): string => {
   const name = shareCookieName(planId);
+  const prefix = `${name}=`;
   for (const header of response.headers.getSetCookie()) {
     const pair = header.split(";")[0] ?? "";
-    if (pair.startsWith(`${name}=`) && !pair.endsWith("=")) return pair;
+    // The value, not the last character: a base64 cookie legitimately ends in
+    // `=`, and rejecting on that would throw about a cookie that is there.
+    if (pair.startsWith(prefix) && pair.length > prefix.length) return pair;
   }
   throw new Error(`the response set no ${name} cookie`);
 };

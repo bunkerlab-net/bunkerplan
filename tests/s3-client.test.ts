@@ -227,7 +227,11 @@ describe("the requests it composes", () => {
     // options object, and an explicit `undefined` is a different thing to
     // build than a key that was never set - one of which stops being harmless
     // the moment a middleware starts checking `in`.
-    expect(sendOptions[0] ?? {}).not.toHaveProperty("abortSignal");
+    // The object itself, with no `?? {}` standing in for one that was never
+    // passed: a driver that stopped passing options at all would satisfy the
+    // fallback while failing the thing this pins.
+    expect(sendOptions[0]).toBeDefined();
+    expect(sendOptions[0]).not.toHaveProperty("abortSignal");
   });
 
   test("the probe hands its cancellation signal to the SDK", async () => {

@@ -472,6 +472,11 @@ describe("the health probe", () => {
       // waiting on it any more. `Promise.race` keeps a handler on both sides,
       // which is what stops that from surfacing as an unhandled rejection -
       // and on a Worker an unhandled rejection takes the isolate with it.
+      // Two turns, not one: the rejection has to travel the driver's own
+      // `catch` before the runtime could report it, and a single turn can
+      // close the window before it would have arrived - passing whether or
+      // not the handler that suppresses it is there.
+      await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
     } finally {
       process.off("unhandledRejection", watch);

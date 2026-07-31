@@ -712,7 +712,9 @@ describe("the share-link relay", () => {
      * the plan, which decides. See the note on `codeInFragment`.
      */
     standOn(`/s/${PLAN_ID}?code=by-the-other-route`);
-    api.unlockPlan = async () => undefined;
+    // `unlockPlan` is left on the stub's default, which throws: the count
+    // below says nothing was spent, and this makes a call fail where it was
+    // made rather than one assertion later.
 
     await mountAsync(gate({ relay: true }));
 

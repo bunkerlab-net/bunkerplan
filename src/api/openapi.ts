@@ -540,11 +540,20 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
         401: "The code did not match.",
         404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
         413: "The body is larger than a code could make it.",
-        500:
+      }),
+      // Spelled out rather than through `failures`, which documents the
+      // problem+json every *returned* refusal carries. This one is thrown -
+      // the route has no handler of its own and the app installs no
+      // `onError` - so what reaches the client is Hono's default, which is
+      // plain text. Documenting it as JSON would be a wire contract nothing
+      // honours.
+      "500": {
+        description:
           "The redemption could not be completed. Releasing its reservation " +
           "is attempted, because a failure said nothing about the code - and " +
           "if that release fails too, the count stays spent.",
-      }),
+        content: { "text/plain": { schema: { type: "string" } } },
+      },
       "429": {
         ...json(
           ErrorBody,
