@@ -113,27 +113,38 @@ branch in it covered. That is one observation of one toolchain: in it, no real
 line was found by one topology and missed by the other, and only the
 denominator moved. A later Bun may report differently.
 
-What `--isolate` costs is intermittent failures. What is observed: several
-tests in one file failing together at almost exactly 5000ms, Bun's per-test
-timeout, most often the Valkey suite - the only part of the run that waits on
-the real clock. The cause is not established. Every file shares one process
-there, and that process both holds the other files' open handles and runs the
-workerd children Miniflare starts; `tests/drivers` is where those meet, but
-nothing here has isolated it.
+What `--isolate` costs is one process for all 61 files. It gives each file its
+own module registry, not its own process, so that process holds every file's
+open handles at once and runs the workerd children Miniflare starts. The
+Valkey client is what breaks there: commands stop completing, and a block of
+tests fails together at almost exactly 5000ms, Bun's per-test timeout.
 
-A red run is therefore not evidence on its own - but neither is one green
-re-run, which is the trap. A single pass says nothing about a failure that
-happens some of the time. Repeat it instead:
+That is measured, not surmised. Three full runs failed 26, 22 and 4 tests;
+every failure in all three was the Valkey suite and nothing else failed in any
+of them. The same file in its own process passed five runs out of five in
+1.4s. The server is not the slow part - it sat at 0.3% CPU with an empty
+slowlog and `timeout 0` throughout, and a standalone script that opens one
+client, waits out a ttl and reads it back did 40 rounds without a hang. What
+is left is the client in a process holding everything else, and that is not
+isolated further.
+
+So the Valkey suite runs in its own step in CI, and `TEST_VALKEY_URL` is not
+set on the main one - see .github/workflows/check.yaml. Every assertion still
+runs exactly once. Locally, `bun run test` with `TEST_VALKEY_URL` set is the
+shared process again, and can still hang there:
 
 ```sh
 bun run build # BUNKERPLAN_PREBUILT=1 below promises this already happened
-BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
+BUNKERPLAN_PREBUILT=1 bun test --isolate ./tests/drivers/kv-store.valkey.test.ts
 ```
 
-`tests/drivers/` because that is where the failure has always appeared. It is
-also the narrower run: the contention is between files sharing one process, so
-dropping the path repeats the whole suite and keeps every other file in the
-picture.
+A red run is not evidence on its own - but neither is one green re-run, which
+is the trap. A single pass says nothing about a failure that happens some of
+the time. Repeat it instead:
+
+```sh
+BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
+```
 
 Repetition narrows it, it does not decide it. A genuine regression tends to
 fail every repetition and to fail on its own assertion; the flake tends to

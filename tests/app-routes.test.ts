@@ -777,6 +777,36 @@ describe("redeeming a code", () => {
     expect(refunded).toEqual([[reserved, WINDOW_START]]);
   });
 
+  test("an unlock naming no plan keeps its count", async () => {
+    /*
+     * Not a wrong code, but the same enumeration by another name - and the
+     * budget is what makes walking the id space expensive. Refunding it would
+     * make unknown ids free to try, which is the cheaper attack of the two.
+     */
+    const refunded: string[] = [];
+    const app = await gated({
+      plans: memoryPlans(),
+      unlockRateLimits: {
+        consume: async () => ({
+          allowed: true,
+          retryAfter: 0,
+          windowStart: WINDOW_START,
+        }),
+        refund: async (key) => {
+          refunded.push(key);
+        },
+      },
+    });
+
+    const response = await app.fetch(
+      `/api/plans/${PLAN_ID}/unlock`,
+      unlockInit(CODE),
+    );
+
+    expect(response.status).toBe(404);
+    expect(refunded).toEqual([]);
+  });
+
   test("the bucket is keyed on the address, never on the plan", async () => {
     const keys: string[] = [];
     const plans = memoryPlans([

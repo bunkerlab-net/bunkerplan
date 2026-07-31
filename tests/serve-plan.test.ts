@@ -168,6 +168,10 @@ describe("a private plan", () => {
     expect(response.headers.get("content-security-policy")).toBe(APP_CSP);
     // And it says nothing about the document.
     expect(body).not.toContain("plan</p>");
+    // Not the relay. `relay: true` makes the client forward to `/s/{id}`, so
+    // the gate that IS `/p/{id}` claiming it would send every refused reader
+    // around a loop back to here.
+    expect(body).toContain('"relay":false');
   });
 
   test("gates an anonymous visitor the same way", async () => {

@@ -100,8 +100,7 @@ jobs:
         run: bun run typecheck
 
       # `bun run test` is `bun test --isolate`, with coverage on through
-      # bunfig.toml. That is the topology that measures coverage correctly and
-      # the one that flakes; see README.md for the shape a real failure has.
+      # bunfig.toml. That is the topology that measures coverage correctly.
       #
       # Run once, on purpose. Bun's `--rerun-each` repeats every test rather
       # than retrying the failures, so it multiplies the run time of a
@@ -113,14 +112,34 @@ jobs:
       # builds one first. That covers what a separate build step used to: a
       # bundle that does not build fails here, before anything is published.
       #
-      # These three variables are the opt-in. A backend whose variable is
-      # missing SKIPS, so dropping one turns a conformance suite off silently -
-      # they are set here precisely so that cannot happen unnoticed.
+      # These variables are the opt-in. A backend whose variable is missing
+      # SKIPS, so dropping one turns a conformance suite off silently - they
+      # are set here precisely so that cannot happen unnoticed.
+      #
+      # `TEST_VALKEY_URL` is the exception, and it is set on the step below
+      # instead. `--isolate` gives each file its own module registry but not
+      # its own process, so all 61 share one - and the Valkey client is the
+      # one thing in the suite that hangs there: commands stop completing and
+      # the block fails together at Bun's 5000ms deadline. Measured on this
+      # repo, three full runs failed 26, 22 and 4 tests and every one of them
+      # was the Valkey suite, with nothing else failing in any run; the same
+      # file in its own process passed five for five in 1.4s. The server is
+      # not what is slow - it was idle at 0.3% CPU with an empty slowlog
+      # throughout. See README.md.
       - name: Test
         run: bun run test
         env:
-          TEST_DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
-          TEST_VALKEY_URL: redis://127.0.0.1:6379
+          TEST_DATABASE_URL: [REDACTED]
           TEST_S3_ENDPOINT: http://127.0.0.1:9000
           TEST_S3_ACCESS_KEY_ID: bunkerplan
           TEST_S3_SECRET_ACCESS_KEY: bunkerplan-secret
+
+      # The Valkey conformance suite, in the process it needs. Same assertions
+      # the run above would have made, once, with no retry - the only thing
+      # that changed is what else is in the process with it. It reports its own
+      # coverage figure, which is why `src/kv/valkey.ts` reads low in the run
+      # above and 100% here.
+      - name: Test Valkey
+        run: BUNKERPLAN_PREBUILT=1 bun test --isolate ./tests/drivers/kv-store.valkey.test.ts
+        env:
+          TEST_VALKEY_URL: redis://127.0.0.1:6379

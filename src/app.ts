@@ -208,7 +208,14 @@ function registerPlanUnlock(app: Hono, getServices: GetServices): void {
      * A redemption was never the thing being rationed, so a count that did not
      * buy a guess goes back. Both endings qualify: a `200`, and a throw - the
      * budget rations guessing, and a route that fell over told nobody whether
-     * the code was right. A refusal keeps its count, because that is a guess.
+     * the code was right.
+     *
+     * Every other ending keeps its count, and not only the wrong-code `401`.
+     * A `404` is an unknown plan id, which is the same enumeration by another
+     * name; a `400` or `413` is a caller this endpoint cannot answer, and a
+     * caller who can spend the budget on malformed bodies for free can hold
+     * the window open while spending it elsewhere. Refunding narrowly is the
+     * safe direction: the budget errs one lower rather than one higher.
      *
      * Swallowed on failure, and only on the refund: the reader has their
      * cookie, or their 500, and losing a refund leaves the budget one lower
