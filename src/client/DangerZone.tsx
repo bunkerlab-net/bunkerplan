@@ -49,6 +49,10 @@ const currentUserId = (): string | null =>
  *
  * The header is what makes the check atomic: the server refuses outright if
  * the session it authenticates is not this account.
+ *
+ * Two arguments because that is the endpoint's shape: the first is the request
+ * body, the second is Better Auth's `fetchOptions` parameter - which is where
+ * `headers` belongs. Not a `fetchOptions` key inside the body object.
  */
 const deleteFor = (intended: string) =>
   authClient().deleteUser(

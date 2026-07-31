@@ -275,6 +275,9 @@ export async function clickPastDisabled(
 ): Promise<void> {
   const held = node.disabled;
   node.disabled = false;
+  // No `try`/`finally`. `EventTarget` reports a listener's exception rather
+  // than rethrowing it from `dispatchEvent`, so this call returns normally
+  // whatever the handler did and the restore below runs before `flush`.
   node.dispatchEvent(
     new MouseEvent("click", { bubbles: true, cancelable: true }),
   );
