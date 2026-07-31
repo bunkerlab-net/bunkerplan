@@ -428,9 +428,9 @@ const CLEAR_SHARE_CODE_OPERATION = {
   operationId: "clearShareCode",
   summary: "Remove a plan's share code",
   description:
-    `${SHARING_NOTE} Existing unlock cookies stop working. Allowed whatever ` +
-    "the plan's visibility, because this is the request that retires a code " +
-    "a public plan is still carrying.",
+    `${SHARING_NOTE} Existing unlock cookies stop working. This request is ` +
+    "allowed regardless of the plan's visibility, because it retires a code " +
+    "that a public plan may still carry.",
   tags: ["Sharing"],
   security: SESSION_AUTH,
   responses: {
