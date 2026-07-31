@@ -173,7 +173,13 @@ describe("createPlan with ?grants=", () => {
 
 describe("createPlan when the upload budget is spent", () => {
   test("refuses before the body is read, not after", async () => {
-    const { deps: d, stored } = deps();
+    const inserted: string[] = [];
+    const { deps: d, stored } = deps({
+      insert: async (row) => {
+        inserted.push(row.id);
+        return "created";
+      },
+    });
     // No `windowStart`: `RateLimitResult` is a union, and the refused arm is
     // `{ allowed: false; retryAfter }`. There is no window to refund a count
     // to when no count was taken, so the field does not exist on this side -
@@ -200,6 +206,9 @@ describe("createPlan when the upload budget is spent", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("30");
     expect(stored).toEqual([]);
+    // Neither half of the write happened. Storage is the expensive one, but a
+    // row written for a refused upload would be a plan with no document.
+    expect(inserted).toEqual([]);
     expect(request.bodyUsed).toBe(false);
   });
 });

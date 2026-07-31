@@ -121,7 +121,7 @@ at almost exactly 5000ms, Bun's per-test timeout.
 What is measured is the correlation, not the mechanism. Three full runs failed
 26, 22 and 4 tests; every failure in all three was the Valkey suite and
 nothing else failed in any of them. The same file in its own process passed
-five runs out of five in 1.4s. The server is not the slow part - it sat at
+five runs out of five. The server is not the slow part - it sat at
 0.3% CPU with an empty slowlog and `timeout 0` throughout, and a standalone
 script that opens one client, waits out a ttl and reads it back did 40 rounds
 without a hang. What is *not* established is why sharing the process does it:
@@ -136,15 +136,25 @@ shared process again, and can still hang there:
 
 ```sh
 bun run build # BUNKERPLAN_PREBUILT=1 below promises this already happened
-BUNKERPLAN_PREBUILT=1 bun test --isolate ./tests/drivers/kv-store.valkey.test.ts
+TEST_VALKEY_URL=redis://localhost:6379 \
+  BUNKERPLAN_PREBUILT=1 bun test --isolate ./tests/drivers/kv-store.valkey.test.ts
 ```
+
+The variable is not optional there: without it the suite skips and the command
+passes having run nothing. Same for the repeat below - a backend whose variable
+is missing is a backend that was not tested.
 
 A red run is not evidence on its own - but neither is one green re-run, which
 is the trap. A single pass says nothing about a failure that happens some of
 the time. Repeat it instead:
 
 ```sh
-BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
+TEST_DATABASE_URL=$$MIWQNAUYA1TZ:L$$ \
+  TEST_VALKEY_URL=redis://localhost:6379 \
+  TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
+  TEST_S3_ACCESS_KEY_ID=bunkerplan \
+  TEST_S3_SECRET_ACCESS_KEY=bunkerplan-secret \
+  BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
 ```
 
 Repetition narrows it, it does not decide it. A genuine regression tends to

@@ -120,14 +120,21 @@ function useApiKeys() {
      * secret on screen beside the error, reading as though it belonged to the
      * attempt that just failed - and it is shown once, so what is on screen is
      * the only copy its owner has.
+     *
+     * Inside the operation, so a call the latch refuses clears nothing. That
+     * call is reachable: `disabled` needs a render to appear, so a press
+     * landing in the same tick as one that took the latch runs from the
+     * enabled render and is refused here instead. Wiping the visible secret on
+     * behalf of a request that was never made is how the only copy gets lost.
      */
-    setPlaintext(null);
     return run(
-      () =>
-        authClient().apiKey.create({
+      () => {
+        setPlaintext(null);
+        return authClient().apiKey.create({
           name: name.trim() === "" ? "API key" : name.trim(),
           ...(seconds === null ? {} : { expiresIn: seconds }),
-        }),
+        });
+      },
       "could not create API key",
       // The only time the plaintext key is ever returned.
       (data) => setPlaintext(data?.key ?? null),

@@ -16,9 +16,10 @@ describeKvStore("Valkey", valkeyKv, { skip });
  * buy four waits or share one through a hook.
  *
  * The budget is its own, and deliberately not `FIXTURE_TIMEOUT_MS`: this waits
- * ~1.2s and runs a handful of commands, so 30s is already far past slow and a
- * hang shows up while someone is still watching. A container starting cold is
- * what the two-minute budget elsewhere is for; nothing here starts one.
+ * 4s against 3s ttls and runs a handful of commands, so 30s is already far
+ * past slow and a hang shows up while someone is still watching. A container
+ * starting cold is what the two-minute budget elsewhere is for; nothing here
+ * starts one.
  */
 test.skipIf(skip)(
   "Valkey expiry: a ttl elapses, and rewriting one replaces it",

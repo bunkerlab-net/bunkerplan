@@ -161,6 +161,14 @@ export function mount(node: Child): Mounted {
    */
   const root = createRoot(host);
   root.render(node as never);
+  /*
+   * No guard around that call, because there is nothing it could catch:
+   * `hono/jsx/dom` renders through a scheduled task, so a component that
+   * throws does so on a later stack and arrives as an unhandled error - and
+   * `render` itself did not throw synchronously even when handed a cyclic
+   * node. Registration below has already happened by then, so teardown owns
+   * the host either way.
+   */
   mounted.push({ host, unmount: () => root.unmount() });
 
   const all = (selector: string): HTMLElement[] => [

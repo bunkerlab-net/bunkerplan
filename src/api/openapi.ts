@@ -497,7 +497,7 @@ const unlockDescription = (codeFormat: string): string =>
   "`/p/{id}` serves it with no parameter and no session. " +
   `${codeFormat} Throttled per client address, set by UNLOCK_RATE_MAX ` +
   "and UNLOCK_RATE_WINDOW_SEC.\n\n" +
-  "Only a refused redemption is charged. A correct code costs nothing, " +
+  "Only a redemption is refunded. A correct code costs nothing, " +
   "because a share link is opened by everyone it was sent to and charging " +
   "those would refuse a room of colleagues behind one egress address. What " +
   "is rationed is guessing, and the budget bounds that rather than deciding " +

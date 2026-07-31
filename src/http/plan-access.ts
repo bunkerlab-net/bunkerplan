@@ -155,10 +155,13 @@ export async function resolvePlanAccess(
  * Unauthenticated: the gate page is the only caller, and a visitor holding
  * just a code has no credential to send. The route is throttled a layer up,
  * per client address - see `reserveUnlockAttempt`, which takes a count before
- * this runs and hands it back when this answers a redemption. Not because a
- * reachable rate would help against guessing the code, which rests on its
- * entropy, but because an unauthenticated write should not let a stranger spend
- * unbounded amounts of someone else's database and CPU.
+ * this runs and hands it back when this answers a redemption, or throws. A
+ * refusal keeps its count; src/app.ts is where that is decided and why.
+ *
+ * Throttled not because a reachable rate would help against guessing the
+ * code, which rests on its entropy, but because an unauthenticated write
+ * should not let a stranger spend unbounded amounts of someone else's
+ * database and CPU.
  */
 export async function unlockPlan(
   plans: PlanRepo,

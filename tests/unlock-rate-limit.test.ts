@@ -4,6 +4,7 @@ import {
   refundUnlockAttempt,
   reserveUnlockAttempt,
 } from "../src/http/unlock-rate-limit.ts";
+import type { Logger } from "../src/log.ts";
 import type { RateLimitRepo } from "../src/services/types.ts";
 
 const CONFIG = {
@@ -53,11 +54,14 @@ const post = (headers: Record<string, string> = {}) =>
 /** What the gate logged, so the one case about that can read it. */
 const warnings: Array<{ fields: unknown; message: string }> = [];
 
-const logger = {
+// `Pick<Logger, "warn">`, the parameter's own type, rather than a cast: a
+// double that stops matching the signature should fail here at compile time
+// instead of being asserted into place.
+const logger: Pick<Logger, "warn"> = {
   warn: (fields: unknown, message?: string) => {
     warnings.push({ fields, message: message ?? "" });
   },
-} as unknown as Parameters<typeof reserveUnlockAttempt>[3];
+};
 
 beforeEach(() => {
   warnings.length = 0;

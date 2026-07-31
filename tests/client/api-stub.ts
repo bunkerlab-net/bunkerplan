@@ -11,8 +11,9 @@ import { type Arm, armWhileFileRuns } from "../armed-mock.ts";
 /**
  * The plans API, replaced.
  *
- * `PlansPanel` is a state machine over nine calls - list, upload, replace,
- * relabel, delete, and the four sharing ones - and the behaviour worth pinning
+ * `PlansPanel` is a state machine over twelve calls - list, upload, replace,
+ * relabel, delete, the four share-code and visibility ones, the two grant
+ * ones, and the unlock the gate spends - and the behaviour worth pinning
  * is what it does with each answer: which control goes busy, what the error
  * line says, whether the list is refetched. Swapping the module is what makes
  * a refusal or a throw as cheap to stage as a success.

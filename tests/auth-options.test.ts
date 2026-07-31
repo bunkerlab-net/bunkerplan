@@ -262,15 +262,17 @@ describe("deleting an account", () => {
       },
     });
 
-    // The code, not only the wording: the client reads `WRONG_ACCOUNT` to
-    // decide this refusal is terminal, so a rename here would silently turn a
-    // blocked delete back into a retryable one.
+    // The code and the status, not only the wording: docs/self-hosting.md
+    // promises callers a `400` carrying `WRONG_ACCOUNT`, and the client reads
+    // that code to decide the refusal is terminal. A rename or a status change
+    // here would silently turn a blocked delete back into a retryable one.
     await expect(
       withHook.user.deleteUser.beforeDelete?.(
         { id: "user-b" },
         asking("user-a"),
       ),
     ).rejects.toMatchObject({
+      status: "BAD_REQUEST",
       body: { code: "WRONG_ACCOUNT" },
     });
     // Refused before the sweep, so nothing of `user-b`'s was touched either.
@@ -284,7 +286,10 @@ describe("deleting an account", () => {
     // the same thing with either - stops.
     await expect(
       options.user.deleteUser.beforeDelete?.({ id: "user-a" }, asking(null)),
-    ).rejects.toMatchObject({ body: { code: WRONG_ACCOUNT_CODE } });
+    ).rejects.toMatchObject({
+      status: "BAD_REQUEST",
+      body: { code: WRONG_ACCOUNT_CODE },
+    });
   });
 
   test("a call with no request at all is refused too", async () => {
@@ -293,6 +298,9 @@ describe("deleting an account", () => {
     // something it never saw.
     await expect(
       options.user.deleteUser.beforeDelete?.({ id: "user-a" }),
-    ).rejects.toMatchObject({ body: { code: WRONG_ACCOUNT_CODE } });
+    ).rejects.toMatchObject({
+      status: "BAD_REQUEST",
+      body: { code: WRONG_ACCOUNT_CODE },
+    });
   });
 });

@@ -33,7 +33,10 @@ function usePasskeys() {
     try {
       const result = await authClient().passkey.listUserPasskeys();
       if (result.error) {
-        setError(result.error.message ?? "could not list passkeys");
+        // `messageOf`, not `?? fallback`: a whitespace-only message renders a
+        // blank error line, and `??` only catches the absent one. The thrown
+        // path below already reads it this way.
+        setError(messageOf(result.error, "could not list passkeys"));
         return;
       }
       setError(null);

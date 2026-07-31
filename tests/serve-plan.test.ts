@@ -335,7 +335,15 @@ describe("a code-shared plan", () => {
       (await reader.fetch(`/p/${PLAN_ID}`, { headers: { cookie } })).status,
     ).toBe(200);
 
-    await owner.fetch(`/api/plans/${PLAN_ID}/share-code`, { method: "POST" });
+    // Asserted, because a mutation that quietly 404'd would leave the reader
+    // refused for the wrong reason and this test green.
+    expect(
+      (
+        await owner.fetch(`/api/plans/${PLAN_ID}/share-code`, {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(201);
 
     // Cookies are bound to the digest, so they die with it.
     expect(
@@ -346,7 +354,13 @@ describe("a code-shared plan", () => {
   test("clearing the code closes the plan to a held cookie", async () => {
     const { owner, reader, cookie } = await ownerAndReader();
 
-    await owner.fetch(`/api/plans/${PLAN_ID}/share-code`, { method: "DELETE" });
+    expect(
+      (
+        await owner.fetch(`/api/plans/${PLAN_ID}/share-code`, {
+          method: "DELETE",
+        })
+      ).status,
+    ).toBe(204);
 
     expect(
       (await reader.fetch(`/p/${PLAN_ID}`, { headers: { cookie } })).status,

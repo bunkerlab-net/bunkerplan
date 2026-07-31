@@ -477,6 +477,51 @@ describe("ApiKeysPanel creating", () => {
     await flush();
     expect(creates).toBe(1);
   });
+
+  test("a press the latch refuses leaves the shown key on screen", async () => {
+    /*
+     * Both dispatched in one tick, which is the window `disabled` cannot close
+     * - it needs a render, and `busy` is state, so the second handler runs
+     * from the enabled render the first one just invalidated. Revoke takes the
+     * shared latch and Create is refused.
+     *
+     * The key is shown once, so what is on screen is the only copy its owner
+     * has. Clearing it belongs to the attempt that actually asks for a new
+     * one; a press that never reaches the network must not take it.
+     */
+    listing([key()]);
+    client.apiKey.create = ok({ key: "bkp_the_only_time" });
+    const view = await mountAsync(<ApiKeysPanel />);
+    await click(view.byText("button", "Create key"));
+    expect(view.text()).toContain("bkp_the_only_time");
+
+    const revoking = deferred<void>();
+    let creates = 0;
+    client.apiKey.delete = async () => {
+      await revoking.answer();
+      return { data: { success: true }, error: null };
+    };
+    client.apiKey.create = async () => {
+      creates += 1;
+      return { data: { key: "bkp_a_second_one" }, error: null };
+    };
+
+    view
+      .byText("button", "Revoke")
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    view
+      .byText("button", "Create key")
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    // Refused, so it never asked - and the secret it would have replaced is
+    // still readable.
+    expect(creates).toBe(0);
+    expect(view.text()).toContain("bkp_the_only_time");
+
+    revoking.release(undefined);
+    await flush();
+  });
 });
 
 describe("ApiKeysPanel revoking", () => {

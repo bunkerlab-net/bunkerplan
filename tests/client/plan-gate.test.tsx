@@ -641,6 +641,21 @@ describe("the share-link relay", () => {
     expect(navigations).toEqual([]);
   });
 
+  test("a malformed escape forwards rather than posting it", async () => {
+    // The `/p/{id}` case above offers the box instead. Here there is no box to
+    // offer - the relay's whole job is to hand the reader on - so the same
+    // undecodable fragment has to end at the plan, with nothing spent and
+    // nothing left in the bar for the page it lands on.
+    standOn(`/s/${PLAN_ID}#code=%`);
+
+    const view = await mountAsync(gate({ relay: true }));
+
+    expect(countOf("unlockPlan")).toBe(0);
+    expect(replacements).toEqual([`/p/${PLAN_ID}`]);
+    expect(view.maybe('[role="alert"]')).toBeNull();
+    expect(window.location.hash).toBe("");
+  });
+
   test("forwards a bare visit rather than claiming the plan is private", async () => {
     // No code to spend, so nothing for this page to do. The reader may hold
     // access already - a session, a grant, a cookie from an earlier redemption -

@@ -145,13 +145,18 @@ describe("uploadPlan", () => {
     );
     // The server answers with an id and a URL only; the rest of the row is
     // synthesised here so the new plan can be listed without a refetch.
-    expect(summary).toMatchObject({
+    // `toEqual` bar the timestamp, not `toMatchObject`: this shape is what the
+    // dashboard renders before any refetch, so a field left out is a column
+    // that reads empty for a plan that was just uploaded.
+    expect({ ...summary, createdAt: undefined }).toEqual({
       id: "abc",
       url: "https://plans.test/p/abc",
       label: null,
       size: file.size,
       visibility: "public",
       hasShareCode: false,
+      hasGrants: false,
+      createdAt: undefined,
     });
     expect(Number.isNaN(Date.parse(summary.createdAt))).toBe(false);
   });
