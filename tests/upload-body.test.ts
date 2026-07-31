@@ -124,4 +124,22 @@ describe("readUploadBody", () => {
     expect(body.truncated).toBeUndefined();
     expect(body.errors?.[9]).toBe("external reference: img[src] /i9.png");
   });
+
+  /**
+   * The refusal is where a caller decides what to do about a webfont, and
+   * without the size the decision has been to drop the fonts and fall back to
+   * system faces. The document is the one that provoked that: Google's two
+   * preconnects and the stylesheet they warm up.
+   */
+  test("prices embedding on the wire, where fonts get abandoned", async () => {
+    const body = await refusalBody(
+      `${HEAD}<link rel="preconnect" href="https://fonts.gstatic.com/">` +
+        `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">` +
+        TAIL,
+    );
+    expect(body.errors).toEqual([
+      "external reference: link[href] https://fonts.gstatic.com/ - embed fonts as data: URIs in @font-face (a latin subset costs about 65 KB)",
+      "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet; embed fonts as data: URIs in @font-face (a latin subset costs about 65 KB)",
+    ]);
+  });
 });

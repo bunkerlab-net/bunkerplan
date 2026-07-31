@@ -265,11 +265,18 @@ function startsWithAt(text: string, needle: string, index: number): boolean {
 /**
  * What an open `(` belongs to. Only these three change what a value means:
  * everything else - `calc(`, a selector's parentheses - is `PLAIN`.
+ *
+ * `IMPORT_URL` is not one `callKind` ever returns: it is the `url()` an
+ * `@import` was waiting for, substituted where the frame is pushed, so the
+ * stack itself remembers that the target is a stylesheet. Held there rather
+ * than in a variable because a bad string voids every open call at once, and
+ * a frame that no longer exists cannot go on speaking for a later `url()`.
  */
 const PLAIN = 0;
 const URL = 1;
 const IMAGE_SET = 2;
 const TYPE = 3;
+const IMPORT_URL = 4;
 
 /** CSS identifier characters, which a function name is made of. */
 function identChar(code: number): boolean {
@@ -311,16 +318,30 @@ function urlTarget(span: string): string {
     : trimmed;
 }
 
-/** The target the `url()` closing at `paren` named, or null for any other call. */
-function closedTarget(
+/**
+ * A target found in CSS, and whether an `@import` is what named it. The two
+ * need different answers: an `@import` is a stylesheet to be inlined, and a
+ * `url()` in a declaration is the image or face it points at.
+ */
+type CssRef = { target: string; stylesheet: boolean };
+
+/**
+ * The reference the call closing at `paren` named, or null when it named none:
+ * an unclosed frame, any call that is not a `url()`, or a target that travels
+ * inside the document.
+ */
+function closedRef(
   css: string,
   paren: number,
   open: number[],
   starts: number[],
-): string | null {
+): CssRef | null {
   const start = starts.pop();
-  if (open.pop() !== URL || start === undefined) return null;
-  return urlTarget(css.slice(start, paren));
+  const kind = open.pop();
+  if ((kind !== URL && kind !== IMPORT_URL) || start === undefined) return null;
+  const target = urlTarget(css.slice(start, paren));
+  if (!isExternalRef(target)) return null;
+  return { target, stylesheet: kind === IMPORT_URL };
 }
 
 /**
@@ -350,6 +371,21 @@ function quotedTargetFollows(css: string, index: number): boolean {
 }
 
 /**
+ * Whether a `url(` call is the next thing after `index`, past whitespace.
+ *
+ * The other half of what an `@import` can name, and armed the same way and for
+ * the same reason as a quoted one: `@import screen;` names nothing, and a wait
+ * left armed would hand the next `url()` anywhere in the stylesheet a
+ * stylesheet's answer. Exact rather than a guess, because CSS puts nothing
+ * between a function name and its `(`.
+ */
+function urlCallFollows(css: string, index: number): boolean {
+  let at = index;
+  while (at < css.length && SPACE.includes(css[at] as string)) at += 1;
+  return startsWithAt(css, "url", at) && css[at + 3] === "(";
+}
+
+/**
  * Yields the target the string spanning `index` to `end` names, and returns
  * whether an `@import` is still waiting for one.
  *
@@ -357,6 +393,9 @@ function quotedTargetFollows(css: string, index: number): boolean {
  * candidate. Inside `url()` the whole span is the target and is read when the
  * call closes; inside `type()` it is a MIME type; anywhere else it is text.
  * A bad string - one a newline ended - voids the calls open around it.
+ *
+ * `importing` therefore also says WHICH of the two this is: a call opening
+ * clears it, so an `image-set()` candidate never arrives with it still set.
  */
 function* stringAt(
   css: string,
@@ -365,7 +404,7 @@ function* stringAt(
   importing: boolean,
   open: number[],
   starts: number[],
-): Generator<string, boolean> {
+): Generator<CssRef, boolean> {
   if (css[end] !== css[index]) {
     open.length = 0;
     starts.length = 0;
@@ -373,8 +412,29 @@ function* stringAt(
   }
   if (!importing && open[open.length - 1] !== IMAGE_SET) return importing;
   const text = css.slice(index + 1, end);
-  if (isExternalRef(text)) yield text;
+  if (isExternalRef(text)) yield { target: text, stylesheet: importing };
   return false;
+}
+
+/**
+ * Pushes the frame the `(` at `paren` opens, and returns the kind of call it
+ * is - which is `URL` even where the frame was pushed as `IMPORT_URL`, because
+ * what an `@import` is waiting for changes nothing about how the value reads.
+ */
+function openCall(
+  css: string,
+  paren: number,
+  open: number[],
+  starts: number[],
+  awaitingUrl: boolean,
+): number {
+  const kind = callKind(css, paren);
+  // The `url()` an `@import` was waiting for carries the at-rule with it, so
+  // the refusal can say to inline the stylesheet rather than only that
+  // something outside was named.
+  open.push(kind === URL && awaitingUrl ? IMPORT_URL : kind);
+  starts.push(paren + 1);
+  return kind;
 }
 
 /**
@@ -403,13 +463,15 @@ function* stringAt(
  * Linear by construction: the index only moves forward, and a string is walked
  * once by `endOfString` before the scan resumes past it.
  */
-function* externalInCss(rawCss: string): Generator<string> {
+function* externalInCss(rawCss: string): Generator<CssRef> {
   const css = stripCssComments(rawCss);
   const open: number[] = [];
   // Where each open call's value begins, pushed and popped beside `open`.
   const starts: number[] = [];
   // Set by `@import`, cleared by the target it takes or by the next call.
   let importing = false;
+  // Set by an `@import` that named a `url()`, cleared by that call opening.
+  let awaitingUrl = false;
   let index = 0;
 
   while (index < css.length) {
@@ -430,28 +492,26 @@ function* externalInCss(rawCss: string): Generator<string> {
     }
 
     if (char === "(") {
-      const kind = callKind(css, index);
-      open.push(kind);
-      starts.push(index + 1);
-      // `type()` describes a candidate rather than carrying a target, so it is
-      // never what an `@import` was waiting for.
+      const kind = openCall(css, index, open, starts, awaitingUrl);
+      awaitingUrl = false;
+      // `type()` carries no target, so an `@import` is still waiting after it.
       if (kind !== TYPE) importing = false;
       index += 1;
       continue;
     }
 
     if (char === ")") {
-      const target = closedTarget(css, index, open, starts);
-      if (target !== null && isExternalRef(target)) yield target;
+      const ref = closedRef(css, index, open, starts);
+      if (ref !== null) yield ref;
       index += 1;
       continue;
     }
 
     if (char === "@" && importAt(css, index)) {
-      // `@import url(...)` is read by the `url()` frame instead, so only a
-      // quoted target is waited for here.
+      // Either spelling names the target; they arrive at different frames.
       index += "@import".length;
       importing = quotedTargetFollows(css, index);
+      awaitingUrl = urlCallFollows(css, index);
       continue;
     }
 
@@ -494,20 +554,54 @@ const UNPRINTABLE = /[\s\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]+/gu;
 const MAX_FINDINGS = 10;
 
 /**
- * Hinted only where the document says so, never guessed from a URL. A path
- * ending in a font extension is a font; `rel="stylesheet"` is a stylesheet
- * because the document declared it.
+ * Hints are clauses appended to a refusal, joined by `; ` after a single dash.
  *
- * Each hint names only what its signal supports. Most external stylesheets are
- * ordinary CSS, so the stylesheet hint says nothing about fonts - a font
- * *stylesheet* such as `fonts.googleapis.com/css2?family=...` is CSS that
- * happens to serve fonts, and it is named by the target now being visible.
- * The embedding workflow belongs in the docs, where it can be a recipe rather
- * than a guess appended to every refusal.
+ * Four signals, each naming only what it supports. Two are declared by the
+ * reference - `rel="stylesheet"` and a CSS `@import` are stylesheets, and
+ * `as="font"` is a face whatever its URL looks like, which is the only way to
+ * place a signed or extensionless font URL. Two are read from the target: a
+ * path ending in a font extension IS a face, and a target that says `fonts` in
+ * a host label or a path segment - `fonts.googleapis.com`,
+ * `fonts.gstatic.com`, `/fonts/faces.css` - serves fonts without being one.
+ *
+ * That last one is read on three references and nowhere else. A stylesheet -
+ * `rel="stylesheet"` or `@import` - can be a font stylesheet, and a
+ * `rel="preconnect"` or `rel="dns-prefetch"` names a HOST rather than a
+ * resource, which is the whole ambiguity: `fonts.gstatic.com` is what a
+ * document warms up before fetching faces from it. Every other reference has
+ * already said what it is - an `img`, a `script`, a `rel="icon"`, a
+ * `rel="preload" as="image"`, a `url()` in a declaration - and
+ * `<img src="/fonts/logo.png">` is an image sitting in a directory, whose
+ * author would be answered with advice about a font they do not have.
+ *
+ * A face gets the font clause alone: there is no CSS at that URL to inline.
+ * Anything merely font-NAMED joins rather than replaces, because a font
+ * stylesheet has to be inlined AND have its faces embedded.
+ *
+ * The size is in the clause because the refusal is where the wrong conclusion
+ * gets drawn. Told only that a font cannot be linked, a caller - a coding
+ * agent especially - weighs embedding against the upload limit, guesses that
+ * a typeface is megabytes, and drops the fonts instead. A latin subset of a
+ * variable face is about 65 KB encoded, which settles that guess in the one
+ * place it is made. The recipe stays in the docs, where it can be a worked
+ * example rather than a paragraph appended to every refusal.
  */
 const FONT_FILE = /\.(?:woff2?|[ot]tf|eot)(?:[?#]|$)/i;
-const FONT_HINT = " - embed fonts as data: URIs in @font-face";
-const STYLESHEET_HINT = " - inline the stylesheet";
+const NAMES_FONTS = /(?:^|[./])fonts?(?:[./?#]|$)/i;
+const FONT_HINT =
+  "embed fonts as data: URIs in @font-face (a latin subset costs about 65 KB)";
+const STYLESHEET_HINT = "inline the stylesheet";
+
+/**
+ * What the reference said it was. `HOST_ONLY` is a `link` that named a host
+ * and no resource, which with a stylesheet is where a font-named target is
+ * read. `DECLARED_STYLESHEET` covers a `rel="stylesheet"` and a CSS `@import`
+ * alike: both are CSS that has to come inside the document.
+ */
+const UNDECLARED = 0;
+const HOST_ONLY = 1;
+const DECLARED_STYLESHEET = 2;
+const DECLARED_FACE = 3;
 
 /**
  * `flat` cut to `MAX_TARGET_LENGTH` characters for display, with an ellipsis
@@ -545,15 +639,24 @@ function addExternal(
   found: Map<string, string>,
   location: string,
   target: string,
-  stylesheet = false,
+  declared: number = UNDECLARED,
 ): void {
   const flat = target.replace(UNPRINTABLE, " ").trim();
   // Classified from the whole target, truncated only for display: a `.woff2`
   // sitting past the cut is still a font, and a long URL is exactly when the
   // caller needs to be told so.
-  let hint = "";
-  if (FONT_FILE.test(flat)) hint = FONT_HINT;
-  else if (stylesheet) hint = STYLESHEET_HINT;
+  const clauses: string[] = [];
+  if (declared === DECLARED_FACE || FONT_FILE.test(flat)) {
+    clauses.push(FONT_HINT);
+  } else {
+    if (declared === DECLARED_STYLESHEET) clauses.push(STYLESHEET_HINT);
+    // A font-named target is only read where the reference is a stylesheet or
+    // a `link` that named a host - never where it said what it fetches.
+    if (declared !== UNDECLARED && NAMES_FONTS.test(flat)) {
+      clauses.push(FONT_HINT);
+    }
+  }
+  const hint = clauses.length === 0 ? "" : ` - ${clauses.join("; ")}`;
   const shown = forDisplay(flat);
   const full = `external reference: ${location} ${flat}${hint}`;
   found.set(full, `external reference: ${location} ${shown}${hint}`);
@@ -637,7 +740,7 @@ function inertLink(rel: string | undefined): boolean {
 function collectAttributes(
   tag: string,
   attributes: Record<string, string>,
-  stylesheet: boolean,
+  declared: number,
   found: Map<string, string>,
 ): void {
   for (const attr of URL_ATTRS[tag] ?? []) {
@@ -645,16 +748,28 @@ function collectAttributes(
     if (value === undefined) continue;
     if (SRCSET_ATTRS[attr] === true) {
       for (const candidate of externalCandidates(value)) {
-        addExternal(found, `${tag}[${attr}]`, candidate, stylesheet);
+        addExternal(found, `${tag}[${attr}]`, candidate, declared);
         if (found.size > MAX_FINDINGS) return;
       }
       continue;
     }
     if (isExternalRef(value)) {
-      addExternal(found, `${tag}[${attr}]`, value, stylesheet);
+      addExternal(found, `${tag}[${attr}]`, value, declared);
       if (found.size > MAX_FINDINGS) return;
     }
   }
+}
+
+/** What a `link` says its own reference is: a face, a stylesheet, or a host. */
+function declaredBy(attributes: Record<string, string>): number {
+  if (attributes["as"]?.toLowerCase() === "font") return DECLARED_FACE;
+  const tokens = attributes["rel"]?.toLowerCase().split(/\s+/) ?? [];
+  if (tokens.includes("stylesheet")) return DECLARED_STYLESHEET;
+  // An opt-in pair rather than everything left over: `rel=icon` and
+  // `rel=preload as=image` have named a resource, and a font-named target
+  // does not overrule them.
+  const host = tokens.includes("preconnect") || tokens.includes("dns-prefetch");
+  return host ? HOST_ONLY : UNDECLARED;
 }
 
 /** Records a refusal for every refusable reference on one start tag. */
@@ -667,17 +782,18 @@ function collectStartTag(tag: StartTag, found: Map<string, string>): void {
   // else, and these adjustments introduce ASCII capitals and nothing more.
   const name = tag.tagName.toLowerCase();
 
-  // From the declared `rel`, not inferred from the URL, so the stylesheet hint
-  // states what the document says rather than what a path looks like.
+  // From what the element declared, not inferred from the URL. `as="font"`
+  // is how a `<link rel="preload">` names a face whose URL says nothing -
+  // signed, hashed, or extensionless - and it outranks `rel` because a face
+  // is a face however it was linked.
   const rel = name === "link" ? attributes["rel"] : undefined;
-  const stylesheet =
-    rel?.toLowerCase().split(/\s+/).includes("stylesheet") === true;
+  const declared = name === "link" ? declaredBy(attributes) : UNDECLARED;
 
   // An inert `link` reaches the network through no attribute, so the whole
   // element is skipped rather than just its `href`: `imagesrcset` only fetches
   // under `rel=preload as=image`, which is not inert.
   if (name !== "link" || !inertLink(rel)) {
-    collectAttributes(name, attributes, stylesheet, found);
+    collectAttributes(name, attributes, declared, found);
     if (found.size > MAX_FINDINGS) return;
   }
 
@@ -708,8 +824,9 @@ function collectStartTag(tag: StartTag, found: Map<string, string>): void {
 
   const inlineStyle = attributes["style"];
   if (inlineStyle !== undefined) {
-    for (const target of externalInCss(inlineStyle)) {
-      addExternal(found, `${name}[style]`, target);
+    for (const ref of externalInCss(inlineStyle)) {
+      const kind = ref.stylesheet ? DECLARED_STYLESHEET : UNDECLARED;
+      addExternal(found, `${name}[style]`, ref.target, kind);
       if (found.size > MAX_FINDINGS) return;
     }
   }
@@ -978,8 +1095,9 @@ function scanDocument(text: string, found: Map<string, string>): void {
 
   const style = new StyleText(
     (css) => {
-      for (const target of externalInCss(css)) {
-        addExternal(found, "style", target);
+      for (const ref of externalInCss(css)) {
+        const kind = ref.stylesheet ? DECLARED_STYLESHEET : UNDECLARED;
+        addExternal(found, "style", ref.target, kind);
         if (capped()) return;
       }
     },
