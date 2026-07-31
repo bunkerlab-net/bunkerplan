@@ -114,19 +114,20 @@ line was found by one topology and missed by the other, and only the
 denominator moved. A later Bun may report differently.
 
 What `--isolate` costs is one process for all 61 files. It gives each file its
-own module registry, not its own process, so that process holds every file's
-open handles at once and runs the workerd children Miniflare starts. The
-Valkey client is what breaks there: commands stop completing, and a block of
-tests fails together at almost exactly 5000ms, Bun's per-test timeout.
+own module registry, not its own process, and the Valkey client is what stops
+working there: commands stop completing, and a block of tests fails together
+at almost exactly 5000ms, Bun's per-test timeout.
 
-That is measured, not surmised. Three full runs failed 26, 22 and 4 tests;
-every failure in all three was the Valkey suite and nothing else failed in any
-of them. The same file in its own process passed five runs out of five in
-1.4s. The server is not the slow part - it sat at 0.3% CPU with an empty
-slowlog and `timeout 0` throughout, and a standalone script that opens one
-client, waits out a ttl and reads it back did 40 rounds without a hang. What
-is left is the client in a process holding everything else, and that is not
-isolated further.
+What is measured is the correlation, not the mechanism. Three full runs failed
+26, 22 and 4 tests; every failure in all three was the Valkey suite and
+nothing else failed in any of them. The same file in its own process passed
+five runs out of five in 1.4s. The server is not the slow part - it sat at
+0.3% CPU with an empty slowlog and `timeout 0` throughout, and a standalone
+script that opens one client, waits out a ttl and reads it back did 40 rounds
+without a hang. What is *not* established is why sharing the process does it:
+the backend fixtures each dispose of their handles in `afterAll`, so "the
+process is holding everything at once" is a description of the topology and
+not a diagnosis. Nobody has isolated the interaction.
 
 So the Valkey suite runs in its own step in CI, and `TEST_VALKEY_URL` is not
 set on the main one - see .github/workflows/check.yaml. Every assertion still

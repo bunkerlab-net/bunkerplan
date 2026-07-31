@@ -226,12 +226,13 @@ confusing 403 much later.
   That policy is `default-src 'self'` with `script-src 'self'`, `img-src
 'self'`, `connect-src 'self'`, `style-src 'self' 'unsafe-inline'`,
   `base-uri 'none'`, `object-src 'none'`, `form-action 'self'` and
-  `frame-ancestors 'none'`. Every header except the CSP is set only when
-  absent, so a route that already chose one keeps it - and a successful plan
-  response then has its CSP *replaced* with `PLAN_CSP`, unconditionally. That
-  overwrite is the point: a `304` legitimately carries almost no headers, and
-  filling one in only when absent would let it inherit the app policy, whose
-  lack of `sandbox` reads as permission to script the real origin.
+  `frame-ancestors 'none'`. All of them, `APP_CSP` included, are set only when
+  absent, so a route that already chose a header keeps it. The exception is
+  the plan route: a successful `/p/{id}` response - `200` or `304` - has its
+  CSP *replaced* with `PLAN_CSP`, whatever it already carried. That overwrite
+  is the point of the split: a `304` legitimately carries almost no headers,
+  and backfilling would let it take the app policy instead, whose lack of
+  `sandbox` reads as permission to script the real origin.
 
   `script-src 'self'` is why nothing in this app inlines a script: the
   hydration payload rides in a `<script type="application/json">` element,

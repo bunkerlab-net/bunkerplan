@@ -208,11 +208,11 @@ describe("the plan gate", () => {
     expect(markup).not.toContain("Have a code?");
   });
 
-  test("the bare call is the refusal page, with no code box", () => {
-    // The defaults are the common case - `/p/{id}` at 401 - so a call that
-    // names neither option must not quietly become the relay, or offer a box
-    // for a code the plan does not have.
-    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN);
+  test("leaving relay out is the refusal page, not the relay", () => {
+    // `relay` is the only defaulted option, and `/p/{id}` at 401 is what it
+    // defaults to. `hasCode` has no default on purpose: every caller reads it
+    // off the row, so there is nothing for the page to assume.
+    const markup = renderPlanGate(ASSETS, "abc123", ORIGIN, { hasCode: false });
 
     expect(pageProps(markup)).toEqual({
       name: "gate",

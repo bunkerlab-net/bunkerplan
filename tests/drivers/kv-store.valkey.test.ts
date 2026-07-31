@@ -27,26 +27,28 @@ test.skipIf(skip)(
     const key = (name: string) => `${unique}:expiry:${name}`;
 
     try {
-      await kv.set(key("elapses"), "transient", 1);
+      await kv.set(key("elapses"), "transient", 3);
       await kv.set(key("permanent"), "kept");
-      await kv.set(key("alongside"), "dropped", 1);
+      await kv.set(key("alongside"), "dropped", 3);
 
       // Better Auth refreshes a session by writing the record again. A rewrite
       // that dropped the ttl would stop sessions expiring; one that kept the
       // original would kill a session the user just renewed.
-      await kv.set(key("extended"), "v1", 1);
-      await kv.set(key("extended"), "v2", 30);
-      await kv.set(key("unexpired"), "v1", 1);
+      await kv.set(key("extended"), "v1", 3);
+      await kv.set(key("extended"), "v2", 60);
+      await kv.set(key("unexpired"), "v1", 3);
       await kv.set(key("unexpired"), "v2");
 
       // Readable now, so what follows is about the ttl firing rather than
-      // about a write that never landed.
+      // about a write that never landed. Three seconds rather than one is
+      // what buys this: nine round trips have to finish inside the ttl or the
+      // key is already gone here, and the assertion blames the wrong thing.
       expect(await kv.get(key("elapses"))).toBe("transient");
       expect(await kv.get(key("alongside"))).toBe("dropped");
 
-      await Bun.sleep(1_200);
+      await Bun.sleep(4_000);
 
-      // The one-second keys are gone, and only those.
+      // The short-lived keys are gone, and only those.
       expect(await kv.get(key("elapses"))).toBeNull();
       expect(await kv.get(key("alongside"))).toBeNull();
       expect(await kv.get(key("permanent"))).toBe("kept");

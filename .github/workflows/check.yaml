@@ -117,15 +117,10 @@ jobs:
       # are set here precisely so that cannot happen unnoticed.
       #
       # `TEST_VALKEY_URL` is the exception, and it is set on the step below
-      # instead. `--isolate` gives each file its own module registry but not
-      # its own process, so all 61 share one - and the Valkey client is the
-      # one thing in the suite that hangs there: commands stop completing and
-      # the block fails together at Bun's 5000ms deadline. Measured on this
-      # repo, three full runs failed 26, 22 and 4 tests and every one of them
-      # was the Valkey suite, with nothing else failing in any run; the same
-      # file in its own process passed five for five in 1.4s. The server is
-      # not what is slow - it was idle at 0.3% CPU with an empty slowlog
-      # throughout. See README.md.
+      # instead. In one shared process the Valkey suite hangs and the block
+      # fails at Bun's 5000ms deadline; in its own process it does not. Only
+      # that correlation is established - see README.md for the measurements
+      # and for what is still not explained.
       - name: Test
         run: bun run test
         env:
