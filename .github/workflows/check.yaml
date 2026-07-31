@@ -124,7 +124,7 @@ jobs:
       - name: Test
         run: bun run test
         env:
-          TEST_DATABASE_URL: [REDACTED]
+          TEST_DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
           TEST_S3_ENDPOINT: http://127.0.0.1:9000
           TEST_S3_ACCESS_KEY_ID: bunkerplan
           TEST_S3_SECRET_ACCESS_KEY: bunkerplan-secret
