@@ -122,7 +122,8 @@ const NOT_STANDALONE =
   "than one, and `truncated` is present when the cap dropped others. Each " +
   "target is cut to its first 120 characters, followed by an ellipsis when it " +
   "was longer. Webfonts count: they have to travel as `data:` URIs in " +
-  "`@font-face`.\n\n" +
+  "`@font-face`, which costs about 65 KB for a latin subset rather than the " +
+  "megabytes it is usually assumed to.\n\n" +
   "Two refusals name markup rather than a reference. A `<style>` inside " +
   "`<svg>` holds a stylesheet built from its direct text, so once another " +
   "element opens inside it - or an end tag appears that may be closing an " +

@@ -213,7 +213,7 @@ export const ErrorBody = component(
             "The faults reported, when there was more than one, up to the limit one response carries. `error` is the first entry, and `truncated` says whether others were dropped.",
           examples: [
             [
-              "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet",
+              "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet; embed fonts as data: URIs in @font-face (a latin subset costs about 65 KB)",
               "external reference: img[src] /logo.png",
             ],
           ],

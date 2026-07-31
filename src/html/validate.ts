@@ -494,20 +494,52 @@ const UNPRINTABLE = /[\s\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]+/gu;
 const MAX_FINDINGS = 10;
 
 /**
- * Hinted only where the document says so, never guessed from a URL. A path
- * ending in a font extension is a font; `rel="stylesheet"` is a stylesheet
- * because the document declared it.
+ * Hints are clauses appended to a refusal, joined by `; ` after a single dash.
  *
- * Each hint names only what its signal supports. Most external stylesheets are
- * ordinary CSS, so the stylesheet hint says nothing about fonts - a font
- * *stylesheet* such as `fonts.googleapis.com/css2?family=...` is CSS that
- * happens to serve fonts, and it is named by the target now being visible.
- * The embedding workflow belongs in the docs, where it can be a recipe rather
- * than a guess appended to every refusal.
+ * Four signals, each naming only what it supports. Two are declared by the
+ * document - `rel="stylesheet"` is a stylesheet, and `as="font"` is a face
+ * whatever its URL looks like, which is the only way to place a signed or
+ * extensionless font URL. Two are read from the target: a path ending in a
+ * font extension IS a face, and a target that says `fonts` in a host label or
+ * a path segment - `fonts.googleapis.com`, `fonts.gstatic.com`,
+ * `/fonts/faces.css` - serves fonts without being one.
+ *
+ * That last one is read on two kinds of `link` and nowhere else. A
+ * `rel="stylesheet"` can be a font stylesheet, and a `rel="preconnect"` or
+ * `rel="dns-prefetch"` names a HOST rather than a resource, which is the whole
+ * ambiguity: `fonts.gstatic.com` is what a document warms up before fetching
+ * faces from it. Every other reference has already said what it is - an
+ * `img`, a `script`, a `rel="icon"`, a `rel="preload" as="image"` - and
+ * `<img src="/fonts/logo.png">` is an image sitting in a directory, whose
+ * author would be answered with advice about a font they do not have.
+ *
+ * A face gets the font clause alone: there is no CSS at that URL to inline.
+ * Anything merely font-NAMED joins rather than replaces, because a font
+ * stylesheet has to be inlined AND have its faces embedded.
+ *
+ * The size is in the clause because the refusal is where the wrong conclusion
+ * gets drawn. Told only that a font cannot be linked, a caller - a coding
+ * agent especially - weighs embedding against the upload limit, guesses that
+ * a typeface is megabytes, and drops the fonts instead. A latin subset of a
+ * variable face is about 65 KB encoded, which settles that guess in the one
+ * place it is made. The recipe stays in the docs, where it can be a worked
+ * example rather than a paragraph appended to every refusal.
  */
 const FONT_FILE = /\.(?:woff2?|[ot]tf|eot)(?:[?#]|$)/i;
-const FONT_HINT = " - embed fonts as data: URIs in @font-face";
-const STYLESHEET_HINT = " - inline the stylesheet";
+const NAMES_FONTS = /(?:^|[./])fonts?(?:[./?#]|$)/i;
+const FONT_HINT =
+  "embed fonts as data: URIs in @font-face (a latin subset costs about 65 KB)";
+const STYLESHEET_HINT = "inline the stylesheet";
+
+/**
+ * What the element said its own reference was. `HOST_ONLY` is a `link` that
+ * named a host and no resource, which with a stylesheet is where a font-named
+ * target is read.
+ */
+const UNDECLARED = 0;
+const HOST_ONLY = 1;
+const DECLARED_STYLESHEET = 2;
+const DECLARED_FACE = 3;
 
 /**
  * `flat` cut to `MAX_TARGET_LENGTH` characters for display, with an ellipsis
@@ -545,15 +577,23 @@ function addExternal(
   found: Map<string, string>,
   location: string,
   target: string,
-  stylesheet = false,
+  declared: number = UNDECLARED,
 ): void {
   const flat = target.replace(UNPRINTABLE, " ").trim();
   // Classified from the whole target, truncated only for display: a `.woff2`
   // sitting past the cut is still a font, and a long URL is exactly when the
   // caller needs to be told so.
-  let hint = "";
-  if (FONT_FILE.test(flat)) hint = FONT_HINT;
-  else if (stylesheet) hint = STYLESHEET_HINT;
+  const clauses: string[] = [];
+  if (declared === DECLARED_FACE || FONT_FILE.test(flat)) {
+    clauses.push(FONT_HINT);
+  } else {
+    if (declared === DECLARED_STYLESHEET) clauses.push(STYLESHEET_HINT);
+    // A font-named target is only read where a `link` left the kind open.
+    if (declared !== UNDECLARED && NAMES_FONTS.test(flat)) {
+      clauses.push(FONT_HINT);
+    }
+  }
+  const hint = clauses.length === 0 ? "" : ` - ${clauses.join("; ")}`;
   const shown = forDisplay(flat);
   const full = `external reference: ${location} ${flat}${hint}`;
   found.set(full, `external reference: ${location} ${shown}${hint}`);
@@ -637,7 +677,7 @@ function inertLink(rel: string | undefined): boolean {
 function collectAttributes(
   tag: string,
   attributes: Record<string, string>,
-  stylesheet: boolean,
+  declared: number,
   found: Map<string, string>,
 ): void {
   for (const attr of URL_ATTRS[tag] ?? []) {
@@ -645,16 +685,28 @@ function collectAttributes(
     if (value === undefined) continue;
     if (SRCSET_ATTRS[attr] === true) {
       for (const candidate of externalCandidates(value)) {
-        addExternal(found, `${tag}[${attr}]`, candidate, stylesheet);
+        addExternal(found, `${tag}[${attr}]`, candidate, declared);
         if (found.size > MAX_FINDINGS) return;
       }
       continue;
     }
     if (isExternalRef(value)) {
-      addExternal(found, `${tag}[${attr}]`, value, stylesheet);
+      addExternal(found, `${tag}[${attr}]`, value, declared);
       if (found.size > MAX_FINDINGS) return;
     }
   }
+}
+
+/** What a `link` says its own reference is: a face, a stylesheet, or a host. */
+function declaredBy(attributes: Record<string, string>): number {
+  if (attributes["as"]?.toLowerCase() === "font") return DECLARED_FACE;
+  const tokens = attributes["rel"]?.toLowerCase().split(/\s+/) ?? [];
+  if (tokens.includes("stylesheet")) return DECLARED_STYLESHEET;
+  // An opt-in pair rather than everything left over: `rel=icon` and
+  // `rel=preload as=image` have named a resource, and a font-named target
+  // does not overrule them.
+  const host = tokens.includes("preconnect") || tokens.includes("dns-prefetch");
+  return host ? HOST_ONLY : UNDECLARED;
 }
 
 /** Records a refusal for every refusable reference on one start tag. */
@@ -667,17 +719,18 @@ function collectStartTag(tag: StartTag, found: Map<string, string>): void {
   // else, and these adjustments introduce ASCII capitals and nothing more.
   const name = tag.tagName.toLowerCase();
 
-  // From the declared `rel`, not inferred from the URL, so the stylesheet hint
-  // states what the document says rather than what a path looks like.
+  // From what the element declared, not inferred from the URL. `as="font"`
+  // is how a `<link rel="preload">` names a face whose URL says nothing -
+  // signed, hashed, or extensionless - and it outranks `rel` because a face
+  // is a face however it was linked.
   const rel = name === "link" ? attributes["rel"] : undefined;
-  const stylesheet =
-    rel?.toLowerCase().split(/\s+/).includes("stylesheet") === true;
+  const declared = name === "link" ? declaredBy(attributes) : UNDECLARED;
 
   // An inert `link` reaches the network through no attribute, so the whole
   // element is skipped rather than just its `href`: `imagesrcset` only fetches
   // under `rel=preload as=image`, which is not inert.
   if (name !== "link" || !inertLink(rel)) {
-    collectAttributes(name, attributes, stylesheet, found);
+    collectAttributes(name, attributes, declared, found);
     if (found.size > MAX_FINDINGS) return;
   }
 

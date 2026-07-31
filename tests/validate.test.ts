@@ -29,6 +29,13 @@ function childTextContent(node: DefaultTreeAdapterTypes.Node): string {
 const DOC = (body: string) =>
   `<!doctype html><html><head><title>t</title></head><body>${body}</body></html>`;
 
+/**
+ * Spelled out once. Every font refusal carries the size, because the refusal
+ * is where a caller decides whether embedding is affordable at all.
+ */
+const EMBED =
+  "embed fonts as data: URIs in @font-face (a latin subset costs about 65 KB)";
+
 describe("validateStandaloneHtml", () => {
   test("accepts a fully inline document", () => {
     const html = `<!doctype html><html><head><style>body{color:red}</style></head>
@@ -371,7 +378,7 @@ describe("validateStandaloneHtml - the reported target", () => {
     expect(check(DOC(`<link rel="stylesheet" href="${url}">`))).toEqual({
       ok: false,
       reasons: [
-        `external reference: link[href] ${url} - inline the stylesheet`,
+        `external reference: link[href] ${url} - inline the stylesheet; ${EMBED}`,
       ],
       truncated: false,
     });
@@ -391,9 +398,7 @@ describe("validateStandaloneHtml - the reported target", () => {
       check(DOC(`<style>@font-face{src:url(/f/inter.woff2)}</style>`)),
     ).toEqual({
       ok: false,
-      reasons: [
-        "external reference: style /f/inter.woff2 - embed fonts as data: URIs in @font-face",
-      ],
+      reasons: [`external reference: style /f/inter.woff2 - ${EMBED}`],
       truncated: false,
     });
   });
@@ -404,7 +409,7 @@ describe("validateStandaloneHtml - the reported target", () => {
     ).toEqual({
       ok: false,
       reasons: [
-        "external reference: link[href] https://e.example/i.otf - embed fonts as data: URIs in @font-face",
+        `external reference: link[href] https://e.example/i.otf - ${EMBED}`,
       ],
       truncated: false,
     });
@@ -416,6 +421,71 @@ describe("validateStandaloneHtml - the reported target", () => {
       ok: false,
       reasons: [
         "external reference: link[href] /site.css - inline the stylesheet",
+      ],
+      truncated: false,
+    });
+  });
+
+  /**
+   * A preloaded face can be signed, hashed, or extensionless, so the URL says
+   * nothing. `as="font"` is the document saying it outright.
+   */
+  test("hints a face the link declares rather than spells", () => {
+    expect(
+      check(
+        DOC(
+          `<link rel="preload" as="font" href="https://e.example/f?sig=abc" crossorigin>`,
+        ),
+      ),
+    ).toEqual({
+      ok: false,
+      reasons: [
+        `external reference: link[href] https://e.example/f?sig=abc - ${EMBED}`,
+      ],
+      truncated: false,
+    });
+  });
+
+  /**
+   * A font stylesheet is CSS that serves fonts, so both answers apply: the CSS
+   * has to come inside the document AND the faces it names have to be embedded.
+   */
+  test("hints both when a stylesheet is served out of a fonts path", () => {
+    expect(
+      check(DOC(`<link rel="stylesheet" href="/fonts/faces.css">`)),
+    ).toEqual({
+      ok: false,
+      reasons: [
+        `external reference: link[href] /fonts/faces.css - inline the stylesheet; ${EMBED}`,
+      ],
+      truncated: false,
+    });
+  });
+
+  /**
+   * A directory called `fonts` speaks for a reference only where nothing else
+   * has: a stylesheet, or a `preconnect` naming a host and no resource. An
+   * `img`, a `script`, a `rel="icon"`, and a `rel="preload" as="image"` have
+   * all said what they are, and answering them with `@font-face` would be
+   * advice about a font their author does not have.
+   */
+  test("keeps the font hint off references that named their own kind", () => {
+    expect(
+      check(
+        DOC(
+          `<img src="/fonts/logo.png">` +
+            `<script src="/fonts/loader.js"></script>` +
+            `<link rel="icon" href="/fonts/favicon.png">` +
+            `<link rel="preload" as="image" href="/fonts/hero.png">`,
+        ),
+      ),
+    ).toEqual({
+      ok: false,
+      reasons: [
+        "external reference: img[src] /fonts/logo.png",
+        "external reference: script[src] /fonts/loader.js",
+        "external reference: link[href] /fonts/favicon.png",
+        "external reference: link[href] /fonts/hero.png",
       ],
       truncated: false,
     });
@@ -435,9 +505,7 @@ describe("validateStandaloneHtml - the reported target", () => {
     const url = `https://e.example/${"a".repeat(400)}.woff2`;
     expect(check(DOC(`<style>@font-face{src:url(${url})}</style>`))).toEqual({
       ok: false,
-      reasons: [
-        `external reference: style ${url.slice(0, 120)}... - embed fonts as data: URIs in @font-face`,
-      ],
+      reasons: [`external reference: style ${url.slice(0, 120)}... - ${EMBED}`],
       truncated: false,
     });
   });
@@ -475,9 +543,9 @@ describe("validateStandaloneHtml - every offender at once", () => {
     expect(result).toEqual({
       ok: false,
       reasons: [
-        "external reference: link[href] https://fonts.googleapis.com",
-        "external reference: link[href] https://fonts.gstatic.com",
-        "external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet",
+        `external reference: link[href] https://fonts.googleapis.com - ${EMBED}`,
+        `external reference: link[href] https://fonts.gstatic.com - ${EMBED}`,
+        `external reference: link[href] https://fonts.googleapis.com/css2?family=Inter - inline the stylesheet; ${EMBED}`,
       ],
       truncated: false,
     });
