@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { validate } from "@scalar/openapi-parser";
 import { DOCS_PAGE, SCALAR_SCRIPT_PATH } from "../../src/api/docs-page.ts";
-import { ErrorBody, PlanCreated, PlanReplaced } from "../../src/api/schemas.ts";
+import {
+  ErrorBody,
+  PlanCreated,
+  PlanList,
+  PlanReplaced,
+} from "../../src/api/schemas.ts";
 import { PLAN_CSP } from "../../src/http/security-headers.ts";
 import {
   type FetchInit,
@@ -469,15 +474,16 @@ describe("the published document describes the real responses", () => {
   });
 
   test("a listing matches PlanList", async () => {
-    // Session-only, so an API key gets the documented 401 rather than a page.
+    const key = await app.account();
+    const created = await createPlan(key, html("listed"));
+
     const response = await app.fetch("/api/plans", {
-      headers: { "x-api-key": await app.account() },
+      headers: { "x-api-key": key },
     });
 
-    expect(response.status).toBe(401);
-    expect(ErrorBody.parse(await response.json()).error).toBe(
-      "authentication required",
-    );
+    expect(response.status).toBe(200);
+    const body = PlanList.parse(await response.json());
+    expect(body.plans.map((plan) => plan.id)).toEqual([created.id]);
   });
 
   test("a refusal matches Error", async () => {
@@ -548,7 +554,13 @@ describe("gated sharing", () => {
     const signedIn = await app.fetch("/api/plans", { headers: { cookie } });
     expect(signedIn.status).toBe(200);
 
-    expect((await app.fetch("/api/plans")).status).toBe(401);
+    // Also the one place a documented 401 body is parsed through the Worker:
+    // every operation in the document answers a refusal with this shape.
+    const refused = await app.fetch("/api/plans");
+    expect(refused.status).toBe(401);
+    expect(ErrorBody.parse(await refused.json()).error).toBe(
+      "authentication required",
+    );
   });
 
   /**
@@ -1363,7 +1375,7 @@ describe("gated sharing", () => {
     ).toBe(401);
   });
 
-  test("every sharing route refuses no session and a stranger's session", async () => {
+  test("every sharing route refuses a key, no session, and a stranger's session", async () => {
     const owner = await app.accountWithSession();
     const stranger = await app.accountWithSession();
     const created = await createPlan(owner.key, html("guarded"), {
@@ -1411,6 +1423,14 @@ describe("gated sharing", () => {
     for (const { path, init } of routes) {
       const anonymous = await app.fetch(path, init);
       expect(anonymous.status).toBe(401);
+
+      // The owner's own key, which every other plan route accepts. These six
+      // are what `SESSION_ONLY` in tests/openapi.test.ts leaves out of the
+      // published document, so the document is only honest while they refuse.
+      const keyed = { ...(init.headers ?? {}), "x-api-key": owner.key };
+      expect((await app.fetch(path, { ...init, headers: keyed })).status).toBe(
+        401,
+      );
 
       const headers = { ...(init.headers ?? {}), cookie: stranger.cookie };
       const outsider = await app.fetch(path, { ...init, headers });

@@ -4,7 +4,7 @@ import type { Config } from "../config.ts";
 import { PLAN_PAGE_SIZE, type PlanRepo } from "../services/types.ts";
 import { planUrl } from "./plan-url.ts";
 import { problem } from "./problem.ts";
-import { resolveSessionUserId } from "./require-user.ts";
+import { resolveUserId } from "./require-user.ts";
 
 export async function listPlans(
   auth: AppAuth,
@@ -12,10 +12,13 @@ export async function listPlans(
   config: Pick<Config, "publicBaseUrl">,
   request: Request,
 ): Promise<Response> {
-  // Session-only. Not because a key cannot read - it can, one plan at a time
-  // through the read gate - but because enumerating an account's plans is a
-  // dashboard capability rather than a per-plan one.
-  const userId = await resolveSessionUserId(auth, request);
+  // A key or a session, like the rest of the plan API. Enumeration hands a
+  // leaked key ids it did not have, but every one of those plans was already
+  // readable, replaceable, and deletable by it - so this widens what a key
+  // knows, not what it can do, and a client that has no cookie is otherwise
+  // blind to plans it did not just upload. Unmetered, like the other reads;
+  // what bounds one call is the page size below.
+  const userId = await resolveUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
 
   // Paged by a fixed size, never by the quota: lowering the quota does not

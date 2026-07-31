@@ -171,9 +171,10 @@ export function ApiKeysPanel() {
     <section className="card">
       <h2 className="card-title">API keys</h2>
       <p className="muted">
-        A key authorises upload, replacement, delete, and reading any plan you
-        can read. It cannot list your plans or change who a plan is shared with.
-        Send it as <code>x-api-key</code>.
+        A key authorises upload, replacement, renaming, delete, listing your
+        plans, and reading any plan you can read. It can share a plan as it
+        uploads it, but it cannot change how an existing plan is shared. Send it
+        as <code>x-api-key</code>.
       </p>
       <CreateKeyForm
         name={name}

@@ -308,7 +308,9 @@ describe("the chrome", () => {
 
     expect(view.all(".footer .mono").map((n) => n.textContent)).toEqual([
       "PUT /api/plans",
+      "GET /api/plans",
       "PUT /api/plans/:id",
+      "PATCH /api/plans/:id",
       "DELETE /api/plans/:id",
       "GET /p/:id",
     ]);

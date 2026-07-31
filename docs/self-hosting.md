@@ -204,6 +204,14 @@ confusing 403 much later.
   more keys does not buy more uploads. The api-key plugin's own per-key limiter
   is deliberately disabled: it only runs when a key is verified, so it would
   miss dashboard uploads entirely.
+  Only upload and replace draw on this allowance. `GET /api/plans`,
+  `PATCH /api/plans/{id}`, and `DELETE /api/plans/{id}` carry no limiter of any
+  kind, and all three accept an API key, so a leaked key can drive them as fast
+  as the runtime allows. The bodies are bounded (4 KB on `PATCH`) and the listing
+  is capped at one page, so the exposure is request volume rather than unbounded
+  work. Put a rate limit in front of the app if that matters to your deployment.
+  (`POST /api/plans/{id}/unlock` has a limiter of its own, keyed on the client
+  address - see `UNLOCK_RATE_MAX`.)
 - **KV propagation is up to 60 seconds across regions.** A revoked session can
   linger in another region until the database fallback catches it. Sessions are
   stored in the database as well as KV precisely so a KV miss degrades to a
@@ -258,19 +266,26 @@ confusing 403 much later.
 
 ## API
 
-Every endpoint below is described at `/api/docs`, a Scalar reference rendered
-from `/api/openapi.json`. The document is generated from the same schemas the
-handlers answer with, and `servers` and the upload cap come from the running
-deployment's own configuration - so a self-hosted instance publishes its
+The API-key endpoints below are described at `/api/docs`, a Scalar reference
+rendered from `/api/openapi.json`. The document is generated from the same
+schemas the handlers answer with, and `servers` and the upload cap come from the
+running deployment's own configuration - so a self-hosted instance publishes its
 limits, not this repository's defaults. Both pages are unauthenticated, and
 neither loads anything off-origin.
 
+The session-only routes are not in the reference: it describes what a key can
+call, so it names no cookie a script cannot obtain. They are tabulated with the
+sharing prose below because this guide is now the only place they are written
+down.
+
 Authentication is an API key in the `x-api-key` header. Keys are minted from
 the dashboard; there is no limit on how many, and expiry is optional. A key
-authorises upload, replacement, delete, and reading any plan its owner may
-read. Listing plans, relabelling them, changing who a plan is shared with,
-managing keys, and deleting the account all require a session - a leaked key
-must not be able to hand out access to other people.
+authorises upload, replacement, relabelling, delete, listing the account's
+plans, and reading any plan its owner may read. Changing who else may read a
+plan - visibility, share codes, grants - along with managing keys and passkeys
+and deleting the account, requires a session: a leaked key must not be able to
+hand out access to other people, and revoking it must be enough to stop the
+bleeding.
 
 Deleting an account takes one more thing. `POST /api/auth/delete-user` refuses
 unless the request carries `x-expected-account` naming the account id it means
@@ -311,6 +326,21 @@ per request. Sharing with accounts is session-only after upload - a key can
 name accounts on a plan it is creating, but cannot hand out access to an
 existing one.
 
+The full session-only sharing-management set, all of which the dashboard drives
+and none of which an API key may call:
+
+| Request | Body | Reply |
+| --- | --- | --- |
+| `GET /api/plans/{id}/sharing` | - | `{"visibility":...,"hasShareCode":...,"grants":["handle",...]}` |
+| `PUT /api/plans/{id}/sharing` | `{"visibility":"public"\|"private"}` | the same shape |
+| `POST /api/plans/{id}/share-code` | - | `201 {"code":"..."}`, shown once; `409` while the plan is public |
+| `DELETE /api/plans/{id}/share-code` | - | `204` |
+| `POST /api/plans/{id}/grants` | `{"accounts":"a,b"}` or `{"accounts":["a","b"]}` | `{"granted":[...],"unknown":[...],"failed":[...]}` |
+| `DELETE /api/plans/{id}/grants/{handle}` | - | `204`; `404` when that handle held no grant |
+
+Every one answers `401` without a session and `404` for a plan the session does
+not own - never `403`, so an id belonging to someone else is never confirmed.
+
 ```sh
 # Upload, optionally labelled
 curl -X PUT "https://plans.example.com/api/plans?label=Q3%20rollout" \
@@ -348,6 +378,17 @@ curl -X PUT https://plans.example.com/api/plans/<id> \
   --data-binary @plan.html
 # 200 {"id":"...","url":"https://plans.example.com/p/..."}
 
+# List what you own, newest first
+curl https://plans.example.com/api/plans -H "x-api-key: bkp_..."
+# 200 {"plans":[{"id":"...","url":"...","label":"Q3 rollout",...}],"truncated":false}
+
+# Rename one
+curl -X PATCH https://plans.example.com/api/plans/<id> \
+  -H "x-api-key: bkp_..." \
+  -H "content-type: application/json" \
+  -d '{"label":"Q4 rollout"}'
+# 200 {"id":"...","label":"Q4 rollout"}
+
 # Delete
 curl -X DELETE https://plans.example.com/api/plans/<id> -H "x-api-key: bkp_..."
 # 204
@@ -357,9 +398,10 @@ A label is owner-facing only. It is stored on the plan row, shown in the
 dashboard, and returned by `GET /api/plans`; it never reaches the object store
 and never appears in the public URL, so relabelling changes nothing a visitor
 can see. Labels are free text up to 100 characters, are not unique, and are
-optional - the id stays the identity. Blank clears the label. The dashboard
-edits them in place with `PATCH /api/plans/<id>` and a `{"label":"..."}` body,
-which is session-only.
+optional - the id stays the identity. Blank clears the label. `PATCH
+/api/plans/<id>` with a `{"label":"..."}` body edits one in place, which is what
+the dashboard does; a key may send it too, since a caller that can replace the
+document or delete the plan is not one to refuse a rename over.
 
 Replacing draws on the same per-user upload allowance as a new upload, and is
 scoped to the caller: an id owned by another account is a `404`, and its object

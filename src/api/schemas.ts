@@ -81,10 +81,16 @@ export function shareCodeFormat(length: number): string {
 }
 
 /**
- * Writes the deployment's own code format onto the two schemas that carry a
+ * Writes the deployment's own code format onto a schema that carries a
  * plaintext code, after generation. Throws rather than silently doing nothing
- * if either shape is renamed - a description that quietly vanished would be
+ * if the shape is renamed - a description that quietly vanished would be
  * indistinguishable from one that was never wanted.
+ *
+ * `ShareCodeCreated` carries one too and is deliberately not described: it is
+ * the reply of a session-only route, so `publishedSchemas` in
+ * src/api/openapi.ts drops it from the document, and describing a shape nothing
+ * publishes would only couple `GET /api/openapi.json` to a rename it does not
+ * care about.
  */
 function describeShareCode(
   schemas: Record<string, JsonSchema>,
@@ -143,7 +149,6 @@ export function componentSchemas(
   }
 
   describeShareCode(schemas, "PlanCreated", shareCodeLength);
-  describeShareCode(schemas, "ShareCodeCreated", shareCodeLength);
 
   return schemas;
 }
@@ -326,7 +331,9 @@ export const PlanSummary = component(
       hasGrants: z.boolean().meta({
         description:
           "True when at least one account has been granted this plan. The " +
-          "handles themselves come from GET /api/plans/{id}/sharing.",
+          "handles themselves are shown in the dashboard, which is where a " +
+          "grant on a plan that already exists is added or removed; `?grants=` " +
+          "names accounts as the plan is uploaded.",
       }),
     })
     .meta({ title: "PlanSummary", description: "One row of the plan list." }),
@@ -373,7 +380,9 @@ export const PlanCreated = component(
         .meta({
           description:
             "Entries from `?grants=` whose grant errored. The plan is stored " +
-            "either way; retry these against POST /api/plans/{id}/grants.",
+            "either way, unshared with these accounts. Granting an existing " +
+            "plan is session-only, so an API key cannot retry them: name them " +
+            "again from the dashboard.",
         }),
     })
     .meta({ title: "PlanCreated" }),

@@ -16,8 +16,9 @@ import { handleEmail } from "../../src/ids.ts";
  * plugin's own `defaultKeyHasher` so Better Auth verifies it the ordinary way.
  * If that hashing ever changes, every request here 401s - loudly, not silently.
  *
- * An API key authorises writes only, so session-only reads (`GET /api/plans`)
- * are not reachable from here and row assertions go through `db` instead.
+ * An API key authorises every plan operation but sharing, so `GET /api/plans`
+ * is reachable from here. The sharing routes are not: they take a session, and
+ * assertions about what they would have written go through `db` instead.
  */
 
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");

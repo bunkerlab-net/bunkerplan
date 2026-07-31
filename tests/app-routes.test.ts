@@ -100,16 +100,25 @@ describe("the plan collection", () => {
     // tests/create-plan.test.ts, which can watch the reader itself.
   });
 
-  test("listing is session-only, because enumerating is not a per-plan act", async () => {
-    const app = buildApp({ keyUser: OWNER });
+  test("listing accepts a key, which sees the plans it already controls", async () => {
+    const app = buildApp({
+      keyUser: OWNER,
+      plans: memoryPlans([
+        storedPlan(),
+        storedPlan({ id: "cccccccccccccccc", userId: STRANGER }),
+      ]),
+    });
 
     const response = await app.fetch("/api/plans", {
       headers: { "x-api-key": "bkp_test" },
     });
 
-    expect(response.status).toBe(401);
-    // A key can read one plan at a time through the gate; it cannot enumerate.
-    expect(app.auth.keys).toBe(0);
+    expect(response.status).toBe(200);
+    expect(app.auth.keys).toBe(1);
+    // The key's owner, not the whole table: a stranger's plan is not listed.
+    expect(
+      await response.json<{ plans: Array<{ id: string }> }>(),
+    ).toMatchObject({ plans: [{ id: PLAN_ID }], truncated: false });
   });
 
   test("listing returns the account's own plans, newest first", async () => {
@@ -284,7 +293,7 @@ describe("one plan by id", () => {
     );
   });
 
-  test("relabelling is session-only, unlike replace and delete", async () => {
+  test("relabelling accepts a key, like replace and delete", async () => {
     const app = buildApp({
       keyUser: OWNER,
       plans: memoryPlans([storedPlan()]),
@@ -296,8 +305,11 @@ describe("one plan by id", () => {
       body: JSON.stringify({ label: "Q3" }),
     });
 
-    // The label a key can set is the one it supplies on upload.
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
+    expect(await response.json<unknown>()).toEqual({
+      id: PLAN_ID,
+      label: "Q3",
+    });
   });
 
   test("relabelling with a session works", async () => {
