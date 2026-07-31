@@ -1,8 +1,8 @@
 import { apiKey } from "@better-auth/api-key";
 import type { SecondaryStorage } from "@better-auth/core/db";
-import { APIError } from "@better-auth/core/error";
 import { passkey } from "@better-auth/passkey";
 import type { BetterAuthOptions } from "better-auth";
+import { APIError } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import {
   EXPECTED_ACCOUNT_HEADER,

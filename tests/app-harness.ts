@@ -221,8 +221,11 @@ export function memoryPlans(
      * through this signature, so there is nothing here to preserve.
      */
     insert: async (row, maxPlans): Promise<PlanInsert> => {
-      if (rows.has(row.id)) return "duplicate";
+      // Before the duplicate check, so a row that could not legally exist is
+      // refused whether or not its id happens to be taken - the check is about
+      // the shape, and "duplicate" would otherwise let one through unlooked at.
       legal(row);
+      if (rows.has(row.id)) return "duplicate";
       const held = [...rows.values()].filter(
         (item) => item.userId === row.userId,
       ).length;
