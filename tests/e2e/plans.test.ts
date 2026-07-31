@@ -53,6 +53,19 @@ async function jsonBody(
 }
 
 /**
+ * The plaintext code out of a mint, narrowed rather than asserted: a mint that
+ * answered without one should fail here, naming the body, instead of handing a
+ * later assertion the string "undefined" to redeem.
+ */
+async function mintedCode(response: FetchResponse): Promise<string> {
+  const { code } = await jsonBody(response);
+  if (typeof code !== "string") {
+    throw new Error(`no code in the mint response: ${JSON.stringify(code)}`);
+  }
+  return code;
+}
+
+/**
  * Plans are private unless asked otherwise, so most tests here that only need
  * a servable document ask for `public` - the gate itself is exercised by its
  * own describe block below.
@@ -1033,7 +1046,7 @@ describe("gated sharing", () => {
       headers: session,
     });
     expect(minted.status).toBe(201);
-    const first = ((await minted.json()) as { code: string }).code;
+    const first = await mintedCode(minted);
     expect(first).toMatch(new RegExp(`^[0-9A-Za-z]{${SHARE_CODE_LENGTH}}$`));
 
     const unlocked = await app.fetch(`/api/plans/${created.id}/unlock`, {
@@ -1075,7 +1088,7 @@ describe("gated sharing", () => {
       headers: session,
     });
     expect(rotated.status).toBe(201);
-    const second = ((await rotated.json()) as { code: string }).code;
+    const second = await mintedCode(rotated);
     expect(second).not.toBe(first);
 
     expect(
@@ -1178,12 +1191,12 @@ describe("gated sharing", () => {
       body: JSON.stringify({ visibility: "public" }),
     });
     expect(flipped.status).toBe(200);
-    // The code is retired by the flip, not merely made inert: a bearer secret
-    // must not reactivate if this goes private again. Grants are named accounts
-    // and survive.
+    // The flip changes who may read the plan and nothing else: the code and the
+    // grants are both still set, and both apply again the moment this goes
+    // private. While it is public neither gates anything.
     expect(await jsonBody(flipped)).toEqual({
       visibility: "public",
-      hasShareCode: false,
+      hasShareCode: true,
       grants: [guest.handle],
     });
 
@@ -1234,7 +1247,9 @@ describe("gated sharing", () => {
     const minted = await mint();
     expect(minted.status).toBe(201);
 
-    // And back to public retires it, rather than leaving it to reactivate.
+    // And back to public keeps it: the flip is about who may read the plan, not
+    // about the credential. Nothing was handed out twice, so nothing has to be
+    // handed out again.
     const toPublic = await app.fetch(`/api/plans/${created.id}/sharing`, {
       method: "PUT",
       headers: { ...session, "content-type": "application/json" },
@@ -1242,12 +1257,12 @@ describe("gated sharing", () => {
     });
     expect(await jsonBody(toPublic)).toEqual({
       visibility: "public",
-      hasShareCode: false,
+      hasShareCode: true,
       grants: [],
     });
   });
 
-  test("a retired code and its cookie both stop opening the plan", async () => {
+  test("a code and its cookie survive a round trip through public", async () => {
     const { key, cookie } = await app.accountWithSession();
     const session = { cookie };
     const created = await createPlan(key, html("secret"), {
@@ -1257,7 +1272,7 @@ describe("gated sharing", () => {
       method: "POST",
       headers: session,
     });
-    const code = ((await minted.json()) as { code: string }).code;
+    const code = await mintedCode(minted);
 
     // Its own address: the unlock ceiling is per address, and the window
     // outlives this run.
@@ -1287,12 +1302,60 @@ describe("gated sharing", () => {
         body: JSON.stringify({ visibility }),
       });
     expect((await flip("public")).status).toBe(200);
+
+    // Ungated while public, and the retained digest does not change that:
+    // `resolvePlanAccess` grants on `visibility` before it reads the hash, so a
+    // reader holding nothing at all gets the document.
+    expect((await app.fetch(`/p/${created.id}`)).status).toBe(200);
+
     expect((await flip("private")).status).toBe(200);
 
-    // The point of the whole change: going public retired the digest, so the
-    // code a stranger still holds no longer matches anything, and the cookie -
-    // signed over that digest - no longer verifies. Neither gets the document
-    // back now the plan is private again.
+    // Issue #22: the owner opened the plan up and closed it again, and the link
+    // they had already handed out still opens it. The cookie signed over that
+    // digest still verifies too, because the digest is the one it was signed
+    // over.
+    expect((await app.fetch(`/p/${created.id}?code=${code}`)).status).toBe(200);
+    expect(
+      (await app.fetch(`/p/${created.id}`, { headers: { cookie: shared } }))
+        .status,
+    ).toBe(200);
+  });
+
+  test("removing the code retires it and its cookie", async () => {
+    const { key, cookie } = await app.accountWithSession();
+    const session = { cookie };
+    const created = await createPlan(key, html("secret"), {
+      visibility: "private",
+    });
+    const minted = await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "POST",
+      headers: session,
+    });
+    const code = await mintedCode(minted);
+
+    // Its own address, for the same reason as the round-trip test above.
+    const redeemed = await app.fetch(`/api/plans/${created.id}/unlock`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cf-connecting-ip": "198.18.9.10",
+      },
+      body: JSON.stringify({ code }),
+    });
+    expect(redeemed.status).toBe(204);
+    const shared = shareCookie(redeemed);
+    expect((await app.fetch(`/p/${created.id}?code=${code}`)).status).toBe(200);
+
+    // Now that a visibility flip keeps the code, this is the request that
+    // destroys one - so it is the request that has to destroy the cookies too.
+    const cleared = await app.fetch(`/api/plans/${created.id}/share-code`, {
+      method: "DELETE",
+      headers: session,
+    });
+    expect(cleared.status).toBe(204);
+
+    // The code matches nothing, and the cookie is signed over a digest the row
+    // no longer holds.
     expect((await app.fetch(`/p/${created.id}?code=${code}`)).status).toBe(401);
     expect(
       (await app.fetch(`/p/${created.id}`, { headers: { cookie: shared } }))

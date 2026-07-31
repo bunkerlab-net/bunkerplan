@@ -207,12 +207,11 @@ export interface PlanRepo {
   /**
    * False means not found or not owned by `userId`.
    *
-   * Neither visibility leaves a code on a public plan. `public` clears any
-   * hash outright; `private` clears one only when the row was public, which
-   * catches the pair `insert` still accepts and rows written before this rule.
-   * A plan that was already private keeps its code - that is the code-shared
-   * state itself, and `DELETE /share-code` is how it is dropped. Unlock
-   * cookies are bound to the digest, so they die with it. Grants are untouched.
+   * Touches `visibility` alone. A share code survives every flip in either
+   * direction, so a plan opened up and closed again is reachable by the code it
+   * always had; `POST`/`DELETE /share-code` are what replace and retire one.
+   * Grants survive too. A code gates nothing while the plan is public, because
+   * access is granted on `visibility` before the hash is read.
    */
   setVisibility(
     id: string,
@@ -222,10 +221,11 @@ export interface PlanRepo {
   /**
    * `hash` null clears the code. False means not found or not owned.
    *
-   * Setting a hash additionally requires the plan to be private, which is what
-   * holds the invariant that a public plan never carries one. Clearing is
-   * always allowed, so a public row can still be tidied. False therefore also
-   * means "the plan is public"; the caller re-reads to tell them apart.
+   * Setting a hash additionally requires the plan to be private: a public plan
+   * is readable by anyone holding the URL, so a new code would gate nothing.
+   * Clearing is always allowed, which is how a public plan's retained code is
+   * destroyed. False therefore also means "the plan is public"; the caller
+   * re-reads to tell them apart.
    */
   setShareCodeHash(
     id: string,

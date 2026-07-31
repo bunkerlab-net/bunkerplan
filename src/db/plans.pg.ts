@@ -112,23 +112,13 @@ function accessMethods(
     },
 
     /**
-     * See the sqlite twin: neither visibility leaves a code on a public plan,
-     * and a row that was already private keeps its own.
+     * See the sqlite twin: visibility and the share code are independent, so
+     * neither direction touches the hash.
      */
     setVisibility: (id, userId, visibility) =>
-      updateOwned(
-        db,
-        id,
-        userId,
-        visibility === "public"
-          ? { visibility, shareCodeHash: null }
-          : {
-              visibility,
-              shareCodeHash: sql`case when ${plan.visibility} = 'public' then null else ${plan.shareCodeHash} end`,
-            },
-      ),
+      updateOwned(db, id, userId, { visibility }),
 
-    /** Private-only, like the sqlite twin, and for the same reason. */
+    /** Private-only mint, like the sqlite twin, and for the same reason. */
     setShareCodeHash: (id, userId, hash) =>
       updateOwned(
         db,

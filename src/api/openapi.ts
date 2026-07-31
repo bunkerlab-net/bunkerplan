@@ -370,15 +370,17 @@ const SET_SHARING_OPERATION = {
     "because that is the one that returns a plaintext code. A plan flipped " +
     "to private stops being served at once: a public plan carries " +
     "`public, no-cache`, so every read revalidates against this API.\n\n" +
-    "Setting `public` retires any share code, in the same write. A code is a " +
-    "bearer secret that cannot be recalled, so it is not left dormant to " +
-    "start working again if the plan goes private later; the unlock cookies " +
-    "minted under it are bound to its digest and stop verifying too. " +
-    "`hasShareCode` in the response says so. Grants are untouched - those " +
-    "name accounts the owner chose, and each is revocable on its own. " +
-    "Setting `private` does not clear a code: every code-shared plan is " +
-    "private with a code, so this field cannot distinguish keeping one from " +
-    "dropping it - `DELETE /api/plans/{id}/share-code` is that request.",
+    "Neither value touches the plan's share code, so `hasShareCode` in the " +
+    "response reads the same as it did before the call, and the unlock " +
+    "cookies bound to that digest are not invalidated by the change. A plan " +
+    "opened up and later closed again is reachable by the code it always " +
+    "had, rather than by a code its owner has to mint and redistribute. " +
+    "While the plan is public the code gates nothing, because a public plan " +
+    "is served to anyone holding its URL. Retiring a code is " +
+    "`POST /api/plans/{id}/share-code`, " +
+    "which replaces it, or `DELETE`, which drops it - both say so precisely, " +
+    "and this field cannot. Grants are untouched for the same reason: they " +
+    "name accounts the owner chose, and each is revocable on its own.",
   tags: ["Sharing"],
   security: SESSION_AUTH,
   requestBody: {
@@ -405,8 +407,7 @@ function rotateShareCodeOperation(codeFormat: string): Record<string, unknown> {
       `back afterwards (${codeFormat}). Calling this again replaces the ` +
       "code and immediately invalidates every unlock cookie issued under " +
       "the old one. The plan must be private: a public one is readable by " +
-      "anyone holding its URL, so a code would gate nothing and would only " +
-      "sit waiting to matter again.\n\n" +
+      "anyone holding its URL, so a new code would gate nothing.\n\n" +
       "Compose the link the same way as after an upload: `/s/{id}#code=CODE` " +
       "for a person, `?code=` on the plan URL for a reader without a browser. " +
       "See `PUT /api/plans` for why the two differ.",
@@ -417,7 +418,7 @@ function rotateShareCodeOperation(codeFormat: string): Record<string, unknown> {
       ...failures({
         401: UNAUTHORISED,
         404: NOT_FOUND,
-        409: "The plan is public, so it needs no share code.",
+        409: "A new share code cannot be minted while the plan is public.",
       }),
     },
   };
@@ -426,7 +427,10 @@ function rotateShareCodeOperation(codeFormat: string): Record<string, unknown> {
 const CLEAR_SHARE_CODE_OPERATION = {
   operationId: "clearShareCode",
   summary: "Remove a plan's share code",
-  description: `${SHARING_NOTE} Existing unlock cookies stop working.`,
+  description:
+    `${SHARING_NOTE} Existing unlock cookies stop working. This request is ` +
+    "allowed regardless of the plan's visibility, because it retires a code " +
+    "that a public plan may still carry.",
   tags: ["Sharing"],
   security: SESSION_AUTH,
   responses: {

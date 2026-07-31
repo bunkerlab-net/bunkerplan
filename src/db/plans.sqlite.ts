@@ -119,45 +119,35 @@ function accessMethods(
     },
 
     /**
-     * Neither visibility ever leaves a code on a public plan.
+     * Visibility and the share code are independent: neither direction touches
+     * the hash, and neither touches grants.
      *
-     * A code is a bearer token: it cannot be asked for back, and whoever holds
-     * it may no longer be someone the owner would give it to. Leaving the hash
-     * behind meant it lay dormant while public and worked again the moment the
-     * plan went private - a flip meant to restrict access silently restoring a
-     * credential minted long before. Unlock cookies are HMAC-bound to the hash,
-     * so they stop verifying with it.
+     * Clearing on the way to public destroyed a credential over a change that
+     * was not about the credential. The dashboard did warn, but the warning was
+     * the whole problem - an owner opening a plan up for a week had to choose
+     * between that and keeping a link already handed out. Now the code that
+     * worked before the flip works after it.
      *
-     * Going public clears it outright. Going private clears it only when the
-     * row was public, which is what catches a pair this repo still accepts from
-     * `insert` and rows written before any of this. The `case` reads the
-     * pre-update value, so both decisions are the one statement.
+     * Nothing is armed in the meantime that was not already reachable:
+     * `resolvePlanAccess` grants on `visibility` before it reads the hash, so a
+     * public plan is served to anyone holding the URL either way. A retained
+     * code gates nothing while public because there is nothing left to gate.
      *
-     * A plan that was already private keeps its code: that is the whole
-     * code-shared state, and this field cannot tell "private, keep it" from
-     * "private, drop it". `DELETE /share-code` says the latter precisely, so an
-     * idempotent write here never destroys a credential.
-     *
-     * Grants survive either way: those are named accounts the owner chose,
-     * still visible and individually revocable.
+     * Retiring a code is `POST /share-code` (replaces it) or `DELETE` (drops
+     * it). Both say so precisely; a visibility change does not.
      */
     setVisibility: (id, userId, visibility) =>
-      updateOwned(
-        db,
-        id,
-        userId,
-        visibility === "public"
-          ? { visibility, shareCodeHash: null }
-          : {
-              visibility,
-              shareCodeHash: sql`case when ${plan.visibility} = 'public' then null else ${plan.shareCodeHash} end`,
-            },
-      ),
+      updateOwned(db, id, userId, { visibility }),
 
     /**
-     * Setting a hash requires the plan to be private, in the same statement so
-     * a concurrent flip to public cannot slip a code in behind it. Clearing has
-     * no such guard: a public row carrying one is exactly what wants tidying.
+     * Minting requires the plan to be private - a policy now rather than an
+     * invariant, since a flip keeps a code. A public plan is readable by anyone
+     * holding the URL, so a *new* code would gate nothing, and the dashboard
+     * disables the control while public for that reason. In the statement so a
+     * concurrent flip cannot land a code on a plan the caller thought private.
+     *
+     * Clearing is allowed whatever the visibility, because destroying a code
+     * must never depend on the plan's current state.
      */
     setShareCodeHash: (id, userId, hash) =>
       updateOwned(

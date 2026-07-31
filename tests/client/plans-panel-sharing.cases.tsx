@@ -24,9 +24,9 @@ import {
  *
  * The share code is why this suite is careful. The server returns the
  * plaintext exactly once and keeps only a digest, so the block holding it has
- * to reveal it on rotation, keep it until the row goes away, and drop it the
- * moment going public retires the code it opens - a link on screen that no
- * longer works is worse than no link at all.
+ * to reveal it on rotation and keep it until the code is actually removed. A
+ * visibility flip no longer retires one, so the plaintext outlives a trip
+ * through public - a link on screen that still works is the point of it.
  */
 
 /**
@@ -253,12 +253,12 @@ export function registerSharingCases(): void {
         expect(radio(view, 1).checked).toBe(true);
       });
 
-      test("a public plan says why the accounts below grant nothing", async () => {
+      test("a public plan says why the code and accounts below do nothing", async () => {
         api.getSharing = async () => sharing({ visibility: "public" });
         const view = await openEditor();
 
         expect(view.find(`#visibility-inert-${PLAN_ID}`).textContent).toContain(
-          "Make it private to use them.",
+          "apply again when you make it private",
         );
         // Carried into the radiogroup's announcement, so the reason arrives with
         // the choice rather than after it.
@@ -276,16 +276,17 @@ export function registerSharingCases(): void {
         ).toBeNull();
       });
 
-      test("going public is labelled as retiring the code, before it is used", async () => {
+      test("the public control makes no claim about a code that is set", async () => {
+        // It used to warn that choosing public retired the code. It does not any
+        // more, because choosing public no longer does.
         api.getSharing = async () => sharing({ hasShareCode: true });
         const view = await openEditor();
 
-        expect(view.text()).toContain(
-          "Public - anyone holding the URL. Retires the share code.",
-        );
+        expect(view.text()).toContain("Public - anyone holding the URL");
+        expect(view.text()).not.toContain("Retires the share code.");
       });
 
-      test("with no code the same control makes no claim about one", async () => {
+      test("with no code the same control reads the same", async () => {
         const view = await openEditor();
 
         expect(view.text()).toContain("Public - anyone holding the URL");
@@ -504,7 +505,7 @@ export function registerSharingCases(): void {
         expect(view.find(".snippet code").textContent).toContain("code-2");
       });
 
-      test("going public retires the code, so the link on screen goes too", async () => {
+      test("going public keeps the code, so the link on screen stays", async () => {
         let state = sharing({ hasShareCode: false });
         api.getSharing = async () => state;
         api.rotateShareCode = async () => {
@@ -512,8 +513,8 @@ export function registerSharingCases(): void {
           return "abcd1234";
         };
         api.setVisibility = async () => {
-          // Going public retires the code server-side.
-          state = sharing({ visibility: "public", hasShareCode: false });
+          // The server keeps the code across the flip.
+          state = sharing({ visibility: "public", hasShareCode: true });
           return state;
         };
         const view = await openEditor();
@@ -522,8 +523,9 @@ export function registerSharingCases(): void {
 
         await choose(radio(view, 1));
 
-        // Showing it would hand the owner a link that no longer opens anything.
-        expect(view.maybe(".snippet")).toBeNull();
+        // It opens the plan again the moment this goes private, so taking it off
+        // screen would lose a working secret the owner can never read back.
+        expect(view.find(".snippet code").textContent).toContain("abcd1234");
       });
 
       test("a refused rotation leaves no half-revealed code", async () => {
@@ -558,6 +560,32 @@ export function registerSharingCases(): void {
         expect(
           view.byText<HTMLButtonElement>("button", "Create code").disabled,
         ).toBe(true);
+      });
+
+      test("a public plan can still remove the code it kept", async () => {
+        // The code survives a flip to public, so this is the only control that
+        // destroys one. Disabled here, the owner would have to make the plan
+        // private, remove, and make it public again to be rid of a credential.
+        let state = sharing({ visibility: "public", hasShareCode: true });
+        api.getSharing = async () => state;
+        api.clearShareCode = async () => {
+          state = sharing({ visibility: "public", hasShareCode: false });
+        };
+        const view = await openEditor();
+
+        expect(
+          view.byText<HTMLButtonElement>("button", "Regenerate").disabled,
+        ).toBe(true);
+        expect(
+          view.byText<HTMLButtonElement>("button", "Remove").disabled,
+        ).toBe(false);
+
+        await click(view.byText("button", "Remove"));
+
+        expect(argsOf("clearShareCode")).toEqual([PLAN_ID]);
+        expect(
+          view.all("button").map((node) => node.textContent),
+        ).not.toContain("Remove");
       });
     });
 
