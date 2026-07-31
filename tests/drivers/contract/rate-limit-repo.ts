@@ -29,6 +29,11 @@ export function describeRateLimitRepo(
     const account = () => fixture.seedUser();
     const consume = (key: string, max = MAX) =>
       limits.consume(key, max, WINDOW);
+    const reserve = async (key: string, max = MAX): Promise<number> => {
+      const result = await limits.consume(key, max, WINDOW);
+      if (!result.allowed) throw new Error("expected the reservation to pass");
+      return result.windowStart;
+    };
 
     /** Puts the stored window far enough back that the next call rolls it. */
     const ageOut = (key: string) =>
@@ -115,6 +120,102 @@ export function describeRateLimitRepo(
         expect((await consume(key)).allowed).toBe(true);
         expect((await consume(key)).allowed).toBe(true);
         expect((await consume(key)).allowed).toBe(false);
+      });
+    });
+
+    /**
+     * The other half of a limiter that charges only what it means to discourage:
+     * the caller spends up front so the decision is atomic, then gives the count
+     * back when the request turns out not to be the kind being rationed. See
+     * src/http/unlock-rate-limit.ts, which does exactly that for a share code.
+     */
+    describe("giving a reservation back", () => {
+      test("a refunded count can be spent again", async () => {
+        const key = await account();
+        const windows: number[] = [];
+        for (let i = 0; i < MAX; i += 1) windows.push(await reserve(key));
+
+        // Spent out.
+        expect((await consume(key)).allowed).toBe(false);
+
+        const first = windows[0];
+        expect(first).toBeDefined();
+        await limits.refund(key, first as number);
+
+        // And exactly one back, not the whole budget.
+        expect((await consume(key)).allowed).toBe(true);
+        expect((await consume(key)).allowed).toBe(false);
+      });
+
+      test("refunding what was never spent cannot go below zero", async () => {
+        const key = await account();
+        const windowStart = await reserve(key);
+
+        for (let i = 0; i < MAX + 3; i += 1) {
+          await limits.refund(key, windowStart);
+        }
+
+        // A negative count would hand out more than `max` for the rest of the
+        // window, which is the limit quietly not applying.
+        const verdicts: boolean[] = [];
+        for (let i = 0; i < MAX + 1; i += 1) {
+          verdicts.push((await consume(key)).allowed);
+        }
+        expect(verdicts.filter(Boolean)).toHaveLength(MAX);
+      });
+
+      test("refunding a key that has no counter yet is a no-op", async () => {
+        /*
+         * Reachable whenever a reservation is given back after its row was
+         * swept, and on any driver that refunds before it has ever consumed.
+         * The update matches nothing, which must mean nothing happened rather
+         * than a row appearing at a negative or a zero count - either would
+         * change what the key's first real window allows.
+         */
+        const key = await account();
+
+        await limits.refund(key, Date.now());
+
+        // No row at all, not merely one at zero: a counter conjured here would
+        // hold a window nobody opened, and the next real consume would fall
+        // into it rather than starting its own.
+        expect(await fixture.countRateLimits(key)).toBe(0);
+
+        const verdicts: boolean[] = [];
+        for (let i = 0; i < MAX + 1; i += 1) {
+          verdicts.push((await consume(key)).allowed);
+        }
+        expect(verdicts.filter(Boolean)).toHaveLength(MAX);
+      });
+
+      test("a refund for an elapsed window leaves the new one alone", async () => {
+        /*
+         * The race this exists for: a request reserves, its window rolls while it
+         * is still in flight, somebody else opens the new window, and only then
+         * does the first one finish and refund. The count it took went with the
+         * old window, so giving one back here would take it off a budget that
+         * never charged it - charging the new caller for a request they did not
+         * make.
+         *
+         * The elapsed window is a fixed epoch rather than the one the first
+         * reservation returned. Three writes can land in the same millisecond, so
+         * `Date.now()` twice can produce the same window and the refund would
+         * match for reasons that have nothing to do with the rule.
+         */
+        const ELAPSED = 1_000_000_000_000;
+        const key = await account();
+        await reserve(key);
+        await fixture.backdateRateWindow(key, ELAPSED);
+
+        await reserve(key); // Rolls, opening a fresh window with one spent.
+        await limits.refund(key, ELAPSED);
+
+        // The fresh window still has exactly that one spent against it.
+        const verdicts: boolean[] = [];
+        for (let i = 0; i < MAX; i += 1) {
+          verdicts.push((await consume(key)).allowed);
+        }
+        expect(verdicts.filter(Boolean)).toHaveLength(MAX - 1);
       });
     });
 

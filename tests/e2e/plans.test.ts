@@ -20,10 +20,8 @@ let app: Harness;
 
 /**
  * `startWorker()` runs a full build before it boots Miniflare, which is
- * nowhere near the 5 second default for a hook. Tests run one process per file
- * (see tests/drivers/plan-storage.r2.test.ts for why), so on a four-core
- * runner this build competes with twenty-odd other files and takes far longer
- * than it does on an idle machine. The bound is here to catch a build that has
+ * nowhere near the 5 second default for a hook, and a cold one on a small CI
+ * runner is slower still. The bound is here to catch a build that has
  * genuinely hung, not to police how long a cold one takes.
  */
 const BOOT_TIMEOUT_MS = 120_000;

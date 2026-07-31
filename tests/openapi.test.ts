@@ -41,8 +41,8 @@ const HTTP_METHODS: Record<string, true> = {
  *
  * `/api/auth/*` belongs to Better Auth: its surface follows the plugin set,
  * and hand-describing it here is the drift the document exists to avoid. The
- * other two are the documentation itself, and the last three are pages rather
- * than API endpoints.
+ * other two are the documentation itself, and the rest are pages rather than
+ * API endpoints.
  */
 const UNDOCUMENTED: Record<string, true> = {
   // The security-header middleware, which is not an endpoint.
@@ -52,6 +52,24 @@ const UNDOCUMENTED: Record<string, true> = {
   "/api/openapi.json": true,
   "/": true,
   "/dashboard": true,
+  /*
+   * The share-link relay: a page, and one an API client never calls. It exists
+   * because a share code rides in a fragment and `/p/{id}` answers an
+   * authorised reader with untrusted HTML that could read its own
+   * `location.hash`. What a client needs is how to compose the link, and that
+   * is described on both endpoints that hand a code out. Documenting the page
+   * itself would put a browser route in a document whose every other entry is
+   * something a client calls - `/dashboard` is left out for the same reason,
+   * and `/p/{id}` is in because a client can fetch a plan.
+   *
+   * Those two are `PUT /api/plans` with `?visibility=code` - the upload, at
+   * `app.put("/api/plans")` in src/app.ts, with the intent declared as
+   * `UploadVisibility` in src/http/plan-visibility.ts - and
+   * `POST /api/plans/{id}/share-code`. Neither is `POST /api/plans`, which
+   * does not exist, and `PUT /api/plans/{id}/sharing` mints no code: its body
+   * takes `public` or `private` and has no `"code"` intent at all.
+   */
+  "/s/{id}": true,
 };
 
 /** Hono's `/api/plans/:id` is the document's `/api/plans/{id}`. */
@@ -183,6 +201,7 @@ describe("coverage of the routes the app actually serves", () => {
       "/dashboard",
       "/healthz",
       "/p/{id}",
+      "/s/{id}",
     ]);
   });
 

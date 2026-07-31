@@ -140,11 +140,37 @@ export function renderDashboard(
 export function renderPlanGate(
   assets: AssetManifest,
   planId: string,
-  hasCode: boolean,
   origin: string,
+  {
+    hasCode,
+    relay = false,
+  }: {
+    /**
+     * Whether the plan has a share code, so the box is worth offering.
+     *
+     * Required, because every caller knows it - it is one read off the row -
+     * and a default would answer for a caller that forgot. Defaulting it false
+     * would tell a reader holding a good code that there is nothing to type.
+     */
+    hasCode: boolean;
+    /**
+     * The share-link relay at `/s/{planId}`, which spends a fragment code and
+     * then sends the reader to the plan.
+     *
+     * Defaulted off, so the bare call is the refusal page this has always
+     * rendered: `/p/{planId}` at 401, where the reader types a code instead.
+     */
+    relay?: boolean;
+  },
 ): string {
-  const path = `/p/${planId}`;
-  const page: PageProps = { name: "gate", path, origin, planId, hasCode };
+  const page: PageProps = {
+    name: "gate",
+    path: `${relay ? "/s" : "/p"}/${planId}`,
+    origin,
+    planId,
+    hasCode,
+    relay,
+  };
   return document(
     <Document assets={assets} page={page}>
       <PlanGate {...page} />

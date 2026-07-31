@@ -55,7 +55,7 @@ import {
 } from "../../src/db/rate-limits.sqlite.ts";
 import { sqliteSchema } from "../../src/db/sqlite-shared.ts";
 import { handleEmail } from "../../src/ids.ts";
-import { createValkeyKv } from "../../src/kv/valkey.ts";
+import { createValkeyKv, type ValkeyKv } from "../../src/kv/valkey.ts";
 import { createWorkersKv } from "../../src/kv/workers-kv.ts";
 import type {
   AccountClosingRepo,
@@ -578,19 +578,30 @@ export async function postgresDb(): Promise<DbFixture> {
   };
 }
 
-export async function valkeyKv(): Promise<Fixture<KvStore>> {
+export async function valkeyKv(): Promise<Fixture<ValkeyKv>> {
   if (VALKEY_URL === undefined) throw new Error("TEST_VALKEY_URL unset");
   const subject = createValkeyKv(VALKEY_URL);
   // Fails here rather than inside the first assertion, where an unreachable
-  // server would look like a driver bug.
-  await subject.probe();
+  // server would look like a driver bug - and the client goes with it. ioredis
+  // keeps retrying a connection it cannot make, so a probe that rejected and
+  // left the client open would leak a socket and its retry timers for the rest
+  // of the run, on the one path where the server is already misbehaving.
+  try {
+    await subject.probe();
+  } catch (cause) {
+    await subject.close();
+    throw cause;
+  }
   return {
     subject,
     unique: `valkey-${crypto.randomUUID()}`,
-    // The driver owns its ioredis client and exposes no handle, so the
-    // connection is dropped by the process ending. Keys are namespaced per
-    // run instead of deleted, which also keeps a shared server usable.
-    close: async () => {},
+    // Keys are namespaced per run rather than deleted, which keeps a shared
+    // server usable. The connection is not left to the process: under
+    // `--isolate` other files' handles stay open in it, so a fixture that
+    // never disconnects accumulates live clients for the whole run.
+    close: async () => {
+      await subject.close();
+    },
   };
 }
 

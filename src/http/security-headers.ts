@@ -61,18 +61,51 @@ export const PLAN_PATH_PREFIX = "/p/";
 /**
  * The app's own policy.
  *
- * It deliberately omits `script-src`: the rendered document carries an inline
- * `<script type="application/json">` with the page props the client hydrates
- * from, so a script policy needs per-request nonces.
+ * The premise that kept `script-src` off this list was wrong: the inline
+ * `<script type="application/json">` carrying the page props is a data block,
+ * not an executable one, so the HTML parser never prepares it as script and
+ * `script-src` never applies to it. The only executable script on the page is
+ * the module bundle at `assets.script`, which is same-origin - no nonce is
+ * needed to pin it, and without the directive any injected `<script src>`
+ * could name any host it liked.
+ *
+ * `default-src 'self'` rather than `'none'` so a resource type nobody listed
+ * here degrades to same-origin instead of vanishing. `style-src` carries
+ * `'unsafe-inline'` because the components use `style={{ ... }}` attributes,
+ * which CSP counts as inline styles; removing them is a refactor, not a header
+ * change. Fonts are the system stack and src/styles.css loads nothing, so
+ * `default-src` covers the rest.
+ *
+ * Exported beside `PLAN_CSP` so the tests can name which of the two applies to
+ * a response.
  */
+export const APP_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  /*
+   * `'self'` only - no `data:`, no `blob:`, unlike PLAN_CSP which has to take
+   * whatever an uploaded document carries. Measured rather than assumed: the
+   * Scalar reference at /api/docs renders with zero CSP violations, zero
+   * blocked requests and no `<img>` element at all, and the app's own pages
+   * serve their icons from `public/`. Widening this needs a blocked resource
+   * to point at.
+   */
+  "img-src 'self'",
+  "connect-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   // Framing the dashboard is a route to phishing a passkey ceremony or a
   // freshly minted API key.
   "x-frame-options": "DENY",
-  "content-security-policy":
-    "base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'",
+  "content-security-policy": APP_CSP,
 };
 
 const HSTS = "max-age=31536000; includeSubDomains";

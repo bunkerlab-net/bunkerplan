@@ -23,22 +23,47 @@ export interface PlanStorage {
   put(id: string, body: Uint8Array): Promise<void>;
   get(id: string): Promise<PlanObject | null>;
   delete(id: string): Promise<void>;
-  /** Throws if the backing store is unreachable. */
-  probe(): Promise<void>;
+  /**
+   * Throws if the backing store is unreachable.
+   *
+   * `signal` is aborted when the health probe gives up. A driver whose client
+   * can carry it MUST pass it down: `/healthz` is unauthenticated, so a
+   * blackholed endpoint that keeps its socket after the deadline is a socket
+   * and a pool client per call. Ignoring it is allowed - not every client API
+   * takes one - and costs only that release.
+   */
+  probe(signal?: AbortSignal): Promise<void>;
 }
 
 export interface KvStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttlSeconds?: number): Promise<void>;
   delete(key: string): Promise<void>;
-  probe(): Promise<void>;
+  probe(signal?: AbortSignal): Promise<void>;
 }
 
-export interface RateLimitResult {
-  allowed: boolean;
-  /** Seconds remaining in the current window. */
-  retryAfter: number;
-}
+/**
+ * A union rather than one shape: only a request that was allowed took a count,
+ * so only that side carries the window to give it back to. A refusal reserved
+ * nothing, and inventing a `windowStart` for it would mean reading one back out
+ * of a row that may have been swept between the decision and the read.
+ */
+export type RateLimitResult =
+  | {
+      allowed: true;
+      /** Seconds remaining in the current window. */
+      retryAfter: number;
+      /**
+       * The window this count was taken from, as epoch milliseconds.
+       *
+       * Handed back to `refund` so a reservation can only be returned to the
+       * window that charged it. A request slow enough for its window to roll
+       * underneath it would otherwise refund a fresh budget that never charged
+       * it, taking a count from whoever opened the new one.
+       */
+      windowStart: number;
+    }
+  | { allowed: false; retryAfter: number };
 
 export interface RateLimitRepo {
   /**
@@ -54,6 +79,37 @@ export interface RateLimitRepo {
     max: number,
     windowSeconds: number,
   ): Promise<RateLimitResult>;
+
+  /**
+   * Gives back one count, for a caller that reserved through `consume` and then
+   * found the request was not the kind being rationed.
+   *
+   * This is how a limiter charges only what it means to discourage while still
+   * deciding atomically. `POST /api/plans/{id}/unlock` is the one that needs it
+   * - see src/http/unlock-rate-limit.ts - because a correct code must not spend
+   * from the same budget as a guess: a link shared with a room of people behind
+   * one address would otherwise lock them out of a plan they were given.
+   *
+   * Reserving first and refunding after is deliberate, and the other order does
+   * not work. Reading the budget without spending it cannot bound anything: any
+   * number of concurrent callers pass such a read before one write lands, so a
+   * parallel caller would face no limit at all. The cost of this order is that
+   * simultaneous legitimate requests can briefly hold the budget down and one of
+   * them see a refusal it would not have seen a moment later; a retry then works,
+   * which is the better failure of the two.
+   *
+   * No-ops rather than going negative, and matches `windowStart` exactly rather
+   * than merely checking that some window is still open. A request whose window
+   * rolled while it was in flight has nothing to give back: the count it took
+   * went with that window, and the row now holds a budget somebody else opened.
+   *
+   * Rejects if the store cannot be reached - it is not swallowed here, because
+   * a budget quietly failing to recover is the thing an operator needs told.
+   * Containment belongs to the caller: src/app.ts catches it, logs the bucket
+   * and window, and lets the original outcome stand - the reader's `204`, or
+   * the error that caused the refund in the first place.
+   */
+  refund(key: string, windowStart: number): Promise<void>;
 }
 
 export type PlanVisibility = "public" | "private";
@@ -87,6 +143,14 @@ export interface PlanRow {
   visibility: PlanVisibility;
   /** Whether a share code is set. The hash itself never leaves the repo. */
   hasShareCode: boolean;
+  /**
+   * Whether any account has been granted this plan.
+   *
+   * A count would say more and cost the same, but the dashboard renders one
+   * word per row and the editor lists the handles themselves - so a number
+   * here would be a field with no reader, and one more thing to keep true.
+   */
+  hasGrants: boolean;
 }
 
 /**
@@ -220,7 +284,7 @@ export interface Db {
    */
   unlockRateLimits: RateLimitRepo;
   accountClosing: AccountClosingRepo;
-  probe(): Promise<void>;
+  probe(signal?: AbortSignal): Promise<void>;
 }
 
 export interface Services {

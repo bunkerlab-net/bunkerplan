@@ -39,9 +39,11 @@ type SessionState = Pick<
  * client exposes the same thing as a nanostore atom instead. Subscribing to it
  * is the whole difference, and it is five lines rather than a React runtime.
  *
- * The initial value is read synchronously so the first client render matches
- * what the server produced - an unresolved session and a signed-out one look
- * identical, which is what makes hydration line up.
+ * The first render is unconditionally pending rather than a read of the
+ * store, so it matches what the server produced - an unresolved session and a
+ * signed-out one look identical, which is what makes hydration line up. The
+ * store is read in the effect, before subscribing, so a value that arrived in
+ * between is not lost.
  */
 export function useSession(): SessionState {
   const [state, setState] = useState<SessionState>({

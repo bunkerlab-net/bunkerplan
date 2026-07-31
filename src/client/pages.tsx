@@ -33,6 +33,20 @@ export interface GateProps extends BasePageProps {
   name: "gate";
   planId: string;
   hasCode: boolean;
+  /**
+   * True on `/s/{id}`, the trusted page a share link points at.
+   *
+   * The share code travels in the fragment, and `/p/{id}` serves the uploaded
+   * document itself - untrusted HTML, which can read its own `location.hash`.
+   * So the link lands here instead: this page is the app's own, spends the code,
+   * and only then sends the reader to the plan. A reader who arrives with no
+   * code in the fragment is forwarded straight there, because there is nothing
+   * for this page to do and `/p/{id}` is what decides whether they may read it.
+   *
+   * False on `/p/{id}`, where the same component is the refusal page: there,
+   * forwarding on an empty fragment would reload the page it is already on.
+   */
+  relay: boolean;
 }
 
 export type PageProps = LandingProps | DashboardProps | GateProps;
@@ -84,7 +98,14 @@ export function LandingPage({ path, origin }: LandingProps) {
  */
 export function DashboardPage({ path }: DashboardProps) {
   const { data: session, error, isPending } = useSession();
-  const handle = session?.user.name ?? null;
+  /*
+   * The whole user, not just the handle. `DangerZone` needs the id to pin
+   * which account a delete is for, and taking it here - at the one branch that
+   * has a resolved session - keeps that panel from reaching for the auth
+   * client during its own render, which is browser-only.
+   */
+  const user = session?.user ?? null;
+  const handle = user?.name ?? null;
 
   useEffect(() => {
     if (!isPending && error === null && handle === null) {
@@ -106,7 +127,7 @@ export function DashboardPage({ path }: DashboardProps) {
           )}
         </div>
       ) : (
-        <Dashboard handle={handle} />
+        <Dashboard handle={handle} userId={user?.id ?? null} />
       )}
     </SiteFrame>
   );

@@ -1,0 +1,7 @@
+# https://docs.coderabbit.ai/getting-started/yaml-configuration
+language: en-ZA
+reviews:
+  auto_review:
+    enabled: true
+  path_filters: ["!worker-configuration.d.ts", "!drizzle/**"]
+  profile: assertive

@@ -1,19 +1,64 @@
 import { describe, expect, test } from "bun:test";
-import { DOCS_PAGE, SCALAR_SCRIPT_PATH } from "../src/api/docs-page.ts";
+import {
+  DOCS_BOOT_PATH,
+  DOCS_PAGE,
+  SCALAR_SCRIPT_PATH,
+} from "../src/api/docs-page.ts";
 
-const VENDORED = `${import.meta.dir}/../public${SCALAR_SCRIPT_PATH}`;
+const PUBLIC = `${import.meta.dir}/../public`;
+const VENDORED = `${PUBLIC}${SCALAR_SCRIPT_PATH}`;
+const BOOT = `${PUBLIC}${DOCS_BOOT_PATH}`;
 
 describe("the /api/docs page", () => {
+  /**
+   * The bug this exists for: the bootstrap used to be an inline `<script>`, and
+   * `script-src 'self'` refuses those. The page served, the reference never
+   * mounted, and every server-side assertion still passed - a document is only
+   * visibly broken once something executes it.
+   */
+  test("carries no inline script, which the app policy would refuse", () => {
+    // Whole elements, not opening tags: a `src` attribute says where the code
+    // came from but not that the element is empty, and `<script src=...>x()`
+    // executes `x()` under a policy that has no nonce for it.
+    const scripts = [
+      ...DOCS_PAGE.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g),
+    ];
+
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const [, attributes, body] of scripts) {
+      expect(attributes).toContain(" src=");
+      expect(body?.trim()).toBe("");
+    }
+  });
+
   /**
    * The app loads nothing off-origin, and the reference must not be the
    * exception. Scalar's defaults break that twice: the theme fetches fonts
    * from fonts.scalar.com, and the AI chat fetches the document registry from
    * api.scalar.com before anyone has asked it for anything.
+   *
+   * A source check, deliberately. Observing it instead means booting a server,
+   * a browser and a 3.5 MB bundle to watch what it requests - and the thing
+   * that would break here is a config flag flipping back, which is exactly
+   * what reading the config catches. The runtime half is covered where it can
+   * be cheap: tests/app-routes.test.ts pins the `script-src 'self'` policy
+   * that refuses an off-origin script whatever the page asks for.
    */
-  test("loads the spec by URL and reaches nothing off-origin", () => {
-    expect(DOCS_PAGE).toContain('"url":"/api/openapi.json"');
-    expect(DOCS_PAGE).toContain('"withDefaultFonts":false');
-    expect(DOCS_PAGE).toContain('"agent":{"disabled":true}');
+  test("loads the spec by URL and reaches nothing off-origin", async () => {
+    const boot = await Bun.file(BOOT).text();
+    // Whitespace-normalised, so re-indenting the file or wrapping a line does
+    // not read as the setting having changed.
+    const code = boot
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "")
+      .replace(/\s+/g, " ");
+
+    expect(code).toContain('url: "/api/openapi.json"');
+    expect(code).toContain("withDefaultFonts: false");
+    expect(code).toContain("agent: { disabled: true }");
+    // Both comment forms are stripped above, so the hosts those comments name
+    // do not answer for the code.
+    expect(code).not.toContain("scalar.com");
     expect(DOCS_PAGE).not.toContain("scalar.com");
   });
 
@@ -43,13 +88,40 @@ describe("the /api/docs page", () => {
   });
 
   /**
+   * And so is the bootstrap, which is committed rather than vendored.
+   *
+   * Three things have to agree: the page asks for a path, that path exists in
+   * `public/`, and the build copies it to where the server serves from.
+   * Existence in the source tree alone would pass for a document that dropped
+   * the tag, and for a build that stopped copying `public/` - both of which
+   * ship the same dead page the inline `<script>` did.
+   */
+  test("the bootstrap is asked for, committed, and built", async () => {
+    const srcs = [...DOCS_PAGE.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+
+    expect(srcs).toEqual([SCALAR_SCRIPT_PATH, DOCS_BOOT_PATH]);
+    expect(await Bun.file(BOOT).exists()).toBe(true);
+    // Same dependency on a build as tests/assets.test.ts, which `bun run test`
+    // satisfies by building first.
+    expect(
+      await Bun.file(
+        `${import.meta.dir}/../dist/client${DOCS_BOOT_PATH}`,
+      ).exists(),
+    ).toBe(true);
+  });
+
+  /**
    * The page calls exactly one function on exactly one global. `standalone.js`
    * is an IIFE with no module surface, so nothing else would catch Scalar
    * renaming or restructuring its entry point.
    */
   test("the vendored bundle defines the global the page calls", async () => {
     const bundle = await Bun.file(VENDORED).text();
+    const boot = await Bun.file(BOOT).text();
+
     expect(bundle).toContain("window.Scalar={createApiReference:");
-    expect(DOCS_PAGE).toContain("Scalar.createApiReference('#app'");
+    expect(boot).toContain('Scalar.createApiReference("#app"');
   });
 });

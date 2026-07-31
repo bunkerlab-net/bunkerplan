@@ -75,6 +75,7 @@ function stores(holdPut = false) {
           createdAt: new Date(),
           visibility: "private" as const,
           hasShareCode: false,
+          hasGrants: false,
         })),
     findOwner: async (id) => rows.get(id)?.userId ?? null,
     relabel: async () => false,

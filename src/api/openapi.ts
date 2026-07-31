@@ -223,8 +223,21 @@ function createPlanOperation(
     description:
       "`?visibility=code` stores the plan private and mints a share code, " +
       `returned once as \`code\` in the response body (${codeFormat}) ` +
-      "and never readable afterwards. Compose the share link by appending " +
-      "`?code=` to `url`.",
+      "and never readable afterwards.\n\n" +
+      "For a link a person will open, put the code in the fragment of `/s/" +
+      "{id}` - the same id as in `url` - giving " +
+      "`https://host/s/{id}#code=CODE`. A fragment is never sent to a server, " +
+      "so the code stays out of request lines, access logs and every " +
+      "`Referer`. The code itself does reach this server when it is redeemed: " +
+      "`/s/{id}` is this app's own " +
+      "page, and it spends the code in the body of `POST /api/plans/{id}/" +
+      "unlock` before sending the reader to the plan - so a proxy that logs " +
+      "request bodies still sees it. It is deliberately not `url`: " +
+      "`/p/{id}` answers a reader who already has access with the uploaded " +
+      "document, and that document can read its own `location.hash`.\n\n" +
+      "For a reader without a browser, append `?code=` to `url` instead - a " +
+      "fragment cannot be sent by one - or redeem the code through " +
+      "`POST /api/plans/{id}/unlock` and keep the cookie.",
     parameters: [LABEL_QUERY_PARAM, VISIBILITY_QUERY_PARAM, GRANTS_QUERY_PARAM],
     requestBody: UPLOAD_BODY,
     responses: {
@@ -392,7 +405,10 @@ function rotateShareCodeOperation(codeFormat: string): Record<string, unknown> {
       "code and immediately invalidates every unlock cookie issued under " +
       "the old one. The plan must be private: a public one is readable by " +
       "anyone holding its URL, so a code would gate nothing and would only " +
-      "sit waiting to matter again.",
+      "sit waiting to matter again.\n\n" +
+      "Compose the link the same way as after an upload: `/s/{id}#code=CODE` " +
+      "for a person, `?code=` on the plan URL for a reader without a browser. " +
+      "See `PUT /api/plans` for why the two differ.",
     tags: ["Sharing"],
     security: SESSION_AUTH,
     responses: {
@@ -474,21 +490,32 @@ const MIN_CODE_BITS = Math.round(
   MIN_SHARE_CODE_LENGTH * Math.log2(SHARE_CODE_ALPHABET_LENGTH),
 );
 
+/** Lifted out so `unlockPlanOperation` stays a shape rather than an essay. */
+const unlockDescription = (codeFormat: string): string =>
+  "Unauthenticated: this is what the gate page calls. A correct code " +
+  "sets a path-scoped, HttpOnly cookie for this one plan, after which " +
+  "`/p/{id}` serves it with no parameter and no session. " +
+  `${codeFormat} Throttled per client address, set by UNLOCK_RATE_MAX ` +
+  "and UNLOCK_RATE_WINDOW_SEC.\n\n" +
+  "A redemption gets its count back, and so does a `500` - neither spent a " +
+  "guess, and a failure disclosed nothing about the code. Returning it is " +
+  "best-effort: if that fails the count stays spent, which errs towards " +
+  "refusing. Every refusal keeps its count: a wrong code, an unknown plan, " +
+  "a body this endpoint cannot read. " +
+  "A correct code costs nothing, " +
+  "because a share link is opened by everyone it was sent to and charging " +
+  "those would refuse a room of colleagues behind one egress address. What " +
+  "is rationed is guessing, and the budget bounds that rather than deciding " +
+  `it: the shortest redeemable code carries about ${MIN_CODE_BITS} bits, ` +
+  "which no reachable rate would improve on. The bucket is the address " +
+  "rather than the plan, because the plan id is in the share link and a " +
+  "per-plan bucket would let anyone holding it lock the other readers out.";
+
 function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
   return {
     operationId: "unlockPlan",
     summary: "Redeem a share code",
-    description:
-      "Unauthenticated: this is what the gate page calls. A correct code " +
-      "sets a path-scoped, HttpOnly cookie for this one plan, after which " +
-      "`/p/{id}` serves it with no parameter and no session. " +
-      `${codeFormat} Throttled per client address, set by UNLOCK_RATE_MAX ` +
-      "and UNLOCK_RATE_WINDOW_SEC. That bounds what an anonymous caller can " +
-      "spend, not what it can guess: the shortest redeemable code carries " +
-      `about ${MIN_CODE_BITS} bits, which no reachable rate would improve ` +
-      "on. The bucket is the address rather than the plan, because the plan " +
-      "id is in the share link and a per-plan bucket would let anyone " +
-      "holding it lock the other readers out.",
+    description: unlockDescription(codeFormat),
     tags: ["Sharing"],
     security: [],
     requestBody: {
@@ -514,6 +541,19 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
         404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
         413: "The body is larger than a code could make it.",
       }),
+      // Spelled out rather than through `failures`, which documents the
+      // JSON `ErrorBody` every *returned* refusal carries. This one is thrown -
+      // the route has no handler of its own and the app installs no
+      // `onError` - so what reaches the client is Hono's default, which is
+      // plain text. Documenting it as JSON would be a wire contract nothing
+      // honours.
+      "500": {
+        description:
+          "The redemption could not be completed. Releasing its reservation " +
+          "is attempted, because a failure said nothing about the code - and " +
+          "if that release fails too, the count stays spent.",
+        content: { "text/plain": { schema: { type: "string" } } },
+      },
       "429": {
         ...json(
           ErrorBody,

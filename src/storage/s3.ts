@@ -103,8 +103,17 @@ export function createS3Storage(config: Config): PlanStorage {
       );
     },
 
-    async probe() {
-      await client.send(new HeadBucketCommand({ Bucket: bucket }));
+    async probe(signal) {
+      // The SDK cancels the in-flight request on abort, which is what releases
+      // the socket when the health deadline gives up on a blackholed endpoint.
+      //
+      // Omitted rather than passed as `undefined` when there is none: the
+      // options object is handed to the SDK's middleware stack, and "no
+      // signal" is a request without the key, not one carrying an empty value.
+      await client.send(
+        new HeadBucketCommand({ Bucket: bucket }),
+        signal === undefined ? {} : { abortSignal: signal },
+      );
     },
   };
 }

@@ -323,6 +323,11 @@ export const PlanSummary = component(
           "True when a share code is set. The code itself is stored as a " +
           "digest and is never returned after the request that minted it.",
       }),
+      hasGrants: z.boolean().meta({
+        description:
+          "True when at least one account has been granted this plan. The " +
+          "handles themselves come from GET /api/plans/{id}/sharing.",
+      }),
     })
     .meta({ title: "PlanSummary", description: "One row of the plan list." }),
 );

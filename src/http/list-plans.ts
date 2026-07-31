@@ -32,6 +32,7 @@ export async function listPlans(
       createdAt: row.createdAt.toISOString(),
       visibility: row.visibility,
       hasShareCode: row.hasShareCode,
+      hasGrants: row.hasGrants,
     })),
     truncated: rows.length > PLAN_PAGE_SIZE,
   } satisfies PlanList);

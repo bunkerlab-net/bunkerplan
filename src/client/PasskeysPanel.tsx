@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
+import { EmptyOrLoading } from "./EmptyOrLoading.tsx";
 import { messageOf } from "./errors.ts";
+import { useWriteLatch } from "./write-latch.ts";
 
 interface PasskeyRow {
   id: string;
@@ -12,7 +14,7 @@ interface PasskeyRow {
 function usePasskeys() {
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+
   /**
    * False until the first list call has answered. Without it the panel says
    * "No passkeys" for the length of that request, to an account that cannot
@@ -31,7 +33,10 @@ function usePasskeys() {
     try {
       const result = await authClient().passkey.listUserPasskeys();
       if (result.error) {
-        setError(result.error.message ?? "could not list passkeys");
+        // `messageOf`, not `?? fallback`: a whitespace-only message renders a
+        // blank error line, and `??` only catches the absent one. The thrown
+        // path below already reads it this way.
+        setError(messageOf(result.error, "could not list passkeys"));
         return;
       }
       setError(null);
@@ -47,40 +52,25 @@ function usePasskeys() {
     void refresh();
   }, [refresh]);
 
-  const add = async () => {
-    setBusy(true);
-    try {
-      const result = await authClient().passkey.addPasskey({
-        name: `Passkey ${passkeys.length + 1}`,
-      });
-      if (result?.error) {
-        setError(result.error.message ?? "could not add a passkey");
-        return;
-      }
-      setError(null);
-      await refresh();
-    } catch (cause) {
-      setError(messageOf(cause, "could not add a passkey"));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, run } = useWriteLatch(setError, refresh);
 
-  const remove = async (id: string) => {
-    setBusy(true);
-    try {
-      const result = await authClient().passkey.deletePasskey({ id });
-      if (result.error) {
-        setError(result.error.message ?? "could not delete the passkey");
-        return;
-      }
-      setError(null);
-      await refresh();
-    } catch (cause) {
-      setError(messageOf(cause, "could not delete the passkey"));
-    } finally {
-      setBusy(false);
-    }
+  const add = () =>
+    run(
+      () =>
+        authClient().passkey.addPasskey({
+          name: `Passkey ${passkeys.length + 1}`,
+        }),
+      "could not add a passkey",
+    );
+
+  // `void`, not the latch's boolean: nothing here branches on whether the
+  // ceremony landed - the refresh is what puts the answer on the page - and
+  // the row's `onDelete` is typed as returning nothing.
+  const remove = async (id: string): Promise<void> => {
+    await run(
+      () => authClient().passkey.deletePasskey({ id }),
+      "could not delete the passkey",
+    );
   };
 
   return { passkeys, error, busy, loaded, add, remove };
@@ -114,9 +104,7 @@ export function PasskeysPanel() {
         // at all when it failed: the error line above is the whole story
         // then, and "No passkeys" beside it would be a second, wrong one.
         error === null && (
-          <p className="empty" style={{ marginTop: "24px" }}>
-            {loaded ? "No passkeys." : "Loading..."}
-          </p>
+          <EmptyOrLoading loaded={loaded} empty="No passkeys." />
         )
       ) : (
         <PasskeysTable
@@ -138,6 +126,10 @@ function PasskeysTable(props: {
   onDelete: (id: string) => Promise<void>;
 }) {
   return (
+    /*
+     * No `role="region"`: a named `<section>` already has it implicitly - see
+     * the same note in ApiKeysPanel.tsx.
+     */
     <section
       className="table-scroll"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).

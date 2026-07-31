@@ -220,19 +220,35 @@ confusing 403 much later.
   its code - `DELETE /api/plans/{id}/share-code` is how that one is dropped.
   Grants are untouched by either flip: those name accounts the owner chose, and
   each is revocable on its own.
-- **Security headers are applied in `src/server.ts`**, the one entry both
-  targets share: `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options:
-DENY`, HSTS over TLS, and a CSP limited to `base-uri`, `object-src`,
-  `form-action`, and `frame-ancestors`. Each is only set when absent, so the
-  plan route's `sandbox` CSP above always wins. The app CSP deliberately has no
-  `script-src`: server-side rendering inlines the hydration payload, so a
-  script policy needs per-request nonces, and `'unsafe-inline'` would be
-  theatre. Helmet is not used - it is Express middleware and cannot run on
-  Workers.
+- **Security headers are applied in `src/http/security-headers.ts`**, reached
+  from the one middleware both targets share: `X-Content-Type-Options`,
+  `Referrer-Policy`, `X-Frame-Options: DENY`, HSTS over TLS, and `APP_CSP`.
+  That policy is `default-src 'self'` with `script-src 'self'`,
+  `img-src 'self'`, `connect-src 'self'`, `style-src 'self' 'unsafe-inline'`,
+  `base-uri 'none'`, `object-src 'none'`, `form-action 'self'` and
+  `frame-ancestors 'none'`. All of them, `APP_CSP` included, are set only when
+  absent, so a route that already chose a header keeps it. The exception is
+  the plan route: a successful `/p/{id}` response - `200` or `304` - has its
+  CSP *replaced* with `PLAN_CSP`, whatever it already carried. That overwrite
+  is the point of the split: a `304` legitimately carries almost no headers,
+  and backfilling would let it take the app policy instead, whose lack of
+  `sandbox` reads as permission to script the real origin.
+
+  `script-src 'self'` is why nothing in this app inlines a script: the
+  hydration payload rides in a `<script type="application/json">` element,
+  which executes nothing, and `/api/docs` loads its bootstrap from
+  `public/api-docs.js` for the same reason. `style-src` keeps `'unsafe-inline'`
+  because the pages carry inline `style` attributes. Helmet is not used - it is
+  Express middleware and cannot run on Workers.
 - **Account deletion is immediate and irreversible.** There is no email
   confirmation because addresses are synthetic (`…@passkey.invalid`) and cannot
-  receive mail. The safeguards are Better Auth's fresh-session requirement
-  (re-prompting for the passkey) and a type-the-handle confirmation in the UI.
+  receive mail. Three safeguards stand in: Better Auth's session-freshness
+  window, which is its default 24 hours here and re-prompts for the passkey
+  only once a session is older than that - not on every deletion; a
+  type-the-handle confirmation in the UI; and the `x-expected-account` header,
+  which the request must carry and the server compares against the session
+  that made it - see API below, and expect a script that omits it to be
+  refused.
 
 ## API
 
@@ -249,6 +265,18 @@ authorises upload, replacement, delete, and reading any plan its owner may
 read. Listing plans, relabelling them, changing who a plan is shared with,
 managing keys, and deleting the account all require a session - a leaked key
 must not be able to hand out access to other people.
+
+Deleting an account takes one more thing. `POST /api/auth/delete-user` refuses
+unless the request carries `x-expected-account` naming the account id it means
+to delete, and Better Auth compares that against the session the same request
+authenticated before anything is removed. A caller that omits the header is
+refused rather than defaulted to its own session: the check exists because a
+client cannot compare the two itself without leaving a window in which the
+session changes, and one a request can skip is one a client regression drops
+silently. Both refusals - a missing header and one naming a different account
+than the session - answer `400` with the error code `WRONG_ACCOUNT`, and
+nothing is deleted in either case. The dashboard sends the header; a script
+deleting its own account should send the id `/api/auth/get-session` hands back.
 
 Two routes are deliberately unauthenticated, because they are how someone
 holding only a share code gets in: `GET /p/{id}?code=...` and

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
+import { EmptyOrLoading } from "./EmptyOrLoading.tsx";
 import { messageOf } from "./errors.ts";
+import { useCopy } from "./use-copy.ts";
+import { useWriteLatch } from "./write-latch.ts";
 
 interface KeyRow {
   id: string;
@@ -14,13 +17,15 @@ interface KeyRow {
 const DAY_SECONDS = 86_400;
 
 /** Values are `expiresIn` in SECONDS; the plugin's min/max are in days. */
-const EXPIRY_CHOICES: ReadonlyArray<{ label: string; seconds: number | null }> =
-  [
-    { label: "Never expires", seconds: null },
-    { label: "30 days", seconds: 30 * DAY_SECONDS },
-    { label: "90 days", seconds: 90 * DAY_SECONDS },
-    { label: "365 days", seconds: 365 * DAY_SECONDS },
-  ];
+export const EXPIRY_CHOICES: ReadonlyArray<{
+  label: string;
+  seconds: number | null;
+}> = [
+  { label: "Never expires", seconds: null },
+  { label: "30 days", seconds: 30 * DAY_SECONDS },
+  { label: "90 days", seconds: 90 * DAY_SECONDS },
+  { label: "365 days", seconds: 365 * DAY_SECONDS },
+];
 
 function Reveal({
   value,
@@ -29,6 +34,8 @@ function Reveal({
   value: string;
   onDismiss: () => void;
 }) {
+  const { copy, copyFailed } = useCopy(value);
+
   return (
     <div className="notice">
       <p>
@@ -36,17 +43,22 @@ function Reveal({
       </p>
       <div className="row">
         <code>{value}</code>
-        <button
-          type="button"
-          className="btn-text"
-          onClick={() => void navigator.clipboard.writeText(value)}
-        >
+        <button type="button" className="btn-text" onClick={copy}>
           Copy
         </button>
         <button type="button" className="btn-text" onClick={onDismiss}>
           Dismiss
         </button>
       </div>
+      {copyFailed && (
+        // `error` and `role="alert"`, as ShareLink's does: nothing moved
+        // focus, so a reader who pressed Copy and heard nothing would believe
+        // it worked - and the key is shown once. `muted` said the opposite of
+        // what this is.
+        <p className="error" role="alert">
+          Copying failed - select the key above instead.
+        </p>
+      )}
     </div>
   );
 }
@@ -62,19 +74,29 @@ function Reveal({
 function useKeyList() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  /**
+   * False until the first list call has answered. Without it the panel says
+   * "No API keys." for the length of that request, to an account that may
+   * well have several - the same gap the passkeys and plans panels close.
+   */
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const result = await authClient().apiKey.list();
       if (result.error) {
-        setError(result.error.message ?? "could not list API keys");
+        // `messageOf`, as everywhere else here: a whitespace-only message
+        // renders a blank error line, and it also suppresses the empty state -
+        // so the panel would show nothing at all where a reason belongs.
+        setError(messageOf(result.error, "could not list API keys"));
         return;
       }
       setError(null);
       setKeys(result.data?.apiKeys ?? []);
     } catch (cause) {
       setError(messageOf(cause, "could not list API keys"));
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -82,64 +104,65 @@ function useKeyList() {
     void refresh();
   }, [refresh]);
 
-  return { keys, error, setError, busy, setBusy, refresh };
+  return { keys, error, setError, loaded, refresh };
 }
 
 /** Keys, and the three calls that change them. */
 function useApiKeys() {
-  const { keys, error, setError, busy, setBusy, refresh } = useKeyList();
+  const { keys, error, setError, loaded, refresh } = useKeyList();
   const [plaintext, setPlaintext] = useState<string | null>(null);
+  const { busy, run } = useWriteLatch(setError, refresh);
 
-  // Both of these are called as `void create(...)` / `void revoke(...)` from
-  // an event handler, so neither may reject: the call itself can throw before
-  // it ever reaches `refresh`, and there is no handler upstream to catch it.
-  const create = async (name: string, expiryIndex: number) => {
-    setBusy(true);
-    try {
-      const seconds = EXPIRY_CHOICES[expiryIndex]?.seconds ?? null;
-      const result = await authClient().apiKey.create({
-        name: name.trim() === "" ? "API key" : name.trim(),
-        ...(seconds === null ? {} : { expiresIn: seconds }),
-      });
-      if (result.error) {
-        setError(result.error.message ?? "could not create API key");
-        return false;
-      }
-      setError(null);
+  const create = (name: string, expiryIndex: number) => {
+    const seconds = EXPIRY_CHOICES[expiryIndex]?.seconds ?? null;
+    /*
+     * The last key's plaintext goes before this one is asked for, not when the
+     * answer arrives. A create that fails would otherwise leave the previous
+     * secret on screen beside the error, reading as though it belonged to the
+     * attempt that just failed - and it is shown once, so what is on screen is
+     * the only copy its owner has.
+     *
+     * Inside the operation, so a call the latch refuses clears nothing. That
+     * call is reachable: `disabled` needs a render to appear, so a press
+     * landing in the same tick as one that took the latch runs from the
+     * enabled render and is refused here instead. Wiping the visible secret on
+     * behalf of a request that was never made is how the only copy gets lost.
+     */
+    return run(
+      () => {
+        setPlaintext(null);
+        return authClient().apiKey.create({
+          name: name.trim() === "" ? "API key" : name.trim(),
+          ...(seconds === null ? {} : { expiresIn: seconds }),
+        });
+      },
+      "could not create API key",
       // The only time the plaintext key is ever returned.
-      setPlaintext(result.data?.key ?? null);
-      await refresh();
-      return true;
-    } catch (cause) {
-      setError(messageOf(cause, "could not create API key"));
-      return false;
-    } finally {
-      setBusy(false);
-    }
+      (data) => setPlaintext(data?.key ?? null),
+    );
   };
 
   const revoke = async (keyId: string) => {
-    setBusy(true);
-    try {
-      const result = await authClient().apiKey.delete({ keyId });
-      if (result.error) {
-        setError(result.error.message ?? "could not revoke API key");
-        return;
-      }
-      setError(null);
-      await refresh();
-    } catch (cause) {
-      setError(messageOf(cause, "could not revoke API key"));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      () => authClient().apiKey.delete({ keyId }),
+      "could not revoke API key",
+    );
   };
 
-  return { keys, plaintext, setPlaintext, error, busy, create, revoke };
+  return {
+    keys,
+    plaintext,
+    setPlaintext,
+    error,
+    busy,
+    loaded,
+    create,
+    revoke,
+  };
 }
 
 export function ApiKeysPanel() {
-  const { keys, plaintext, setPlaintext, error, busy, create, revoke } =
+  const { keys, plaintext, setPlaintext, error, busy, loaded, create, revoke } =
     useApiKeys();
   const [name, setName] = useState("");
   const [expiryIndex, setExpiryIndex] = useState(0);
@@ -169,9 +192,12 @@ export function ApiKeysPanel() {
       )}
       {error !== null && <p className="error">{error}</p>}
       {keys.length === 0 ? (
-        <p className="empty" style={{ marginTop: "24px" }}>
-          No API keys.
-        </p>
+        // Nothing is claimed while the first list is in flight, and nothing
+        // at all when it failed: the error line above is the whole story
+        // then, and "No API keys." beside it would be a second, wrong one.
+        error === null && (
+          <EmptyOrLoading loaded={loaded} empty="No API keys." />
+        )
       ) : (
         <KeysTable keys={keys} busy={busy} onRevoke={revoke} />
       )}
@@ -229,6 +255,12 @@ function KeysTable(props: {
   onRevoke: (keyId: string) => Promise<void>;
 }) {
   return (
+    /*
+     * No `role="region"`: a `<section>` with an accessible name already has
+     * that role implicitly (ARIA in HTML), so spelling it out adds nothing an
+     * assistive technology can tell apart. The `aria-label` is what supplies
+     * the name, and without one the element would fall back to `generic`.
+     */
     <section
       className="table-scroll"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
@@ -249,8 +281,12 @@ function KeysTable(props: {
             <tr key={item.id}>
               <td>{item.name ?? "-"}</td>
               {/* `start` is the first characters of the full key, prefix
-                  included - do not prepend `prefix` again. */}
-              <td className="mono">{item.start ?? "-"}…</td>
+                  included - do not prepend `prefix` again. The ellipsis is
+                  what says the value is truncated, so it goes with the value:
+                  "-…" would claim a placeholder had been cut short. */}
+              <td className="mono">
+                {item.start === null ? "-" : `${item.start}…`}
+              </td>
               <td>
                 {item.expiresAt === null
                   ? "Never"

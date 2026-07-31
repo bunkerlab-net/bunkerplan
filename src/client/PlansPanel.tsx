@@ -17,11 +17,24 @@ import {
   uploadPlan,
 } from "./api.ts";
 import { inputOf } from "./dom.ts";
+import { useCopy } from "./use-copy.ts";
 
-/** What the Sharing column says at a glance. */
+/**
+ * What the Sharing column says at a glance.
+ *
+ * Public is public: a plan cannot carry a code while it is public, because
+ * `setVisibility` nulls the hash on the way out of private and `setShareCodeHash`
+ * only writes to a private row - so there is no "Public + code" to render.
+ *
+ * A private plan can carry both a code and named accounts at once. That is a
+ * real state, not an accident, so it is named rather than collapsed into
+ * whichever half is checked first.
+ */
 function describeSharing(plan: PlanSummary): string {
   if (plan.visibility === "public") return "Public";
-  return plan.hasShareCode ? "Private + code" : "Private";
+  if (plan.hasShareCode && plan.hasGrants) return "Private + user share + code";
+  if (plan.hasShareCode) return "Private + code";
+  return plan.hasGrants ? "Private + user share" : "Private";
 }
 
 function formatBytes(size: number): string {
@@ -259,7 +272,7 @@ function ShareCodeBlock(
         )}
       </div>
       {code !== null && props.hasShareCode && (
-        <ShareLink url={plan.url} code={code} />
+        <ShareLink url={plan.url} id={plan.id} code={code} />
       )}
       {code === null && props.hasShareCode && (
         <p className="muted">
@@ -276,27 +289,48 @@ function ShareCodeBlock(
  * for - the same shape `ApiKeysPanel`'s `Reveal` uses for the other secret
  * this app shows exactly once.
  */
-function ShareLink({ url, code }: { url: string; code: string }) {
-  // Encoded even though the alphabet is base62 and needs none: the link is
-  // built here, and a future alphabet change must not silently start
-  // producing broken URLs.
-  const link = `${url}?code=${encodeURIComponent(code)}`;
-  const [copyFailed, setCopyFailed] = useState(false);
-
-  // `writeText` rejects on a denied permission or an insecure context, and
-  // this is the one secret the app shows once - a copy that quietly did
-  // nothing would lose it. The link is on screen either way, so the fallback
-  // is to say so rather than to retry.
-  const copy = () => {
-    void (async () => {
-      try {
-        await navigator.clipboard.writeText(link);
-        setCopyFailed(false);
-      } catch {
-        setCopyFailed(true);
-      }
-    })();
-  };
+function ShareLink({
+  url,
+  id,
+  code,
+}: {
+  url: string;
+  id: string;
+  code: string;
+}) {
+  /*
+   * `/s/{id}#code=`, and both halves of that are deliberate.
+   *
+   * The fragment, because a fragment is never sent to a server: the code in the
+   * link people paste into chat reaches no access log, no proxy and no
+   * `Referer`. And `/s/{id}` rather than the plan's own URL, because `/p/{id}`
+   * answers a reader who already has access with the uploaded document - and
+   * untrusted HTML can read its own `location.hash`. `/s/{id}` is the app's own
+   * page: it spends the code, then sends the reader to the plan.
+   *
+   * `?code=` on `/p/{id}` remains for a reader without a DOM, which cannot send
+   * a fragment at all. SECURITY.md records why both exist.
+   *
+   * Rebuilt through `URL` rather than by patching the string: the plan URL's
+   * origin is the configured one, and that is the part worth keeping.
+   *
+   * Encoded even though the alphabet is base62 and needs none: the link is
+   * built here, and a future alphabet change must not silently start producing
+   * broken URLs.
+   */
+  const relay = new URL(url);
+  relay.pathname = `/s/${id}`;
+  /*
+   * Both of these go through the URL object rather than concatenation, and for
+   * the same reason: `planUrl` produces neither a query nor a fragment today,
+   * so neither line changes what is emitted - they are what keeps the relay
+   * link free of both if the plan URL ever grows one. A query inherited here
+   * would ride along beside a share code.
+   */
+  relay.search = "";
+  relay.hash = `code=${encodeURIComponent(code)}`;
+  const link = relay.toString();
+  const { copy, copyFailed } = useCopy(link);
 
   return (
     <>
@@ -580,7 +614,11 @@ function RowActions({
         className="btn-text"
         disabled={busy}
         onClick={onToggleSharing}
-        aria-expanded={expanded}
+        // A string, not the boolean: the server renderer writes
+        // `aria-expanded="false"`, but `hono/jsx/dom` drops a false attribute
+        // and writes `""` for true - so hydrating this row would strip the
+        // state a disclosure control is announced by.
+        aria-expanded={expanded ? "true" : "false"}
         aria-controls={sharingRegionId(plan.id)}
       >
         Share
@@ -841,7 +879,7 @@ export function PlansPanel() {
         // one.
         error === null && (
           <p className="empty" style={{ marginTop: "24px" }}>
-            {loaded ? "No plans yet." : "Loading..."}
+            {loaded ? "No plans yet." : "Loading…"}
           </p>
         )
       ) : (

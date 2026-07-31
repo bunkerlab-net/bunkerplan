@@ -459,6 +459,69 @@ export function describePlanRepo(
         expect(JSON.stringify(listed)).not.toContain("b".repeat(64));
       });
 
+      test("listByUser reports whether anyone is named on the plan", async () => {
+        const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        await fixture.seedUser(handle);
+        const created = row(owner);
+        await plans.insert(created, 10);
+
+        expect((await plans.listByUser(owner, 1))[0]?.hasGrants).toBe(false);
+
+        expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
+          "granted",
+        );
+        expect((await plans.listByUser(owner, 1))[0]?.hasGrants).toBe(true);
+
+        expect(await plans.revokeByHandle(created.id, owner, handle)).toBe(
+          true,
+        );
+        expect((await plans.listByUser(owner, 1))[0]?.hasGrants).toBe(false);
+      });
+
+      test("a plan shared with several accounts is still one row", async () => {
+        /*
+         * `exists`, not a join: a join against `plan_grant` multiplies the
+         * plan row once per grantee, which reads as three plans in the
+         * dashboard and pushes real ones off the end of the page.
+         */
+        const owner = await fixture.seedUser();
+        const created = row(owner);
+        await plans.insert(created, 10);
+        for (let index = 0; index < 3; index += 1) {
+          const handle = uniqueHandle();
+          await fixture.seedUser(handle);
+          expect(await plans.grantByHandle(created.id, owner, handle)).toBe(
+            "granted",
+          );
+        }
+
+        const listed = await plans.listByUser(owner, 10);
+        expect(listed.length).toBe(1);
+        expect(listed[0]?.hasGrants).toBe(true);
+      });
+
+      test("one plan's grants do not mark another's", async () => {
+        // The subquery is correlated; a stray one would answer "anyone at all
+        // has a grant" and light up every row in the account.
+        const owner = await fixture.seedUser();
+        const handle = uniqueHandle();
+        await fixture.seedUser(handle);
+        const shared = row(owner, { label: "shared" });
+        const alone = row(owner, { label: "alone" });
+        await plans.insert(shared, 10);
+        await plans.insert(alone, 10);
+        expect(await plans.grantByHandle(shared.id, owner, handle)).toBe(
+          "granted",
+        );
+
+        const listed = await plans.listByUser(owner, 10);
+        const granted = (label: string) =>
+          listed.find((plan) => plan.label === label)?.hasGrants;
+        expect(granted("shared")).toBe(true);
+        expect(granted("alone")).toBe(false);
+      });
+
       test("setVisibility and setShareCodeHash refuse a stranger", async () => {
         const owner = await fixture.seedUser();
         const stranger = await fixture.seedUser();

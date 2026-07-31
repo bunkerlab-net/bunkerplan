@@ -52,8 +52,40 @@ Known and accepted, so please do not report these as new:
   script by design and CSS escapes such as `u\72l(...)` parse in a browser
   while defeating any token scan. Bypasses of it are worth reporting as bugs;
   they are not sandbox escapes.
-- **Plan ids are unguessable, not secret.** A plan URL is public and unlisted.
-  Anyone holding the URL can read it, by design.
+- **Plan ids are identifiers, not credentials.** They are unguessable and
+  unlisted, and that is all they are. A public plan is readable by anyone
+  holding its URL, by design. A private one is not: it still needs its share
+  code, the cookie a redemption left, an API key whose owner may read it, or a
+  session for the owner or a granted account.
+- **Anyone who can see a share link can read the code in it, so the link the
+  dashboard hands out keeps the code out of the request that opens it.** That
+  link is `/s/{id}#code=…`, and a fragment is never sent to a server, so
+  following it puts the code in no request line, no access log and no
+  `Referer`. Both halves of that are narrow: the `?code=` fallback below is a
+  URL that does carry the code, and redemption sends it deliberately, in the
+  body of `POST /api/plans/{id}/unlock` - a code has to be presented to be
+  checked - where a proxy that logs request bodies sees it. What the fragment
+  buys is that getting to the page costs nothing. `/s/{id}` is
+  the app's own page, under the app policy, and it strips the code from the
+  address bar before it tries to redeem it - so a wrong code or a dropped connection
+  does not leave it in history either. It is deliberately not `/p/{id}#code=`:
+  that path answers a reader who already holds access with the uploaded
+  document, and a plan can read its own `location.hash`, so the credential would
+  be handed to HTML the reader did not write.
+
+  The `?code=` parameter on `/p/{id}` is kept for a client that can only fetch
+  a URL. No client *sends* a fragment - HTTP requests carry the path and query
+  only, which is what makes the share link safe - so using one is a two-step:
+  read the code out of the URL you were given, then
+  `POST /api/plans/{id}/unlock` with it in the JSON body and keep the cookie.
+  Anything that can make that request should, and a script holding the link
+  already can. The query form skips the two steps and pays for it: the code
+  reaches the deployment's own access log and that browser's history, and a plan
+  served in the same request can read `location.search`.
+
+  Rotating the code (`POST /api/plans/{id}/share-code`) is the remedy in every
+  case: the cookie is signed over a digest of the code current when it was
+  minted, so rotation invalidates every cookie issued under the old one.
 
 ## Supported versions
 

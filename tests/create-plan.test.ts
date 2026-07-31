@@ -71,7 +71,12 @@ function deps(over: Partial<PlanRepo> = {}): {
       plans,
       accountClosing: { open: async () => {}, isOpen: async () => false },
       uploadRateLimits: {
-        consume: async () => ({ allowed: true, retryAfter: 60 }),
+        consume: async () => ({
+          allowed: true,
+          retryAfter: 60,
+          windowStart: 0,
+        }),
+        refund: async () => {},
       },
       storage,
       logger,
@@ -163,5 +168,47 @@ describe("createPlan with ?grants=", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).not.toHaveProperty("granted");
     expect(body).not.toHaveProperty("failed");
+  });
+});
+
+describe("createPlan when the upload budget is spent", () => {
+  test("refuses before the body is read, not after", async () => {
+    const inserted: string[] = [];
+    const { deps: d, stored } = deps({
+      insert: async (row) => {
+        inserted.push(row.id);
+        return "created";
+      },
+    });
+    // No `windowStart`: `RateLimitResult` is a union, and the refused arm is
+    // `{ allowed: false; retryAfter }`. There is no window to refund a count
+    // to when no count was taken, so the field does not exist on this side -
+    // adding one would not typecheck.
+    d.uploadRateLimits = {
+      consume: async () => ({ allowed: false, retryAfter: 30 }),
+      refund: async () => {},
+    };
+
+    /*
+     * `bodyUsed` rather than a spy on `getReader`. It is set by every standard
+     * way of consuming a request - `arrayBuffer`, `text`, `json`, a reader -
+     * so it still catches this if `readBoundedBody` is ever rewritten to reach
+     * the body some other way.
+     *
+     * Reading first would let a caller who is already over the limit spend the
+     * server's bandwidth on every refused attempt, which is most of what the
+     * limit is for.
+     */
+    const request = upload("");
+
+    const response = await createPlan(d, request);
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("30");
+    expect(stored).toEqual([]);
+    // Neither half of the write happened. Storage is the expensive one, but a
+    // row written for a refused upload would be a plan with no document.
+    expect(inserted).toEqual([]);
+    expect(request.bodyUsed).toBe(false);
   });
 });

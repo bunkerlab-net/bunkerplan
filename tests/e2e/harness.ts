@@ -93,16 +93,13 @@ export interface Harness {
  * bundles the Worker itself from there, so there is no separate server build
  * to wait for.
  *
- * Skipped when `bun run test` already did it. That script builds once and then
- * runs `bun test --parallel`, so every file that boots a worker would otherwise
- * rebuild - and `scripts/build.ts` opens with `rm -rf dist`, which means one
- * file deleting the tree another is reading. Nothing errors; the reader just
- * finds a file missing, which is how this arrived as "the bundle the page asks
- * for is in the client build" failing on CI and nowhere else.
+ * Skipped when `bun run test` already did it: that script builds once and sets
+ * `BUNKERPLAN_PREBUILT=1`, and without the flag every file booting a worker
+ * would rebuild the same tree - `scripts/build.ts` opens with `rm -rf dist`,
+ * so the repeats are destructive as well as slow.
  *
- * Still unconditional for a direct `bun test <file>` run, where nothing has
- * built and a stale `dist` would test the previous commit. Those runs are
- * sequential, so there is no tree to pull out from under anyone.
+ * Still unconditional for a direct run - `bun test ./tests/e2e/plans.test.ts`
+ * - where nothing has built and a stale `dist` would test the previous commit.
  */
 async function build(): Promise<void> {
   if (process.env["BUNKERPLAN_PREBUILT"] === "1") return;

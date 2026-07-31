@@ -33,8 +33,8 @@ bun run dev
 | `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it   |
-| `bun run test`                         | Builds, then the whole suite. Skips the container-backed backends unless they are up - see Tests        |
-| `bun run test:backends`                | Postgres, Valkey, and MinIO on localhost, so nothing skips                                              |
+| `bun run test`                         | Builds, then runs the whole suite with coverage. Partial by default: the container-backed suites run only when their `TEST_*` variables are set - see Tests |
+| `bun run test:backends`                | Starts Postgres, Valkey, and MinIO on localhost; set the `TEST_*` variables to reach them               |
 | `bun run check`                        | Biome lint and format                                                                                   |
 | `bun run typecheck`                    | Builds, then `tsc --noEmit`                                                                             |
 
@@ -89,17 +89,89 @@ reads it - and `bun run test` alone runs the full matrix. `.env.example`
 documents all five, including the two S3 credentials that default to the
 compose MinIO.
 
-CI sets them, so a pull request always runs the full matrix. Nothing here
-can reach data you care about: the backends run under their own Compose
-project (`bunkerplan-test`), separate from the self-hosting stack below, so
-`test:backends:down -v` cannot take your local Postgres, Valkey, or MinIO
-volumes with it. Postgres then works in a scratch schema and MinIO in a bucket
-created for the run, both dropped afterwards.
+CI sets them, so a pull request always runs the full matrix - across two steps
+rather than one: the main step carries Postgres and MinIO, and Valkey gets a
+step of its own for the reason below. It brings the same images up as native
+service containers rather than through Compose, so the runner waits on their
+health gates instead of a script polling ports.
 
-`bun run test` is `bun test --parallel`, one process per file, and that is not
-a speed choice: Miniflare runs a workerd child process, and sharing a process
-with the AWS SDK intermittently wedges a concurrent S3 request that then never
-settles.
+Locally, nothing here can reach data you care about: `test:backends` runs
+under its own Compose project (`bunkerplan-test`), separate from the
+self-hosting stack below, so `test:backends:down -v` cannot take your local
+Postgres, Valkey, or MinIO volumes with it. Either way Postgres works in a
+scratch schema and MinIO in a bucket created for the run, both dropped
+afterwards.
+
+One command, `bun run test`. It builds first, because the suite serves the
+real Workers bundle on Miniflare; `BUNKERPLAN_PREBUILT=1` is what stops each
+worker rebuilding it. Coverage is on in `bunfig.toml`, so every run reports a
+figure - and that figure counts only what ran, so a run with the backends
+absent measures a smaller suite than the full matrix does.
+
+The run is `--isolate`, which gives each file its own module registry. That is
+the topology that measures coverage correctly. `--parallel` does not: its
+reporter registers lines that are not statements - comments, blank lines, the
+continuation lines of a multi-line string - as coverable and unhit in workers
+that loaded a module without exercising it. Measured on this repo under Bun
+1.3.14, that invents 1583 such lines and reports 86% where the same run
+measures 99.5% in one process, with `src/client/errors.ts` at 44% and every
+branch in it covered. That is one observation of one toolchain: in it, no real
+line was found by one topology and missed by the other, and only the
+denominator moved. A later Bun may report differently.
+
+What `--isolate` costs is one process for all 61 files. It gives each file its
+own module registry, not its own process, and the Valkey client is what stops
+working there: commands stop completing, and a block of tests fails together
+at almost exactly 5000ms, Bun's per-test timeout.
+
+What is measured is the correlation, not the mechanism. Three full runs failed
+26, 22 and 4 tests; every failure in all three was the Valkey suite and
+nothing else failed in any of them. The same file in its own process passed
+five runs out of five. The server is not the slow part - it sat at
+0.3% CPU with an empty slowlog and `timeout 0` throughout, and a standalone
+script that opens one client, waits out a ttl and reads it back did 40 rounds
+without a hang. What is *not* established is why sharing the process does it:
+the backend fixtures each dispose of their handles in `afterAll`, so "the
+process is holding everything at once" is a description of the topology and
+not a diagnosis. Nobody has isolated the interaction.
+
+So the Valkey suite runs in its own step in CI, and `TEST_VALKEY_URL` is not
+set on the main one - see .github/workflows/check.yaml. Every assertion still
+runs exactly once. Locally, `bun run test` with `TEST_VALKEY_URL` set is the
+shared process again, and can still hang there:
+
+```sh
+bun run build # BUNKERPLAN_PREBUILT=1 below promises this already happened
+TEST_VALKEY_URL=redis://localhost:6379 \
+  BUNKERPLAN_PREBUILT=1 bun test --isolate ./tests/drivers/kv-store.valkey.test.ts
+```
+
+The variable is not optional there: without it the suite skips and the command
+passes having run nothing. Same for the repeat below - a backend whose variable
+is missing is a backend that was not tested.
+
+A red run is not evidence on its own - but neither is one green re-run, which
+is the trap. A single pass says nothing about a failure that happens some of
+the time. Repeat it instead:
+
+```sh
+BUNKERPLAN_PREBUILT=1 bun test --isolate --rerun-each 5 tests/drivers/
+```
+
+That command carries no variables of its own, so it needs them in the
+environment: uncomment them in your local environment file, which `bun test`
+reads, or `export` the ones the setup block above passes per-command. All of
+them, not just the one for the driver under suspicion - the point is to keep
+the other files in the picture. Without them the drivers skip and the repeat
+proves nothing, five times.
+
+Repetition narrows it, it does not decide it. A genuine regression tends to
+fail every repetition and to fail on its own assertion; the flake tends to
+fail a minority of them, at the deadline, in a whole block at once. Read the
+assertion that failed and the surrounding output before calling anything
+environmental - a real bug that only shows up under load wears the flake's
+shape exactly. Anything that does not fit the flake's shape is a regression
+until the evidence says otherwise.
 
 ## Self-hosting
 
