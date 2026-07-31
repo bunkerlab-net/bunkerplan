@@ -130,7 +130,9 @@ describe("validateStandaloneHtml", () => {
       ),
     ).toEqual({
       ok: false,
-      reasons: ["external reference: style https://x/y.css"],
+      reasons: [
+        "external reference: style https://x/y.css - inline the stylesheet",
+      ],
       truncated: false,
     });
   });
@@ -356,7 +358,9 @@ describe("validateStandaloneHtml - subresource gate regressions", () => {
       check(DOC(`<style>@import/**/"https://e.example/x.css";</style>`)),
     ).toEqual({
       ok: false,
-      reasons: ["external reference: style https://e.example/x.css"],
+      reasons: [
+        "external reference: style https://e.example/x.css - inline the stylesheet",
+      ],
       truncated: false,
     });
   });
@@ -384,11 +388,33 @@ describe("validateStandaloneHtml - the reported target", () => {
     });
   });
 
-  test("names an @import target, which has no attribute to name", () => {
+  /**
+   * An `@import` is a stylesheet, whichever spelling names it, so it gets the
+   * answer a `rel="stylesheet"` gets - and a font service named that way is
+   * still a font service. An ordinary `url()` in a declaration is not: it
+   * fetches the image or face it points at, so `/fonts/` in its path says
+   * nothing.
+   */
+  test.each([
+    ['@import url("URL");', "a url() target"],
+    ['@import "URL";', "a quoted target"],
+  ])("names an @import target and says to inline it: %s", (rule) => {
     const url = "https://fonts.googleapis.com/css2?family=Inter";
-    expect(check(DOC(`<style>@import url("${url}");</style>`))).toEqual({
+    expect(check(DOC(`<style>${rule.replace("URL", url)}</style>`))).toEqual({
       ok: false,
-      reasons: [`external reference: style ${url}`],
+      reasons: [
+        `external reference: style ${url} - inline the stylesheet; ${EMBED}`,
+      ],
+      truncated: false,
+    });
+  });
+
+  test("leaves a declaration's url() unhinted about stylesheets", () => {
+    expect(
+      check(DOC(`<style>a{background:url(/fonts/hero.png)}</style>`)),
+    ).toEqual({
+      ok: false,
+      reasons: ["external reference: style /fonts/hero.png"],
       truncated: false,
     });
   });
@@ -563,7 +589,7 @@ describe("validateStandaloneHtml - every offender at once", () => {
       reasons: [
         "external reference: style /a.png",
         "external reference: style /b.png",
-        "external reference: style https://e.example/c.css",
+        "external reference: style https://e.example/c.css - inline the stylesheet",
       ],
       truncated: false,
     });
@@ -875,7 +901,9 @@ describe("validateStandaloneHtml - CSS text is not CSS code", () => {
   ])("reads an @import target with %s", (css) => {
     expect(check(style(css))).toMatchObject({
       ok: false,
-      reasons: ["external reference: style https://e.example/a.css"],
+      reasons: [
+        "external reference: style https://e.example/a.css - inline the stylesheet",
+      ],
     });
   });
 
@@ -1320,9 +1348,12 @@ describe("validateStandaloneHtml - parser conformance", () => {
     expect(check(DOC(body))).toEqual({ ok: true });
   });
   test.each(EXACT_CSS)("scans the CSS a browser applies: %s", (body) => {
+    // These differ in how the reference is written, and an `@import` is a
+    // stylesheet: what is under test is that the CSS was read at all.
+    const hint = body.includes("@import") ? " - inline the stylesheet" : "";
     expect(check(DOC(body))).toEqual({
       ok: false,
-      reasons: [`external reference: style ${EXT}`],
+      reasons: [`external reference: style ${EXT}${hint}`],
       truncated: false,
     });
   });
@@ -1430,7 +1461,7 @@ describe("validateStandaloneHtml - parser conformance", () => {
         check(`<!doctype html><html><head><style>@import url("${EXT}");`),
       ).toEqual({
         ok: false,
-        reasons: [`external reference: style ${EXT}`],
+        reasons: [`external reference: style ${EXT} - inline the stylesheet`],
         truncated: false,
       });
     });
@@ -1505,7 +1536,7 @@ describe("validateStandaloneHtml - parser conformance", () => {
   ])("reads an HTML <style> as a stylesheet however it ends: %s", (body) => {
     expect(check(DOC(body))).toEqual({
       ok: false,
-      reasons: [`external reference: style ${EXT}`],
+      reasons: [`external reference: style ${EXT} - inline the stylesheet`],
       truncated: false,
     });
   });

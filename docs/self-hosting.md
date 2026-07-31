@@ -397,14 +397,15 @@ was longer:
 }
 ```
 
-A refusal carries the answer beside the fault. `rel="stylesheet"` says to
-inline the CSS. A `.woff2`, `.woff`, `.ttf`, `.otf`, or `.eot` path anywhere,
-and a `link` that is `as="font"`, say to embed the faces. So does a target
-naming fonts in a host label or a path segment -
+A refusal carries the answer beside the fault. `rel="stylesheet"` and a CSS
+`@import` both say to inline the CSS. A `.woff2`, `.woff`, `.ttf`, `.otf`, or
+`.eot` path anywhere, and a `link` that is `as="font"`, say to embed the
+faces. So does a target naming fonts in a host label or a path segment -
 `fonts.googleapis.com/css2?family=Inter`, `/fonts/faces.css` - but only on a
-`rel="stylesheet"`, `rel="preconnect"`, or `rel="dns-prefetch"`, the three
-that have not already said what they are fetching. An `<img src="/fonts/x.png">`
-is an image in a directory, and is refused without the font advice.
+stylesheet, a `rel="preconnect"`, or a `rel="dns-prefetch"`, which have not
+already said what they are fetching. An `<img src="/fonts/x.png">`, and a
+`url()` in a declaration, name what they name: both are refused without the
+font advice.
 
 The size travels with the advice because the refusal is where the decision to
 drop the fonts altogether otherwise gets made. See [Webfonts](#webfonts) for
