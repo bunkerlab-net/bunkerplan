@@ -114,7 +114,7 @@ export interface StorageFixture extends Fixture<PlanStorage> {
 /**
  * A SQL backend with the real migrations applied.
  *
- * Everything past the three repos is a helper the conformance suites need but
+ * Everything past the repositories is a helper the conformance suites need but
  * cannot express portably: the placeholder syntax, the column types, and the
  * way a timestamp is stored all differ between SQLite and Postgres. Keeping
  * that here means the contracts contain no dialect at all, so a divergence
@@ -391,7 +391,7 @@ interface Fragments {
  *
  * Everything past the repositories is a helper the conformance suites need
  * but cannot express portably. It was written out twice, and the two copies
- * differed only in how a statement was dispatched and in the three fragments
+ * differed only in how a statement was dispatched and in the four fragments
  * above - which is not a difference worth 100 duplicated lines, and is how
  * the `insertPlanWithVisibility` helper came to be added to one and not the
  * other.

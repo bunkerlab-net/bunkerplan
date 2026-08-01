@@ -22,13 +22,13 @@ import { createDialectRepos } from "./repos.ts";
  * stops answering is bounded only from this end.
  *
  * Set past the server's rather than equal to it, on purpose. Equal, the two
- * race, and which fires is a coin toss - but only the server's has a defined
- * outcome: `57014` means the statement did not run and its transaction is
- * aborted, which is what lets `isTimeout` promise a safe retry. The client's
- * deadline says only that no answer arrived, leaving whatever the server is
- * doing unknown. Letting the server win means the client's deadline fires
- * only when the server has genuinely stopped answering, which is a fault
- * rather than a queue and is reported as one.
+ * race and which fires is a coin toss - and only the server's can be
+ * classified at all. `57014` is the server naming what it did, a code that
+ * means something definite at a call site that knows which statement it
+ * wrapped; the client's deadline reports only that no answer arrived, which is
+ * uninterpretable wherever it is caught. Letting the server win means the
+ * client's deadline fires only when the server has genuinely stopped
+ * answering, which is a fault rather than a queue and is reported as one.
  *
  * Both bounds are what keeps the plan claim from eating the pool. Concurrent
  * uploads by one account queue on the advisory lock `pgDialect.claim` takes,
@@ -39,11 +39,13 @@ import { createDialectRepos } from "./repos.ts";
  * back. Uploads are already rate limited per account, which is what makes the
  * depth a bounded worry rather than an open one.
  *
- * Such a timeout leaves the transaction rolled back and nothing claimed, so
- * the upload fails whole rather than partly. `pgClaim` names it as
- * `DatabaseUnavailable` and src/http/create-plan.ts answers 503 with a
- * `retry-after`: the request was fine and the deployment was busy, which is a
- * different thing to tell a caller than "something broke".
+ * A cancellation caught around that wait is the retryable one, and only that
+ * one: `pgClaim` names it `DatabaseUnavailable` from inside the transaction
+ * callback - before any write, so nothing was claimed - and
+ * src/http/create-plan.ts answers 503 with a `retry-after`. A `57014` seen
+ * anywhere else may have landed on the `COMMIT`, where the outcome is unknown,
+ * and stays a fault. See `isStatementCancelled` in src/db/unavailable.ts for
+ * why the position decides it rather than the code.
  */
 const POOL_MAX = 10;
 const CONNECTION_TIMEOUT_MS = 5_000;

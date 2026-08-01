@@ -85,5 +85,12 @@ export function sqliteDialect(db: SqliteDb): Dialect {
  * the handle union - which is what stops a handle being mistagged. On `Db`
  * alone (`adapter: unknown`) a wrong `provider` beside it would only surface
  * as Better Auth issuing statements in the wrong dialect at runtime.
+ *
+ * Declared once, here. The name appears in several other files - src/db/d1.ts
+ * and src/db/bun-sqlite.ts import the type and name it in their return types,
+ * src/auth/instance.ts unions it into `AuthDb`, and src/db/pg-shared.ts points
+ * at it from a comment - but every one of those is a type-only import or a
+ * mention, not a second declaration. `tsc --noEmit` is the arbiter and it is
+ * clean; a genuine duplicate identifier would not compile.
  */
 export type SqliteAuthHandle = { adapter: SqliteDb; provider: "sqlite" };

@@ -19,8 +19,8 @@ jobs:
     # orchestrator and the health gates below are what the job waits on.
     #
     # MinIO is the exception and is started as a step further down, because a
-    # service container cannot supply a command and only a four-year-old MinIO
-    # image carries one - see the note there.
+    # service container cannot supply a command and the only MinIO image that
+    # carries one was built in July 2021 - see the note there.
     #
     # Every one of these is what makes a suite run rather than skip. Without
     # them tests/drivers/* reports success having exercised only the Cloudflare
@@ -80,9 +80,10 @@ jobs:
       # MinIO as a step, not a service container, and the same dated release
       # docker-compose.yml pins. A service container cannot supply a command,
       # so it could only run `edge-cicd` - the one MinIO image carrying
-      # `CMD ["minio","server","/data"]`, and one built in July 2021, which
-      # pointed the S3 conformance suite at a server four years behind the one
-      # a self-hoster gets. Started here the argument is just an argument, and
+      # `CMD ["minio","server","/data"]`, and one built in July 2021 - which
+      # pointed the S3 conformance suite at a server years behind the September
+      # 2025 release a self-hoster gets. Started here the argument is just an
+      # argument, and
       # local and CI exercise the same MinIO.
       #
       # Pinned by release tag, not by digest. That is a repository-wide
@@ -102,8 +103,14 @@ jobs:
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
             docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          # Each probe bounded, not just the loop. `curl` with no deadline can
+          # sit on a socket that accepts and never answers, which is exactly
+          # what a half-started server does - and forty of those turn an
+          # eighty-second wait into the job's own timeout with no output.
           for _ in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then
+            if curl --fail --silent --show-error \
+              --connect-timeout 2 --max-time 5 \
+              http://127.0.0.1:9000/minio/health/live >/dev/null; then
               exit 0
             fi
             sleep 2

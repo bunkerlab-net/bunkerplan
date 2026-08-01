@@ -193,11 +193,18 @@ export function memoryPlans(
      * through this signature, so there is nothing here to preserve.
      */
     insert: async (row, maxPlans): Promise<PlanInsert> => {
-      if (rows.has(row.id)) return "duplicate";
+      // Quota before duplicate, which is the order `claimRow` reports in and
+      // the order `createPlan` depends on: it retries a duplicate with a fresh
+      // id and stops on a quota, so a full account answered "duplicate" would
+      // be sent round the retry loop to be refused three times and end on
+      // "no free plan id was found". The contract suite pins this against all
+      // three real dialects; a fake that checked the id first would let a
+      // handler test disagree with every one of them.
       const held = [...rows.values()].filter(
         (item) => item.userId === row.userId,
       ).length;
       if (held >= maxPlans) return "quota";
+      if (rows.has(row.id)) return "duplicate";
       // `grants` cloned, as the seed path does: a row that kept the caller's
       // array would let a later `grantByHandle` write into an object the test
       // still holds, which is a fake editing its own input.

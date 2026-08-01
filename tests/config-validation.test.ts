@@ -127,12 +127,18 @@ describe("the drivers and their companions", () => {
     );
   });
 
-  test.each(["DB_DRIVER", "KV_DRIVER", "STORAGE_DRIVER"])(
+  // Paired in the table rather than looked up inside the body: an index into
+  // an object literal is `string | undefined` under `noUncheckedIndexedAccess`,
+  // so a typo in the key would set the variable to `undefined` and the case
+  // would quietly assert that omitting the setting is accepted - which it is,
+  // for a different reason.
+  test.each([
+    ["DB_DRIVER", "d1"],
+    ["KV_DRIVER", "kv"],
+    ["STORAGE_DRIVER", "r2"],
+  ])(
     "naming the platform's own %s explicitly is still accepted",
-    (key) => {
-      const only = { DB_DRIVER: "d1", KV_DRIVER: "kv", STORAGE_DRIVER: "r2" }[
-        key
-      ];
+    (key, only) => {
       expect(() =>
         loadConfig({ ...REQUIRED, [key]: only } as never, { workers: true }),
       ).not.toThrow();
