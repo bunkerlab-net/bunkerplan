@@ -299,25 +299,31 @@ describe("the unlock rate limit", () => {
  * same process could be silently misconfigured.
  */
 describe("the missing-header warning", () => {
-  const route = () => ({
-    run: createUnlockRoute(),
-    deps: {
-      plans: memoryPlans(),
-      limits: fakeLimits(true).limits,
-      config: ROUTE_CONFIG,
-      logger,
-    },
-  });
+  // `spent` kept rather than dropped on the floor: these cases are about a
+  // request that never reaches the counter, so what makes them mean anything
+  // is that the bucket stayed untouched - and `fakeLimits(true).limits` alone
+  // throws that evidence away.
+  const route = () => {
+    const { limits, spent } = fakeLimits(true);
+    return {
+      run: createUnlockRoute(),
+      deps: { plans: memoryPlans(), limits, config: ROUTE_CONFIG, logger },
+      spent,
+    };
+  };
 
   test("says so in the log, because the symptom is otherwise silent", async () => {
     // Every redemption on this deployment answers 429 and no reader can tell
     // why. Configuration refuses to load without naming a header, so reaching
     // here means the proxy in front is not sending the one it was told to
     // trust - which is an operator's problem and needs saying once.
-    const { run, deps } = route();
+    const { run, deps, spent } = route();
 
     expect((await run(deps, post(), "abc")).status).toBe(429);
 
+    // Refused before the counter, so no bucket was charged - which is what
+    // makes this a deployment fault rather than a caller using up its budget.
+    expect(spent).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toContain("no trusted client address header");
     // Names the header it looked for, so the fix does not need a code read.

@@ -577,15 +577,16 @@ describe("the unlock bucket's opportunistic prune", () => {
   });
 
   test("a prune that fails is logged, and the redemption still passes", async () => {
-    const warnings: unknown[] = [];
+    const warnings: Array<{ fields: { err?: unknown }; message: string }> = [];
     const logger = {
-      warn: (...args: unknown[]) => {
-        warnings.push(args);
+      warn: (fields: { err?: unknown }, message: string) => {
+        warnings.push({ fields, message });
       },
     } as unknown as Logger;
+    const failure = new Error("database is locked");
     const repo = createUnlockRateLimitRepo(
       dialect(async () => {
-        throw new Error("database is locked");
+        throw failure;
       }),
       logger,
       { shouldSweep: () => true },
@@ -596,7 +597,12 @@ describe("the unlock bucket's opportunistic prune", () => {
       retryAfter: 1,
       windowStart: WINDOW_START,
     });
+    // The cause travels, not just the fact. A line saying only that a sweep
+    // failed leaves an operator with a table that stops shrinking and nothing
+    // naming why - and this is the one place the reason is still in hand.
     expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe("unlock rate-limit sweep failed");
+    expect(warnings[0]?.fields.err).toBe(failure);
   });
 
   test("and a prune that succeeds says nothing", async () => {

@@ -79,7 +79,16 @@ interface Fixture {
   accountClosing: AccountClosingRepo;
 }
 
-function fixture(planOverrides: Partial<PlanRepo> = {}): Fixture {
+/**
+ * `planOverrides` is a factory rather than an object so an override can
+ * delegate to the repository it is replacing a method on, which several need:
+ * a `deleteOwned` that refuses one id and defers the rest cannot be written
+ * before `base` exists. Assigning onto `f.plans` afterwards did the same job
+ * and left the fixture mutable, so a test could rewrite it halfway through.
+ */
+function fixture(
+  planOverrides: (base: MemoryPlans) => Partial<PlanRepo> = () => ({}),
+): Fixture {
   const objects: string[] = [];
   const steps: string[] = [];
   const logs: LogLine[] = [];
@@ -119,7 +128,7 @@ function fixture(planOverrides: Partial<PlanRepo> = {}): Fixture {
     closing,
     rows: base.rows,
     base,
-    plans: { ...base, listByUser, ...planOverrides },
+    plans: { ...base, listByUser, ...planOverrides(base) },
     storage: {
       put: async () => {},
       get: async () => null,
@@ -263,7 +272,7 @@ describe("sweepAccountObjects", () => {
    * naming an object the sweep never got.
    */
   test("throws on a row it can never remove, rather than looping", async () => {
-    const f = fixture({ deleteOwned: async () => false });
+    const f = fixture(() => ({ deleteOwned: async () => false }));
     seed(f, ["stuck"]);
 
     await expect(run(f)).rejects.toThrow(/not making progress/);
@@ -272,7 +281,7 @@ describe("sweepAccountObjects", () => {
 
   /** One object delete per plan, not one per pass: a refusal is not retried. */
   test("sweeps a refused object once, however many passes it takes", async () => {
-    const f = fixture({ deleteOwned: async () => false });
+    const f = fixture(() => ({ deleteOwned: async () => false }));
     seed(f, ["stuck"]);
 
     await expect(run(f)).rejects.toThrow();
@@ -291,12 +300,13 @@ describe("sweepAccountObjects", () => {
    * account did.
    */
   test("finishes when a refused row stops being listed, and says so", async () => {
-    const f = fixture();
-    f.plans.deleteOwned = async (id, userId) => {
-      if (id !== "vanishing") return await f.base.deleteOwned(id, userId);
-      f.rows.delete(id);
-      return false;
-    };
+    const f = fixture((base) => ({
+      deleteOwned: async (id, userId) => {
+        if (id !== "vanishing") return await base.deleteOwned(id, userId);
+        base.rows.delete(id);
+        return false;
+      },
+    }));
     seed(f, ["mine", "vanishing"]);
 
     await expect(run(f)).resolves.toBeUndefined();
@@ -387,7 +397,7 @@ describe("sweepAccountObjects", () => {
      * must not ask for one.
      */
     test("is spent by refusals, and says so as a stall not a retry", async () => {
-      const f = fixture({ deleteOwned: async () => false });
+      const f = fixture(() => ({ deleteOwned: async () => false }));
       seed(f, ["p1", "p2", "p3"]);
 
       await expect(run(f, 2)).rejects.toThrow(/not making progress/);
@@ -400,12 +410,13 @@ describe("sweepAccountObjects", () => {
      * only thing left is work a retry will finish.
      */
     test("asks for a retry when the refusals were concurrent deletes", async () => {
-      const f = fixture();
-      f.plans.deleteOwned = async (id, userId) => {
-        if (id !== "vanishing") return await f.base.deleteOwned(id, userId);
-        f.rows.delete(id);
-        return false;
-      };
+      const f = fixture((base) => ({
+        deleteOwned: async (id, userId) => {
+          if (id !== "vanishing") return await base.deleteOwned(id, userId);
+          base.rows.delete(id);
+          return false;
+        },
+      }));
       seed(f, ["vanishing", "p1", "p2"]);
 
       await expect(run(f, 2)).rejects.toThrow(/Retry the deletion/);

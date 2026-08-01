@@ -25,12 +25,16 @@ export class DatabaseUnavailable extends Error {
  * No SQLSTATE, because no server was involved - which is also why matching the
  * text is tolerable here. `pg` raises it from its own pool.
  *
- * Coupled to that wording, and so to the dependency: `pg` is pinned to `^8` in
- * package.json, which is the range this string is known to hold across. The
- * failure mode of it changing is mild and one-directional - a pool timeout
- * would stop being retryable and answer 500 instead of 503 - but a major bump
- * of `pg` should check it. tests/pg-dialect.test.ts asserts the exact message
- * translates, so the check is a test run rather than a code read.
+ * Coupled to that wording, and `pg` is a caret range (`^8.22.0`) rather than a
+ * pin, so any 8.x could in principle reword it. The exposure is small and
+ * one-directional: a pool timeout would stop being recognised and answer 500
+ * instead of 503, which is a worse message rather than a wrong outcome.
+ *
+ * tests/pg-dialect.test.ts covers the predicate by injecting this same
+ * literal, so it proves the classification and nothing about `pg`. What
+ * watches the dependency is the pool-timeout test in
+ * tests/drivers/db.postgres.test.ts, which provokes a real one against a real
+ * server and reads the message `pg` actually emits.
  */
 const POOL_TIMEOUT = "timeout exceeded when trying to connect";
 

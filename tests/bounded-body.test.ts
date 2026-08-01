@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { readBoundedBody } from "../src/http/bounded-body.ts";
+import { readBoundedBody, readJsonBody } from "../src/http/bounded-body.ts";
 
 const LIMIT = 1024;
+const encode = (text: string) => new TextEncoder().encode(text);
 
 /**
  * A body delivered as a stream, which is what a chunked or HTTP/2 request
@@ -82,5 +83,62 @@ describe("readBoundedBody", () => {
   test("treats a missing body as empty rather than failing", async () => {
     const request = new Request("https://example.test/", { method: "DELETE" });
     expect((await readBoundedBody(request, LIMIT))?.byteLength).toBe(0);
+  });
+});
+/** A request whose body is exactly these bytes, valid UTF-8 or not. */
+function raw(bytes: Uint8Array): Request {
+  return new Request("https://example.test/", {
+    method: "PATCH",
+    // The backing buffer, because `BodyInit` takes an `ArrayBuffer` view only
+    // through the DOM lib's narrower alias and this file needs exact bytes.
+    body: bytes.buffer as ArrayBuffer,
+  });
+}
+
+describe("readJsonBody", () => {
+  test("parses a body that fits and is valid JSON", async () => {
+    const read = await readJsonBody(raw(encode('{"label":"hi"}')), LIMIT);
+
+    expect(read.ok).toBe(true);
+    expect(read.ok && read.body).toEqual({ label: "hi" });
+  });
+
+  /**
+   * The decoder is `fatal` for this case, and it is the one where being
+   * lenient looks harmless. A lone `0xff` is not UTF-8; replaced with U+FFFD
+   * it sits quietly inside the string, the parse succeeds, and a label nobody
+   * typed is stored. Refusing is the only answer that does not invent data.
+   */
+  test("refuses a JSON-shaped body carrying invalid UTF-8", async () => {
+    const malformed = new Uint8Array([
+      ...encode('{"label":"'),
+      0xff,
+      ...encode('"}'),
+    ]);
+
+    const read = await readJsonBody(raw(malformed), LIMIT);
+
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.response.status).toBe(400);
+    expect(await read.response.json()).toMatchObject({
+      error: "body must be JSON",
+    });
+  });
+
+  test("refuses a body that is not JSON at all", async () => {
+    const read = await readJsonBody(raw(encode("not json")), LIMIT);
+
+    expect(read.ok).toBe(false);
+    expect(read.ok || read.response.status).toBe(400);
+  });
+
+  test("refuses a body past the limit before parsing it", async () => {
+    const oversized = encode(`{"label":"${"x".repeat(LIMIT)}"}`);
+
+    const read = await readJsonBody(raw(oversized), LIMIT);
+
+    expect(read.ok).toBe(false);
+    expect(read.ok || read.response.status).toBe(413);
   });
 });

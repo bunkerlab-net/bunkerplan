@@ -569,8 +569,15 @@ export async function postgresDb(): Promise<DbFixture> {
   }
 
   return pgFixture(db, async () => {
-    await pool.query(`drop schema if exists "${schema}" cascade`);
-    await pool.end();
+    // `finally`, so a drop that fails still closes the pool. Left open, its
+    // clients keep the process alive past the suite and every later file pays
+    // for it - and the drop failing is exactly when that is most likely, since
+    // something is already wrong with the server.
+    try {
+      await pool.query(`drop schema if exists "${schema}" cascade`);
+    } finally {
+      await pool.end();
+    }
   });
 }
 
