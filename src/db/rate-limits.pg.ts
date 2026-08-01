@@ -1,7 +1,6 @@
 import { and, eq, lte, sql } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { RateLimitRepo, RateLimitResult } from "../services/types.ts";
-import type { PgSchema } from "./pg-shared.ts";
+import type { PgDb } from "./pg-shared.ts";
 import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
 import { unlockRateLimit, uploadRateLimit } from "./schema/rate-limit.pg.ts";
 
@@ -18,7 +17,7 @@ export type PgRateLimitTable = typeof uploadRateLimit | typeof unlockRateLimit;
  * sqlite twin, whose reasoning this mirrors exactly.
  */
 async function refundOne(
-  db: NodePgDatabase<PgSchema>,
+  db: PgDb,
   t: PgRateLimitTable,
   key: string,
   windowStart: number,
@@ -40,7 +39,7 @@ async function refundOne(
  * side when a difference between them is suspected.
  */
 async function consumeOne(
-  db: NodePgDatabase<PgSchema>,
+  db: PgDb,
   t: PgRateLimitTable,
   key: string,
   max: number,
@@ -90,7 +89,7 @@ async function consumeOne(
 
 /** See src/db/rate-limits.sqlite.ts for why this is a single statement. */
 export function createPgRateLimitRepo(
-  db: NodePgDatabase<PgSchema>,
+  db: PgDb,
   t: PgRateLimitTable = uploadRateLimit,
 ): RateLimitRepo {
   return {
@@ -105,7 +104,7 @@ export function createPgRateLimitRepo(
  * why it sweeps on a fraction of attempts rather than all of them.
  */
 export function createPgUnlockRateLimitRepo(
-  db: NodePgDatabase<PgSchema>,
+  db: PgDb,
   shouldSweep: () => boolean = sometimes,
 ): RateLimitRepo {
   const counter = createPgRateLimitRepo(db, unlockRateLimit);

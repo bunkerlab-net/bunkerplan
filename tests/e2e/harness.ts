@@ -1,8 +1,8 @@
-import { readdirSync, readFileSync } from "node:fs";
 import { defaultKeyHasher } from "@better-auth/api-key";
 import { makeSignature } from "better-auth/crypto";
 import { createTestHarness, type TestHarness } from "wrangler";
 import { handleEmail } from "../../src/ids.ts";
+import { migrationFiles } from "../migration-files.ts";
 
 /**
  * The real Worker on the real local stack: workerd via Miniflare, with D1, R2,
@@ -116,16 +116,8 @@ async function build(): Promise<void> {
 }
 
 async function migrate(db: D1Database): Promise<void> {
-  const dir = `${ROOT}/drizzle/sqlite`;
-  const files = readdirSync(dir)
-    .filter((name) => name.endsWith(".sql"))
-    .sort();
-  for (const file of files) {
-    const statements = readFileSync(`${dir}/${file}`, "utf8")
-      .split("--> statement-breakpoint")
-      .map((statement) => statement.trim())
-      .filter((statement) => statement !== "");
-    await db.batch(statements.map((statement) => db.prepare(statement)));
+  for (const file of migrationFiles("sqlite")) {
+    await db.batch(file.statements.map((statement) => db.prepare(statement)));
   }
 }
 

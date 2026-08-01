@@ -1,16 +1,13 @@
 import { and, count, desc, eq, type SQL, sql } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { handleEmail } from "../ids.ts";
 import type {
   PlanInsert,
   PlanRepo,
   PlanVisibility,
 } from "../services/types.ts";
-import type { PgSchema } from "./pg-shared.ts";
+import type { PgDb } from "./pg-shared.ts";
 import { user } from "./schema/auth.pg.ts";
 import { plan, planGrant } from "./schema/plan.pg.ts";
-
-type PgDb = NodePgDatabase<PgSchema>;
 
 /** False means no row matched: unknown id, or one owned by somebody else. */
 async function updateOwned(

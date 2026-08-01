@@ -1,14 +1,11 @@
 import { and, eq, lte, sql } from "drizzle-orm";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type { RateLimitRepo, RateLimitResult } from "../services/types.ts";
 import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
 import {
   unlockRateLimit,
   uploadRateLimit,
 } from "./schema/rate-limit.sqlite.ts";
-import type { SqliteSchema } from "./sqlite-shared.ts";
-
-type SqliteDb = BaseSQLiteDatabase<"sync" | "async", unknown, SqliteSchema>;
+import type { SqliteDb } from "./sqlite-shared.ts";
 
 /**
  * Either counter table. They differ only in name and in whether the key

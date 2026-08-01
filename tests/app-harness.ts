@@ -430,7 +430,6 @@ export interface AppHarness<S extends PlanStorage = MemoryStorage> {
    */
   storage: S;
   auth: AuthCalls;
-  deps: AppDeps;
 }
 
 export function buildApp<S extends PlanStorage>(
@@ -489,7 +488,6 @@ export function buildApp(
     plans,
     storage,
     auth: calls,
-    deps,
   };
 }
 

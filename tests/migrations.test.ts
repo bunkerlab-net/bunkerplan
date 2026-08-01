@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { migrationFiles } from "./migration-files.ts";
 
 /**
  * What the migrations do to data that is already there.
@@ -15,25 +15,6 @@ import { readdirSync, readFileSync } from "node:fs";
  * mode is run too: the two fail in opposite directions, so testing one proves
  * very little.
  */
-
-const DIR = "drizzle/sqlite";
-
-function migrationFiles(): { n: number; sql: string; statements: string[] }[] {
-  return readdirSync(DIR)
-    .filter((name) => name.endsWith(".sql"))
-    .sort()
-    .map((name) => {
-      const sql = readFileSync(`${DIR}/${name}`, "utf8");
-      return {
-        n: Number(name.slice(0, 4)),
-        sql,
-        statements: sql
-          .split("--> statement-breakpoint")
-          .map((statement) => statement.trim())
-          .filter((statement) => statement !== ""),
-      };
-    });
-}
 
 /**
  * Applies every migration, running `seed` immediately before the one numbered
@@ -51,7 +32,7 @@ function migrate(
   db.exec("PRAGMA foreign_keys = ON");
 
   let seeded = false;
-  for (const { n, statements } of migrationFiles()) {
+  for (const { n, statements } of migrationFiles("sqlite")) {
     const guarded = n === seedBefore;
     if (guarded) {
       seed(db);
@@ -226,7 +207,7 @@ describe("the migration set as a whole", () => {
     let grantsExistAlready = false;
     const offenders: string[] = [];
 
-    for (const { n, sql } of migrationFiles()) {
+    for (const { n, sql } of migrationFiles("sqlite")) {
       // Positions, not just presence: within a single file the order of these
       // two is the whole question, and a regeneration puts them the wrong way
       // round without changing which statements are present.
@@ -263,10 +244,8 @@ describe("the migration set as a whole", () => {
  */
 describe("the data repairs exist in both dialects", () => {
   const corpus = (dialect: "sqlite" | "pg"): string =>
-    readdirSync(`drizzle/${dialect}`)
-      .filter((name) => name.endsWith(".sql"))
-      .sort()
-      .map((name) => readFileSync(`drizzle/${dialect}/${name}`, "utf8"))
+    migrationFiles(dialect)
+      .map((file) => file.sql)
       .join("\n");
 
   test.each(["sqlite", "pg"] as const)(

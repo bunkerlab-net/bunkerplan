@@ -1,10 +1,7 @@
 import { eq } from "drizzle-orm";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type { AccountClosingRepo } from "../services/types.ts";
 import { accountClosing } from "./schema/account-closing.sqlite.ts";
-import type { SqliteSchema } from "./sqlite-shared.ts";
-
-type SqliteDb = BaseSQLiteDatabase<"sync" | "async", unknown, SqliteSchema>;
+import type { SqliteDb } from "./sqlite-shared.ts";
 
 export function createSqliteAccountClosingRepo(
   db: SqliteDb,

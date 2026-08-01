@@ -129,8 +129,6 @@ export function setSession(next: SessionState): void {
   session = next;
 }
 
-export const authClientCalls: string[] = [];
-
 const arm: Arm = { on: false };
 
 /**
@@ -160,7 +158,6 @@ const implementations = {
   // exercise the real module and must get it.
   authClient: () => {
     if (!arm.on) return passthrough.authClient();
-    authClientCalls.push("authClient");
     return client;
   },
   useSession: () => (arm.on ? session : passthrough.useSession()),
@@ -224,6 +221,5 @@ export function useAuthStub(): void {
     session = SIGNED_OUT;
     navigations.length = 0;
     replacements.length = 0;
-    authClientCalls.length = 0;
   });
 }
