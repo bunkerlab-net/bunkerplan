@@ -81,9 +81,12 @@ export function parseVisibility(
       return {
         ok: true,
         requested: candidate,
-        // `"code"` is the intent that stores `private`; the other two store
-        // themselves.
-        stored: candidate === "public" ? "public" : "private",
+        // `"code"` is the only one of these that is an intent rather than a
+        // column value: it stores `private` and mints a code beside it. Every
+        // real visibility stores itself, which is what keeps this derived from
+        // the tuple - naming `public` here instead would quietly store a third
+        // visibility as `private` the day one is added.
+        stored: candidate === "code" ? "private" : candidate,
       };
     }
   }

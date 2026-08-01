@@ -59,6 +59,17 @@ export function pgDialect(db: PgDb): Dialect {
     // critical section per account, and it is released with the transaction
     // whichever way it ends. The body reads and writes through the transaction,
     // which is the only reason the executor is handed to it.
+    //
+    // The lock is only half of it: the count must also see what the previous
+    // holder committed, which read committed gives by taking a fresh snapshot
+    // per statement. Under repeatable read or serializable the whole
+    // transaction reads one snapshot taken before the lock was granted, so the
+    // second claimant counts the account as it stood before the first one
+    // wrote and the ceiling admits one too many. Nothing here or in
+    // src/db/postgres.ts sets an isolation level, so this runs at the server
+    // default - a deployment that raises it, in `postgresql.conf` or through
+    // `options=` on `DATABASE_URL`, breaks the quota rather than tightening
+    // it.
     claim: (userId, body) =>
       db.transaction(async (tx) => {
         await tx.execute(

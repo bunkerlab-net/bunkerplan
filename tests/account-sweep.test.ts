@@ -35,6 +35,12 @@ interface Fixture {
   objects: string[];
   closing: Set<string>;
   rows: Map<string, StoredPlan>;
+  /**
+   * Every marker, listing, and object delete, in the order they happened. The
+   * marker going first is the whole reason the sweep is safe, and only an
+   * ordering can say so.
+   */
+  steps: string[];
   /** The unwrapped repository, for an override that delegates to it. */
   base: MemoryPlans;
   plans: PlanRepo;
@@ -44,25 +50,33 @@ interface Fixture {
 
 function fixture(planOverrides: Partial<PlanRepo> = {}): Fixture {
   const objects: string[] = [];
+  const steps: string[] = [];
   const closing = new Set<string>();
   const base = memoryPlans();
+  const listByUser: PlanRepo["listByUser"] = async (userId, limit) => {
+    steps.push("list");
+    return await base.listByUser(userId, limit);
+  };
 
   return {
     objects,
+    steps,
     closing,
     rows: base.rows,
     base,
-    plans: { ...base, ...planOverrides },
+    plans: { ...base, listByUser, ...planOverrides },
     storage: {
       put: async () => {},
       get: async () => null,
       delete: async (id) => {
+        steps.push("delete");
         objects.push(id);
       },
       probe: async () => {},
     },
     accountClosing: {
       open: async (userId) => {
+        steps.push("open");
         closing.add(userId);
       },
       isOpen: async (userId) => closing.has(userId),
@@ -87,13 +101,21 @@ function run(f: Fixture, maxAttempts?: number): Promise<void> {
 }
 
 describe("sweepAccountObjects", () => {
+  /**
+   * The marker first, before anything is listed. An upload that claims a row
+   * after the sweep passed it and writes its object before the cascade would
+   * leave that object served at `/p/{id}` with no row to own it; the marker is
+   * what refuses that upload, so a sweep that read the first page before
+   * setting it has a window where nothing does.
+   */
   test("marks the account, then removes every object and row", async () => {
     const f = fixture();
     seed(f, ["p1", "p2", "p3"]);
 
     await run(f);
 
-    expect(f.closing.has(OWNER)).toBe(true);
+    expect(f.steps[0]).toBe("open");
+    expect(f.steps.slice(0, 3)).toEqual(["open", "list", "delete"]);
     expect(f.objects.toSorted()).toEqual(["p1", "p2", "p3"]);
     expect(f.rows.size).toBe(0);
   });

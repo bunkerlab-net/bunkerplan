@@ -1,9 +1,9 @@
 import type { AppAuth } from "../auth/instance.ts";
 import type { Logger } from "../log.ts";
 import type { PlanRepo, PlanStorage } from "../services/types.ts";
+import { sweepOrphanedObject } from "./orphan-sweep.ts";
 import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";
-import { sweepOrphanedObject } from "./store-plan.ts";
 
 /**
  * Object first, row second - the mirror of the upload path.

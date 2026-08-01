@@ -7,14 +7,14 @@ import type {
   PlanStorage,
   RateLimitRepo,
 } from "../services/types.ts";
+import { sweepOrphanedObject } from "./orphan-sweep.ts";
 import { planUrl } from "./plan-url.ts";
 import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";
-import { sweepOrphanedObject } from "./store-plan.ts";
 import { readUploadBody } from "./upload-body.ts";
 import { checkUploadRate } from "./upload-rate-limit.ts";
 
-/** Eight things, so they arrive named - as `CreatePlanDeps` does next door. */
+/** Six things, so they arrive named - as `CreatePlanDeps` does next door. */
 export interface ReplacePlanDeps {
   auth: AppAuth;
   config: Pick<
