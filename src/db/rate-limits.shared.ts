@@ -126,22 +126,44 @@ export function createRateLimitRepo(
 }
 
 /**
+ * Closed windows one sweep will remove.
+ *
+ * The prune runs on the request path, and this table is the one an anonymous
+ * caller can grow: its key is a digest of a client address, so a flood from
+ * many addresses leaves a row each. Unbounded, a single redemption that
+ * happened to draw the sweep would pay for every row that ever accumulated -
+ * a statement long enough to trip the Postgres `statement_timeout` or a D1
+ * query limit, and a sweep that throws is a sweep that never gets further,
+ * so the backlog it choked on would grow forever.
+ *
+ * Bounded, one redemption pays for at most this many deletions and the
+ * backlog drains over the sweeps that follow. Nothing waits on it: a closed
+ * window can only ever be reset, never refused, so a row left for the next
+ * sweep changes no decision.
+ */
+const UNLOCK_SWEEP_BATCH = 500;
+
+/** What the pruning tests inject; a deployment takes both defaults. */
+export interface UnlockSweepOptions {
+  /** Injected so a test can ask for a sweep instead of rolling dice for one. */
+  shouldSweep?: () => boolean;
+  batch?: number;
+}
+
+/**
  * The unlock bucket, which prunes itself.
  *
  * `upload_rate_limit` needs no sweep: its key cascades from `user`, so a
  * counter goes when its account does. This table's key is a digest of a client
  * address, with nothing to cascade from, so an unauthenticated caller could
- * otherwise plant a row per address for good. A closed window can only ever be
- * reset, never refused, so deleting one never changes a decision.
- *
- * `shouldSweep` is injected so the pruning test can ask for one instead of
- * rolling dice until it gets one.
+ * otherwise plant a row per address for good.
  */
 export function createUnlockRateLimitRepo(
   dialect: Dialect,
   logger: Pick<Logger, "warn">,
-  shouldSweep: () => boolean = sometimes,
+  options: UnlockSweepOptions = {},
 ): RateLimitRepo {
+  const { shouldSweep = sometimes, batch = UNLOCK_SWEEP_BATCH } = options;
   const unlock = dialect.tables.unlockRateLimit;
   const counter = createRateLimitRepo(dialect, unlock);
   return {
@@ -153,9 +175,22 @@ export function createUnlockRateLimitRepo(
       // the consume below, which is the call that has to be right.
       if (shouldSweep()) {
         try {
+          // `key in (select ... limit)` rather than `delete ... limit`, which
+          // Postgres does not have at all. Both engines take this form, and
+          // `key` is the primary key, so the inner select reads the
+          // `window_start` index and the delete matches on the key.
+          //
+          // `order by window_start` takes the oldest first, so a backlog
+          // drains in the order it accumulated rather than the sweep circling
+          // whatever the planner happened to return.
           await dialect.run(sql`
             delete from ${unlock}
-            where window_start <= ${Date.now() - windowSeconds * 1000}
+            where "key" in (
+              select "key" from ${unlock}
+              where window_start <= ${Date.now() - windowSeconds * 1000}
+              order by window_start
+              limit ${batch}
+            )
           `);
         } catch (cause) {
           logger.warn({ err: cause }, "unlock rate-limit sweep failed");

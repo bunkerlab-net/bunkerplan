@@ -125,6 +125,12 @@ export interface DbFixture {
   rateLimits: RateLimitRepo;
   /** The unlock bucket, whose key is a client address rather than a user id. */
   unlockRateLimits: RateLimitRepo;
+  /**
+   * The same bucket with the sweep bounded to one row, so the batching is
+   * assertable without seeding a production-sized backlog against three real
+   * servers. Always sweeps, as `unlockRateLimits` does.
+   */
+  unlockRateLimitsOneAtATime: RateLimitRepo;
   accountClosing: AccountClosingRepo;
   /**
    * Creates a `user` row and returns its id; every repo needs one for the FK.
@@ -142,8 +148,8 @@ export interface DbFixture {
   rateWindowStart(key: string): Promise<number>;
   /** Ages an unlock counter's window, so rollover needs no waiting. */
   backdateUnlockWindow(key: string, epochMs: number): Promise<void>;
-  /** Every unlock row, to prove a closed window is actually swept. */
-  countUnlockRows(): Promise<number>;
+  /** Unlock rows, all of them or the one a key names. */
+  countUnlockRows(key?: string): Promise<number>;
   countPlans(userId: string): Promise<number>;
   countRateLimits(key: string): Promise<number>;
   countAccountClosings(userId: string): Promise<number>;
@@ -320,21 +326,28 @@ function repos(
   dialect: Dialect,
 ): Pick<
   DbFixture,
-  "plans" | "rateLimits" | "unlockRateLimits" | "accountClosing"
+  | "plans"
+  | "rateLimits"
+  | "unlockRateLimits"
+  | "unlockRateLimitsOneAtATime"
+  | "accountClosing"
 > {
   // The production wiring, so the contract suites exercise the repositories a
   // deployment gets rather than a second set assembled here. `rateLimits` is
-  // the fixture's name for the upload bucket, and the unlock one is rebuilt to
-  // sweep every time: the pruning contract asserts a closed window is gone,
+  // the fixture's name for the upload bucket, and the unlock ones are rebuilt
+  // to sweep every time: the pruning contract asserts a closed window is gone,
   // and the default fires on a fraction of attempts.
   const wired = createDialectRepos(dialect, silentLogger);
   return {
     plans: wired.plans,
     rateLimits: wired.uploadRateLimits,
-    unlockRateLimits: createUnlockRateLimitRepo(
+    unlockRateLimits: createUnlockRateLimitRepo(dialect, silentLogger, {
+      shouldSweep: () => true,
+    }),
+    unlockRateLimitsOneAtATime: createUnlockRateLimitRepo(
       dialect,
       silentLogger,
-      () => true,
+      { shouldSweep: () => true, batch: 1 },
     ),
     accountClosing: wired.accountClosing,
   };
@@ -433,8 +446,12 @@ function dbFixture(
         sql`update unlock_rate_limit set window_start = ${epochMs} where key = ${key}`,
       );
     },
-    countUnlockRows: () =>
-      exec.count(sql`select count(*) as v from unlock_rate_limit`),
+    countUnlockRows: (key) =>
+      exec.count(
+        key === undefined
+          ? sql`select count(*) as v from unlock_rate_limit`
+          : sql`select count(*) as v from unlock_rate_limit where key = ${key}`,
+      ),
     countAccountClosings: (userId) =>
       exec.count(
         sql`select count(*) as v from account_closing where user_id = ${userId}`,

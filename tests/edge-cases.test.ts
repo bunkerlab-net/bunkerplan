@@ -587,7 +587,7 @@ describe("the unlock bucket's opportunistic prune", () => {
         throw new Error("database is locked");
       }),
       logger,
-      () => true,
+      { shouldSweep: () => true },
     );
 
     expect(await repo.consume("addr", 3, 60)).toEqual({
@@ -607,7 +607,7 @@ describe("the unlock bucket's opportunistic prune", () => {
     const repo = createUnlockRateLimitRepo(
       dialect(async () => {}),
       logger,
-      () => true,
+      { shouldSweep: () => true },
     );
 
     expect((await repo.consume("addr", 3, 60)).allowed).toBe(true);

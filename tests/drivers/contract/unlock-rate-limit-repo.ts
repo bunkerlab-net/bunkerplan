@@ -89,5 +89,49 @@ export function describeUnlockRateLimitRepo(
       expect(after).toBe(before);
       expect(await fixture.countUnlockRows()).toBeGreaterThan(0);
     });
+
+    /**
+     * The sweep is bounded, and this is the table that makes that matter: its
+     * key is a digest of a client address and nothing owns it, so a flood from
+     * many addresses leaves a row each. An unbounded prune would hand the one
+     * redemption that drew the sweep a delete over every row that ever
+     * accumulated - long enough to trip a statement timeout or a D1 query
+     * limit, and a sweep that throws is one that never gets further, so the
+     * backlog it choked on would only grow.
+     *
+     * Run at a batch of one, because the real ceiling is 500 and seeding that
+     * against three servers would prove the same thing slowly.
+     */
+    test("removes at most one batch per redemption, and drains", async () => {
+      const bounded = fixture.unlockRateLimitsOneAtATime;
+      const closed = ["198.51.100.201", "198.51.100.202", "198.51.100.203"];
+      const stale = Date.now() - (WINDOW + 1) * 1_000;
+      // Every row first, then aged. Interleaved, each `consume` would sweep
+      // the one aged just before it and the backlog would never reach three.
+      for (const address of closed) {
+        await bounded.consume(address, MAX, WINDOW);
+      }
+      for (const address of closed) {
+        await fixture.backdateUnlockWindow(address, stale);
+      }
+
+      const before = await fixture.countUnlockRows();
+
+      // Each redemption adds its own fresh row and takes exactly one closed
+      // one, so the total holds. A sweep that took the lot would drop it to
+      // `before - closed.length + 1` on the first call and leave it there.
+      await bounded.consume("198.51.100.210", MAX, WINDOW);
+      expect(await fixture.countUnlockRows()).toBe(before);
+
+      await bounded.consume("198.51.100.211", MAX, WINDOW);
+      expect(await fixture.countUnlockRows()).toBe(before);
+
+      // And the backlog is gone rather than circled: three closed rows, three
+      // sweeps that each took the oldest.
+      await bounded.consume("198.51.100.212", MAX, WINDOW);
+      for (const address of closed) {
+        expect(await fixture.countUnlockRows(address)).toBe(0);
+      }
+    });
   });
 }
