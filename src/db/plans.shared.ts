@@ -216,9 +216,14 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
     async listByUser(userId, limit) {
       /*
        * `exists`, not a join or a count: a plan shared with forty accounts must
-       * not multiply its own row, and the column renders one word. Postgres
-       * answers this as a boolean and SQLite as 0/1, so the mapping below reads
-       * both the same way rather than trusting the driver.
+       * not multiply its own row, and the column renders one word.
+       *
+       * Projected as 0/1 through `case when`, rather than letting each engine
+       * hand back its own idea of a boolean. Postgres answers `true`/`false`
+       * and SQLite 0/1, and `Boolean()` over both only works while the driver
+       * keeps parsing them - a `"f"` arriving as a string would read as true,
+       * which is the wrong answer in the safe-looking direction. One integer
+       * from both, compared as one.
        *
        * Indexed: `plan_grant`'s primary key is `(plan_id, user_id)` in both
        * dialects, so this reads a prefix rather than scanning - and
@@ -243,15 +248,16 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
         size: number;
         created_at: unknown;
         visibility: PlanVisibility;
-        has_share_code: unknown;
-        has_grants: unknown;
+        has_share_code: number | string;
+        has_grants: number | string;
       }>(sql`
         select p.id as id, p.label as label, p.size as size,
                p.created_at as created_at, p.visibility as visibility,
-               (p.share_code_hash is not null) as has_share_code,
-               exists (
+               case when p.share_code_hash is not null then 1 else 0 end
+                 as has_share_code,
+               case when exists (
                  select 1 from ${planGrant} g where g.plan_id = p.id
-               ) as has_grants
+               ) then 1 else 0 end as has_grants
         from ${plan} p
         where p.user_id = ${userId}
         order by p.created_at desc, p.id desc
@@ -266,8 +272,8 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
         // Answered in SQL, so the hash is never read into this process at all.
         // The dashboard needs to know a code exists, and the value is what
         // would let a holder forge the plan's unlock cookie.
-        hasShareCode: Boolean(row.has_share_code),
-        hasGrants: Boolean(row.has_grants),
+        hasShareCode: Number(row.has_share_code) === 1,
+        hasGrants: Number(row.has_grants) === 1,
       }));
     },
 

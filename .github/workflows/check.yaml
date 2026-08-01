@@ -85,6 +85,12 @@ jobs:
       # a self-hoster gets. Started here the argument is just an argument, and
       # local and CI exercise the same MinIO.
       #
+      # Pinned by release tag, not by digest. That is a repository-wide
+      # decision rather than an oversight here: every image reference in this
+      # project names a version and none names a `sha256:`, because a digest
+      # has to be re-resolved by hand on every bump. Keep this reference and
+      # docker-compose.yml's on the same release.
+      #
       # Credentials are inherited by name rather than written into the command,
       # where they would reach the run log. The bucket is not created:
       # tests/drivers/backends.ts makes its own per run and drops it.

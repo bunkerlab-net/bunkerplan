@@ -369,11 +369,11 @@ interface Exec {
 }
 
 /**
- * The three places the helper SQL genuinely cannot be shared.
+ * The four places the helper SQL genuinely cannot be shared.
  *
  * Everything else below is one statement for both servers. Keeping the
- * differences to a named list is what makes it obvious that there are only
- * three, rather than leaving two 15-method bodies to be diffed by eye.
+ * differences to a named list is what makes it obvious how few there are,
+ * rather than leaving two 15-method bodies to be diffed by eye.
  */
 interface Fragments {
   /** `user` is reserved in Postgres and must be quoted; SQLite must not. */

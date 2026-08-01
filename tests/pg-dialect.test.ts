@@ -104,16 +104,35 @@ describe("the Postgres claim", () => {
 });
 
 /**
- * The one Postgres failure the layers above are allowed to know about.
+ * Which Postgres failures the layers above are allowed to retry on.
  *
- * Waiting for the claim's advisory lock is a statement, so a deep enough queue
- * ends at `statement_timeout` rather than in a hang. Nothing was claimed and
- * the transaction rolled back, so the caller should be told to come back -
- * which the HTTP layer can only do if it is told which failure this was, and
- * it cannot read a SQLSTATE without `pg` in the Workers bundle.
+ * Only the two that are known to have left nothing behind, and the position
+ * matters as much as the code: `statement_timeout` stays armed through the
+ * transaction commands, so a `57014` seen from outside `db.transaction` may
+ * have landed on the `COMMIT` and the outcome is then unknown. It is caught
+ * around the advisory-lock wait alone, where nothing has been written yet.
  */
 describe("a claim that runs out of time", () => {
-  function failingDb(cause: unknown): PgDb {
+  const CANCELLED = Object.assign(
+    new Error("canceling statement due to statement timeout"),
+    { code: "57014" },
+  );
+
+  /** Throws from the lock statement, which is the first `tx.execute`. */
+  function lockFails(cause: unknown): PgDb {
+    return {
+      execute: async () => ({ rows: [] }),
+      transaction: async (body: (tx: unknown) => Promise<unknown>) =>
+        await body({
+          execute: async () => {
+            throw cause;
+          },
+        }),
+    } as unknown as PgDb;
+  }
+
+  /** Throws where the transaction itself does - acquisition, or the commit. */
+  function transactionFails(cause: unknown): PgDb {
     return {
       execute: async () => ({ rows: [] }),
       transaction: async () => {
@@ -122,28 +141,41 @@ describe("a claim that runs out of time", () => {
     } as unknown as PgDb;
   }
 
-  const claim = (cause: unknown) =>
-    pgDialect(failingDb(cause)).claim("user-a", async () => null);
+  const claim = (db: PgDb) => pgDialect(db).claim("user-a", async () => null);
 
-  test("translates the server cancelling its own statement", async () => {
-    // SQLSTATE 57014, `query_canceled`, which is what `statement_timeout`
-    // raises. The server answered, so the statement provably did not run and
-    // its transaction is aborted - the one failure a retry is safe after.
-    const cancelled = Object.assign(
-      new Error("canceling statement due to statement timeout"),
-      { code: "57014" },
+  test("translates the lock wait being cancelled", async () => {
+    // The queue this models: the lock is the first statement, so nothing was
+    // written before it was cut short, and drizzle rolls back on the way out.
+    await expect(claim(lockFails(CANCELLED))).rejects.toBeInstanceOf(
+      DatabaseUnavailable,
     );
+  });
 
-    await expect(claim(cancelled)).rejects.toBeInstanceOf(DatabaseUnavailable);
+  test("leaves a cancellation it cannot place alone", async () => {
+    // The same code, thrown where `db.transaction` itself throws. That may be
+    // the `COMMIT` being cancelled, and whether the transaction committed is
+    // then unknown - the one thing a retryable answer may not be unsure of.
+    await expect(claim(transactionFails(CANCELLED))).rejects.not.toBeInstanceOf(
+      DatabaseUnavailable,
+    );
+  });
+
+  test("translates the pool refusing to hand out a client", async () => {
+    // `connectionTimeoutMillis`, raised by `pg`'s own pool before a
+    // transaction exists. The cleanest of them: no statement was ever sent.
+    await expect(
+      claim(
+        transactionFails(new Error("timeout exceeded when trying to connect")),
+      ),
+    ).rejects.toBeInstanceOf(DatabaseUnavailable);
   });
 
   test("leaves a client-side deadline alone", async () => {
-    // `pg`'s own `query_timeout` never reached the server, so whether the
-    // statement ran is unknown - it may still be running, and on a `COMMIT` it
-    // may yet commit. Nothing may call that retryable. src/db/postgres.ts sets
-    // it past the server's deadline precisely so this is the unusual case.
+    // `pg`'s own `query_timeout` never reached the server, so the statement
+    // may still be running. src/db/postgres.ts sets it past the server's
+    // deadline precisely so this is the unusual case.
     await expect(
-      claim(new Error("Query read timeout")),
+      claim(lockFails(new Error("Query read timeout"))),
     ).rejects.not.toBeInstanceOf(DatabaseUnavailable);
   });
 
@@ -154,8 +186,10 @@ describe("a claim that runs out of time", () => {
       code: "23505",
     });
 
-    await expect(claim(violation)).rejects.toThrow("duplicate key value");
-    await expect(claim(violation)).rejects.not.toBeInstanceOf(
+    await expect(claim(lockFails(violation))).rejects.toThrow(
+      "duplicate key value",
+    );
+    await expect(claim(lockFails(violation))).rejects.not.toBeInstanceOf(
       DatabaseUnavailable,
     );
   });

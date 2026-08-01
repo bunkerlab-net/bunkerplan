@@ -127,8 +127,11 @@ export function describeUnlockRateLimitRepo(
       expect(await fixture.countUnlockRows()).toBe(before);
 
       // And the backlog is gone rather than circled: three closed rows, three
-      // sweeps that each took the oldest.
+      // sweeps that each took the oldest. The total holds here as well, which
+      // is what says the third sweep took the last closed row rather than
+      // finding nothing and letting its own row grow the table.
       await bounded.consume("198.51.100.212", MAX, WINDOW);
+      expect(await fixture.countUnlockRows()).toBe(before);
       for (const address of closed) {
         expect(await fixture.countUnlockRows(address)).toBe(0);
       }

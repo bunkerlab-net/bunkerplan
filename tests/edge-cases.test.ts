@@ -26,6 +26,7 @@ import {
   CONFIG,
   html,
   memoryStorage,
+  openAccounts,
   openRateLimits,
   PUBLIC_BASE_URL,
   upload,
@@ -206,7 +207,7 @@ describe("replacing a plan whose row vanishes underneath", () => {
     config: CONFIG,
     plans,
     uploadRateLimits: openRateLimits,
-    accountClosing: { open: async () => {}, isOpen: async () => false },
+    accountClosing: openAccounts,
     storage,
   });
 

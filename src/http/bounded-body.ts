@@ -79,7 +79,14 @@ export async function readJsonBody(
   }
 
   try {
-    return { ok: true, body: JSON.parse(new TextDecoder().decode(encoded)) };
+    // `fatal`, so a malformed byte sequence throws here rather than being
+    // replaced with U+FFFD and parsed. Silently substituting is the worse
+    // ending: a bad byte inside a JSON string leaves the parse succeeding and
+    // stores the replacement character, so a label arrives subtly corrupted
+    // instead of being refused. Both paths answer 400 - this decides which
+    // inputs reach it.
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(encoded);
+    return { ok: true, body: JSON.parse(text) };
   } catch {
     return { ok: false, response: problem(400, "body must be JSON") };
   }

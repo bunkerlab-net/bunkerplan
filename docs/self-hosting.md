@@ -93,14 +93,17 @@ Auth performs around them. It is not a universal figure: Workers Free allows
 50 subrequests per invocation, where an account of more than about twenty
 plans cannot be deleted in one attempt whatever this is set to.
 
-That is survivable rather than fatal. An account too large for one invocation -
-because the plan is Free, or because the account grew under an older, higher
-setting - is still deletable. Retry the deletion: whichever limit stops it, our
-own or the platform's, the deletion is aborted rather than half-applied, and
-every plan the attempt removed stays removed. On Paid the refusal says so; on
-Free the platform ends the invocation first and the error is its own, so the
-symptom is a delete that fails and then succeeds after enough attempts.
-Self-hosted there is no per-request budget and no ceiling.
+That is survivable rather than fatal, though not atomic. An account too large
+for one invocation - because the plan is Free, or because the account grew
+under an older, higher setting - is still deletable by repeating the delete.
+What each attempt does is remove as many plans as it can and then fail: those
+plans are gone for good, objects and rows both, and the account itself is
+untouched because the failure aborts the deletion before Better Auth removes
+anything. So a retry has less to do than the attempt before it, and enough
+retries finish. On Paid the refusal says so; on Free the platform ends the
+invocation first and the error is its own, so the symptom is a delete that
+fails and then succeeds after enough attempts. Self-hosted there is no
+per-request budget and no ceiling.
 
 ## Swap matrices
 

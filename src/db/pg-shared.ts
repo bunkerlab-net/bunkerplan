@@ -5,7 +5,11 @@ import * as accountClosingSchema from "./schema/account-closing.pg.ts";
 import * as authSchema from "./schema/auth.pg.ts";
 import * as planSchema from "./schema/plan.pg.ts";
 import * as rateLimitSchema from "./schema/rate-limit.pg.ts";
-import { DatabaseUnavailable, isTimeout } from "./unavailable.ts";
+import {
+  DatabaseUnavailable,
+  isPoolTimeout,
+  isStatementCancelled,
+} from "./unavailable.ts";
 
 export const pgSchema = {
   ...authSchema,
@@ -72,27 +76,49 @@ function pgExecutor(handle: Pick<PgDb, "execute">): SqlExecutor {
  *
  * Waiting for that lock is itself a statement, so `statement_timeout` bounds
  * it and a queue deep enough ends in a cancellation rather than a hang. That
- * is the one failure worth naming: the transaction rolled back, nothing was
- * claimed and nothing was written, so the caller should be told to come back
- * rather than told something broke. Translated here because this is the last
- * place that knows it is Postgres - `pg` must not be reachable from the
- * handler that answers.
+ * is the one cancellation worth naming, and it is caught around that statement
+ * alone rather than around the whole transaction. Two reasons. A `57014`
+ * caught outside `db.transaction` may have landed on the `COMMIT` - the
+ * timeout stays armed through the transaction commands - and whether that
+ * committed is then unknown, which is the one thing a retryable answer may not
+ * be unsure about. And a cancellation from inside `body` is a different event
+ * that happens to share a code; calling it lock contention would be a guess.
+ *
+ * Thrown from inside the callback so drizzle rolls the transaction back on the
+ * way out. Nothing was claimed - the lock is the first statement, before any
+ * write - so the retry is safe on the plainest possible grounds.
+ *
+ * The pool refusing to hand out a client is the other one, and is caught
+ * outside: it happens before a transaction exists at all. Both are translated
+ * here because this is the last place that knows it is Postgres; `pg` must not
+ * be reachable from the handler that answers.
  */
 function pgClaim(db: PgDb): Dialect["claim"] {
   return async (userId, body) => {
     try {
       return await db.transaction(
         async (tx) => {
-          await tx.execute(
-            sql`select pg_advisory_xact_lock(hashtext(${userId})::bigint)`,
-          );
+          try {
+            await tx.execute(
+              sql`select pg_advisory_xact_lock(hashtext(${userId})::bigint)`,
+            );
+          } catch (cause) {
+            if (isStatementCancelled(cause)) {
+              throw new DatabaseUnavailable("waiting to claim a plan id", {
+                cause,
+              });
+            }
+            throw cause;
+          }
           return await body(pgExecutor(tx));
         },
         { isolationLevel: "read committed" },
       );
     } catch (cause) {
-      if (isTimeout(cause)) {
-        throw new DatabaseUnavailable("claiming a plan id", { cause });
+      if (isPoolTimeout(cause)) {
+        throw new DatabaseUnavailable("connecting to claim a plan id", {
+          cause,
+        });
       }
       throw cause;
     }

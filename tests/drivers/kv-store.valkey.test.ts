@@ -32,6 +32,10 @@ test.skipIf(skip)(
     // a test would put a member on the contract nothing in src/ calls.
     const client = new Redis(VALKEY_URL as string, {
       maxRetriesPerRequest: 3,
+      // Bounded like every other fixture's connect: without it an unreachable
+      // server is ioredis retrying quietly until Bun's own test deadline, which
+      // reports as a timeout rather than as "nothing is listening".
+      connectTimeout: 5_000,
     });
     const key = (name: string) => `${unique}:expiry:${name}`;
 

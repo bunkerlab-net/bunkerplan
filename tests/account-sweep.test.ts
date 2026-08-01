@@ -53,9 +53,10 @@ interface Fixture {
    */
   steps: string[];
   /**
-   * The `limit` each listing asked for. The fixture ignores it - the fake
-   * returns everything - so without recording it a sweep that paged by one
-   * would satisfy every assertion here while making 400 round trips.
+   * The `limit` each listing asked for. `memoryPlans` honours it, so a sweep
+   * that paged wrongly would still finish - just in far more round trips than
+   * the subrequest budget was sized for, which `steps` cannot show and this
+   * does.
    */
   limits: number[];
   /**
@@ -160,6 +161,12 @@ const WORKERS_SUBREQUEST_LIMIT = 1000;
 const AUTH_RESERVE = 100;
 
 /**
+ * Listings a sweep of `plans` should make: one per page, plus the empty one
+ * that ends the loop.
+ */
+const listingsFor = (plans: number) => Math.ceil(plans / PLAN_PAGE_SIZE) + 1;
+
+/**
  * The arithmetic behind `WORKERS_MAX_PLANS_PER_USER`, enforced rather than
  * described.
  *
@@ -169,10 +176,11 @@ const AUTH_RESERVE = 100;
  * looks like workerd ending the request. This is what fails first instead.
  */
 test("the sweep ceiling fits one Workers invocation", () => {
-  // A listing per page, plus the empty one that ends the loop, plus the
-  // marker; then the pair of deletes each plan costs.
-  const listings = Math.ceil(WORKERS_MAX_PLANS_PER_USER / PLAN_PAGE_SIZE) + 1;
-  const subrequests = 2 * WORKERS_MAX_PLANS_PER_USER + listings + 1;
+  // The listings, plus the marker, plus the pair of deletes each plan costs.
+  const subrequests =
+    2 * WORKERS_MAX_PLANS_PER_USER +
+    listingsFor(WORKERS_MAX_PLANS_PER_USER) +
+    1;
 
   expect(subrequests).toBeLessThanOrEqual(
     WORKERS_SUBREQUEST_LIMIT - AUTH_RESERVE,
@@ -201,11 +209,16 @@ test("a full account's sweep issues no more calls than that", async () => {
   const subrequests = f.steps.length + WORKERS_MAX_PLANS_PER_USER;
 
   expect(f.rows.size).toBe(0);
-  // The page size the sweep actually asked for, not the one the arithmetic
-  // assumed. The fake ignores `limit` and hands back everything, so a sweep
-  // that paged by one would still finish - and still pass the count above,
-  // which is exactly the drift this measurement exists to catch.
-  expect(f.limits).toEqual([PLAN_PAGE_SIZE, PLAN_PAGE_SIZE]);
+  // Both the number of listings and the size each asked for, derived from the
+  // constants rather than written out. `steps` counts the calls but says
+  // nothing about the page size, so a sweep that paged by one would make 401
+  // listings and still satisfy a count that only checked the total.
+  expect(f.limits).toEqual(
+    Array.from(
+      { length: listingsFor(WORKERS_MAX_PLANS_PER_USER) },
+      () => PLAN_PAGE_SIZE,
+    ),
+  );
   expect(subrequests).toBeLessThanOrEqual(
     WORKERS_SUBREQUEST_LIMIT - AUTH_RESERVE,
   );

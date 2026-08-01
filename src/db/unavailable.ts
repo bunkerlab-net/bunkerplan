@@ -20,27 +20,44 @@ export class DatabaseUnavailable extends Error {
 }
 
 /**
- * Whether a thrown value is the server having cancelled its own statement.
+ * `pg`'s message when `connectionTimeoutMillis` expires waiting for a client.
  *
- * SQLSTATE `57014` (`query_canceled`) and nothing else, because this decides
- * whether the caller is told to retry and only this code earns that. The
- * server raised it, which means the server is still there, the statement did
- * not run, and the transaction around it is aborted. Repeating the request is
- * safe because the first attempt provably did nothing.
- *
- * `pg`'s own `query_timeout` is deliberately not included. It fires from this
- * end without the server having answered, so what happened over there is
- * unknown - the statement may still be running, and if the deadline landed on
- * a `COMMIT` the transaction may yet commit. Nothing may promise a safe retry
- * on that. src/db/postgres.ts sets the client deadline past the server's so
- * the defined one wins the race and this is the ordinary answer; a client-side
- * timeout means the server stopped answering entirely, which is a fault
- * rather than a queue.
- *
- * Matched on the code alone, never the message. Text varies by server locale
- * and would catch unrelated failures that merely say "timeout".
+ * No SQLSTATE, because no server was involved - which is also why matching the
+ * text is tolerable here. `pg` raises it from its own pool.
  */
-export function isTimeout(cause: unknown): boolean {
+const POOL_TIMEOUT = "timeout exceeded when trying to connect";
+
+/**
+ * The pool giving up before a client was ever handed out.
+ *
+ * The cleanest failure to promise a retry on: no connection, so no statement
+ * was sent, so nothing anywhere changed.
+ */
+export function isPoolTimeout(cause: unknown): boolean {
+  return cause instanceof Error && cause.message === POOL_TIMEOUT;
+}
+
+/**
+ * The server having cancelled a statement - SQLSTATE `57014`, which is what
+ * `statement_timeout` raises.
+ *
+ * Safe to retry only where the caller knows which statement it was. That is
+ * why this is a predicate and not a translation: `statement_timeout` stays
+ * armed through the transaction commands too, so a cancellation seen from
+ * outside `db.transaction` may have landed on the `COMMIT`, and whether the
+ * transaction committed is then genuinely unknown. Callers apply this around
+ * the one statement whose cancellation they can reason about - see `pgClaim`
+ * in src/db/pg-shared.ts, which wraps the advisory-lock wait and nothing else.
+ *
+ * Matched on the code, never the message: server text varies by locale and
+ * would catch unrelated failures that merely say "timeout".
+ *
+ * `pg`'s own `query_timeout` is not this and is deliberately absent
+ * everywhere. It fires from this end without the server having answered, so
+ * the statement may still be running. src/db/postgres.ts sets that deadline
+ * past the server's so the defined one wins the race.
+ */
+export function isStatementCancelled(cause: unknown): boolean {
   return (
     typeof cause === "object" &&
     cause !== null &&

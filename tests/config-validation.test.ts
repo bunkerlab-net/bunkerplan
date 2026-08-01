@@ -171,10 +171,12 @@ describe("the drivers and their companions", () => {
   test("an unknown driver is refused and lists what is allowed", () => {
     const message = refusal({ ...SELF_HOSTED, STORAGE_DRIVER: "gcs" });
 
-    // `r2` is deliberately absent: off Workers it is not a choice, and
-    // offering it here would send an operator to a driver that refuses next.
-    expect(message).toContain("STORAGE_DRIVER must be one of: s3");
-    expect(message).toContain('got "gcs"');
+    // The whole clause including its end, not a prefix of it. `r2` is
+    // deliberately absent off Workers - it is not a choice there, and offering
+    // it would send an operator to a driver that refuses next - so a message
+    // reading "one of: s3, r2" has to fail, and it would satisfy a `toContain`
+    // that stopped at "s3".
+    expect(message).toContain('STORAGE_DRIVER must be one of: s3, got "gcs"');
   });
 
   test.each([

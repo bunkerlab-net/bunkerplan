@@ -35,9 +35,17 @@ const config = wrangler as WranglerConfig;
 describe("the deployed wrangler configuration", () => {
   test("names a real origin, not the development one", () => {
     const base = String(config.vars["PUBLIC_BASE_URL"]);
-
     expect(base).toStartWith("https://");
-    expect(new URL(base).hostname).not.toBe("localhost");
+
+    // Every spelling of "this machine", not just the word. `127.0.0.1`,
+    // `[::1]`, and the reserved `.localhost` suffix all resolve to the
+    // loopback, and any of them shipped would break WebAuthn exactly as
+    // `localhost` does - the relying-party origin has to match the browser's.
+    const { hostname } = new URL(base);
+    expect(hostname).not.toBe("localhost");
+    expect(hostname).not.toEndWith(".localhost");
+    expect(hostname).not.toBe("127.0.0.1");
+    expect(hostname).not.toBe("[::1]");
   });
 
   test("binds real D1 and KV ids, not the placeholder zeros", () => {
