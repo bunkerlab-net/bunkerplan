@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
 import pg from "pg";
 import { DATABASE_URL } from "./drivers/backends.ts";
+import { migrationFiles } from "./migration-files.ts";
 
 /**
  * What the Postgres migrations do to data that is already there.
@@ -18,22 +18,8 @@ import { DATABASE_URL } from "./drivers/backends.ts";
  * destroy it.
  */
 
-const DIR = "drizzle/pg";
 const CONNECT_TIMEOUT_MS = 5_000;
 const skip = DATABASE_URL === undefined;
-
-function migrationFiles(rewrite: (sql: string) => string) {
-  return readdirSync(DIR)
-    .filter((name) => name.endsWith(".sql"))
-    .sort()
-    .map((name) => ({
-      n: Number(name.slice(0, 4)),
-      statements: rewrite(readFileSync(`${DIR}/${name}`, "utf8"))
-        .split("--> statement-breakpoint")
-        .map((statement) => statement.trim())
-        .filter((statement) => statement !== ""),
-    }));
-}
 
 const schemas: string[] = [];
 
@@ -66,7 +52,7 @@ async function migrate(
   let seeded = false;
   // Drizzle writes explicit `"public".` on its foreign keys; redirected so
   // nothing reaches the real schema, exactly as the driver fixture does.
-  for (const { n, statements } of migrationFiles((body) =>
+  for (const { n, statements } of migrationFiles("pg", (body) =>
     body.replaceAll('"public".', `"${schema}".`),
   )) {
     if (n === seedBefore) {

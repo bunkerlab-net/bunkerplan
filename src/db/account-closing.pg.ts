@@ -1,10 +1,7 @@
 import { eq } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { AccountClosingRepo } from "../services/types.ts";
-import type { PgSchema } from "./pg-shared.ts";
+import type { PgDb } from "./pg-shared.ts";
 import { accountClosing } from "./schema/account-closing.pg.ts";
-
-type PgDb = NodePgDatabase<PgSchema>;
 
 export function createPgAccountClosingRepo(db: PgDb): AccountClosingRepo {
   return {

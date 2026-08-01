@@ -23,7 +23,6 @@
  */
 
 import { Database } from "bun:sqlite";
-import { readdirSync, readFileSync } from "node:fs";
 import {
   CreateBucketCommand,
   DeleteBucketCommand,
@@ -65,6 +64,7 @@ import type {
   RateLimitRepo,
 } from "../../src/services/types.ts";
 import { createS3Storage } from "../../src/storage/s3.ts";
+import { migrationFiles } from "../migration-files.ts";
 
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -181,18 +181,7 @@ function migrations(
   dialect: "sqlite" | "pg",
   rewrite?: (sql: string) => string,
 ) {
-  const dir = `${ROOT}/drizzle/${dialect}`;
-  const statements: string[] = [];
-  for (const file of readdirSync(dir).sort()) {
-    if (!file.endsWith(".sql")) continue;
-    const body = readFileSync(`${dir}/${file}`, "utf8");
-    for (const statement of (rewrite === undefined ? body : rewrite(body))
-      .split("--> statement-breakpoint")
-      .map((part) => part.trim())) {
-      if (statement !== "") statements.push(statement);
-    }
-  }
-  return statements;
+  return migrationFiles(dialect, rewrite).flatMap((file) => file.statements);
 }
 
 // ---------------------------------------------------------------------------

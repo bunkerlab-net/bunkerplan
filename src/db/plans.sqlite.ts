@@ -1,5 +1,4 @@
 import { and, count, desc, eq, type SQL, sql } from "drizzle-orm";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { handleEmail } from "../ids.ts";
 import type {
   PlanInsert,
@@ -8,14 +7,7 @@ import type {
 } from "../services/types.ts";
 import { user } from "./schema/auth.sqlite.ts";
 import { plan, planGrant } from "./schema/plan.sqlite.ts";
-import type { SqliteSchema } from "./sqlite-shared.ts";
-
-/**
- * Both the D1 and bun:sqlite drizzle instances extend BaseSQLiteDatabase; the
- * only difference that matters here is sync vs async result kind, and every
- * query builder below is awaited, which works for both.
- */
-type SqliteDb = BaseSQLiteDatabase<"sync" | "async", unknown, SqliteSchema>;
+import type { SqliteDb } from "./sqlite-shared.ts";
 
 /** False means no row matched: unknown id, or one owned by somebody else. */
 async function updateOwned(
