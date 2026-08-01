@@ -74,9 +74,8 @@ const read = (name: string) => process.env[name]?.trim() || undefined;
 export const DATABASE_URL = read("TEST_DATABASE_URL");
 export const VALKEY_URL = read("TEST_VALKEY_URL");
 export const S3_ENDPOINT = read("TEST_S3_ENDPOINT");
-const S3_ACCESS_KEY_ID = read("TEST_S3_ACCESS_KEY_ID") ?? "bunkerplan";
-const S3_SECRET_ACCESS_KEY =
-  read("TEST_S3_SECRET_ACCESS_KEY") ?? "bunkerplan-secret";
+const S3_ACCESS_KEY_ID = read("TEST_S3_ACCESS_KEY_ID") ?? "minioadmin";
+const S3_SECRET_ACCESS_KEY = read("TEST_S3_SECRET_ACCESS_KEY") ?? "minioadmin";
 
 const PG_CONNECT_TIMEOUT_MS = 5_000;
 
