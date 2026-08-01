@@ -93,10 +93,7 @@ function registerPlanItem(app: Hono, getServices: GetServices): void {
   app.delete("/api/plans/:id", async (c) => {
     const { auth, db, logger, storage } = await getServices();
     return await deletePlan(
-      auth,
-      storage,
-      db.plans,
-      logger,
+      { auth, storage, plans: db.plans, logger },
       c.req.raw,
       c.req.param("id"),
     );

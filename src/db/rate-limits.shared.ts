@@ -102,10 +102,14 @@ async function consumeOne(
  * One implementation for both counter tables: the decision is identical, only
  * the bucket differs. `unlock_rate_limit` is structurally the same table
  * without the user cascade.
+ *
+ * `counter` is required rather than defaulted to the upload bucket: a factory
+ * that picks a table when the caller says nothing would let a new bucket share
+ * the upload counter silently, and the two decide different limits.
  */
 export function createRateLimitRepo(
   dialect: Dialect,
-  counter: SQLWrapper = dialect.tables.uploadRateLimit,
+  counter: SQLWrapper,
 ): RateLimitRepo {
   return {
     consume: (key, max, windowSeconds) =>

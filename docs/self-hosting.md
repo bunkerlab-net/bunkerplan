@@ -58,7 +58,7 @@ These names are the API. They are not renamed across releases.
 | `RP_NAME`                | no              | `BunkerPlan`                  | shown in the passkey prompt                                              |
 | `CLIENT_IP_HEADER`       | **off Workers** | `cf-connecting-ip` on Workers | single header your proxy **overwrites** with the client IP               |
 | `MAX_UPLOAD_BYTES`       | no              | `2097152` (2 MiB)             |                                                                          |
-| `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`   |
+| `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`; max `400` on Workers |
 | `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
 | `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | minimum 60; a shorter window multiplies the sustained rate               |
 | `UNLOCK_RATE_MAX`        | no              | `30`                          | share-code redemptions per window per client address                     |
@@ -83,6 +83,14 @@ These names are the API. They are not renamed across releases.
 
 A misconfigured deployment fails at boot with every problem listed at once, not
 on the first request.
+
+`MAX_PLANS_PER_USER` is the one limit whose ceiling depends on the runtime. On
+Workers it is refused above 400: deleting an account removes its objects one at
+a time before the database cascades the rows, and each plan spends two of the
+1000 subrequests an invocation may make. An account that grew past that under
+an older setting is still deletable - the sweep stops at the budget and asks to
+be retried, and every plan it removed stays removed - but it takes one attempt
+per 400 plans. Self-hosted there is no per-request budget and no ceiling.
 
 ## Swap matrices
 

@@ -154,7 +154,10 @@ export function createPostgresDb(
     adapter: db,
     provider: "pg",
     plans: createPlanRepo(dialect),
-    uploadRateLimits: createRateLimitRepo(dialect),
+    uploadRateLimits: createRateLimitRepo(
+      dialect,
+      dialect.tables.uploadRateLimit,
+    ),
     unlockRateLimits: createUnlockRateLimitRepo(dialect),
     accountClosing: createAccountClosingRepo(dialect),
     probe: (signal) => probeOnce(pool, signal),

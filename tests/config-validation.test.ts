@@ -301,6 +301,26 @@ describe("integer settings", () => {
     );
   });
 
+  /**
+   * The one ceiling that depends on the runtime. Deleting an account sweeps
+   * its objects one at a time inside one invocation, and on Workers that
+   * invocation has a subrequest budget - so a quota above what the sweep can
+   * finish is refused at boot rather than discovered by an account that
+   * cannot be deleted. Self-hosted there is no budget and no ceiling.
+   */
+  test("the plan quota is capped on Workers", () => {
+    expect(refusal({ ...REQUIRED, MAX_PLANS_PER_USER: "401" }, true)).toContain(
+      'MAX_PLANS_PER_USER must be an integer between 1 and 400, got "401"',
+    );
+  });
+
+  test("and uncapped off Workers, where nothing counts the calls", () => {
+    expect(
+      loadConfig({ ...SELF_HOSTED, MAX_PLANS_PER_USER: "5000" } as never, {})
+        .maxPlansPerUser,
+    ).toBe(5000);
+  });
+
   test("the unlock window has no such floor", () => {
     const config = loadConfig(
       { ...SELF_HOSTED, UNLOCK_RATE_WINDOW_SEC: "1" } as never,

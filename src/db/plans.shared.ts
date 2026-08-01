@@ -196,6 +196,11 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
        * tests/schema-shape.test.ts pins that order, because a key declared the
        * other way round would still be unique and would turn every row of the
        * dashboard into a scan.
+       *
+       * Every column carries an explicit alias. The row type below is keyed
+       * by result name, and an unaliased `p.created_at` leaves that name to
+       * the driver - `findOwner` a few lines down already relies on aliasing
+       * for exactly this reason.
        */
       const rows = await dialect.rows<{
         id: string;
@@ -206,8 +211,9 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
         share_code_hash: string | null;
         has_grants: unknown;
       }>(sql`
-        select p.id, p.label, p.size, p.created_at, p.visibility,
-               p.share_code_hash,
+        select p.id as id, p.label as label, p.size as size,
+               p.created_at as created_at, p.visibility as visibility,
+               p.share_code_hash as share_code_hash,
                exists (
                  select 1 from ${planGrant} g where g.plan_id = p.id
                ) as has_grants

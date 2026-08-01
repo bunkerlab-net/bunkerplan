@@ -124,10 +124,13 @@ export type MemoryPlans = PlanRepo & { rows: Map<string, StoredPlan> };
 /**
  * A `PlanRepo` over a Map.
  *
- * Real enough that ownership, the quota, and the "a public plan never carries
- * a code" invariant behave the way the SQL does - a handler that skips an
- * ownership check fails here, rather than passing against a stub that answers
- * yes to everything.
+ * Real enough that ownership, the quota, and the rule that a *new* share code
+ * requires a private plan behave the way the SQL does - a handler that skips
+ * an ownership check fails here, rather than passing against a stub that
+ * answers yes to everything. A visibility flip is deliberately not one of
+ * those rules: `setVisibility` in src/db/plans.shared.ts leaves the hash
+ * alone in both directions, so a public plan can carry a code it was minted
+ * before the flip, and this keeps one too.
  *
  * `handles` maps a public handle to the account it names, which is the lookup
  * `grantByHandle` does against the `user` table. An empty map therefore means

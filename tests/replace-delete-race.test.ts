@@ -79,10 +79,7 @@ describe("a replacement racing a delete", () => {
     // object, so the replacement's ownership check and its own row update both
     // pass against a row that is about to disappear.
     const deleting = deletePlan(
-      auth,
-      storage,
-      plans,
-      silentLogger,
+      { auth, storage, plans, logger: silentLogger },
       new Request(`https://example.test/api/plans/${ID}`, { method: "DELETE" }),
       ID,
     );

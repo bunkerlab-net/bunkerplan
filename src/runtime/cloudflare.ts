@@ -3,6 +3,7 @@ import { createAuth } from "../auth/instance.ts";
 import { loadConfig } from "../config.ts";
 import { createD1Db } from "../db/d1.ts";
 import { createWorkersKv } from "../kv/workers-kv.ts";
+import { WORKERS_MAX_PLANS_PER_USER } from "../limits.ts";
 import { createLogger } from "../log.ts";
 import type { Services } from "../services/context.ts";
 import type { RuntimeTarget } from "../services/types.ts";
@@ -50,7 +51,19 @@ async function initialise(): Promise<Services> {
   const db = createD1Db(env.DB);
   const kv = createWorkersKv(env.KV);
   const storage = createR2Storage(env.BUCKET);
-  const auth = createAuth({ config, db, kv, storage, logger });
+  // The one place the subrequest budget is known. `MAX_PLANS_PER_USER` is
+  // refused above the same ceiling here (src/config.ts), so this only ever
+  // fires for an account grown under an older, higher quota - and then it
+  // stops the sweep with a message saying to retry, rather than letting
+  // workerd end the request with "Too many subrequests".
+  const auth = createAuth({
+    config,
+    db,
+    kv,
+    storage,
+    logger,
+    maxSweepAttempts: WORKERS_MAX_PLANS_PER_USER,
+  });
 
   return await Promise.resolve({ config, auth, logger, storage, kv, db });
 }

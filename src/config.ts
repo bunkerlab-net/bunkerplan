@@ -6,6 +6,8 @@
  * container fails loudly at boot instead of on the first request.
  */
 
+import { WORKERS_MAX_PLANS_PER_USER } from "./limits.ts";
+
 export type StorageDriver = "r2" | "s3";
 export type DbDriver = "d1" | "sqlite" | "postgres";
 export type KvDriver = "kv" | "valkey";
@@ -78,6 +80,7 @@ export interface LoadConfigOptions {
 /** Values are whatever the runtime supplies; `str` coerces them to text. */
 type Env = Record<string, unknown>;
 
+const DEFAULT_MAX_PLANS_PER_USER = 250;
 const MIN_SECRET_LENGTH = 32;
 /**
  * Floor on `UPLOAD_RATE_WINDOW_SEC`. A policy floor, not a platform one: the
@@ -372,7 +375,7 @@ interface Limits {
   unlockRateWindowSec: number;
 }
 
-function parseLimits(env: Env, problems: string[]): Limits {
+function parseLimits(env: Env, workers: boolean, problems: string[]): Limits {
   return {
     maxUploadBytes: int(
       env,
@@ -397,7 +400,32 @@ function parseLimits(env: Env, problems: string[]): Limits {
       problems,
       MAX_SHARE_CODE_LENGTH,
     ),
-    maxPlansPerUser: int(env, "MAX_PLANS_PER_USER", 250, 1, problems),
+    // Capped on Workers, where an account that outgrows one invocation's
+    // subrequest budget is an account whose deletion cannot finish in one
+    // attempt - see WORKERS_MAX_PLANS_PER_USER.
+    maxPlansPerUser: int(
+      env,
+      "MAX_PLANS_PER_USER",
+      DEFAULT_MAX_PLANS_PER_USER,
+      1,
+      problems,
+      workers ? WORKERS_MAX_PLANS_PER_USER : undefined,
+    ),
+    ...parseRateLimits(env, problems),
+  };
+}
+
+/** The two counters: how much each allows, and over how long. */
+type RateLimits = Pick<
+  Limits,
+  | "uploadRateMax"
+  | "uploadRateWindowSec"
+  | "unlockRateMax"
+  | "unlockRateWindowSec"
+>;
+
+function parseRateLimits(env: Env, problems: string[]): RateLimits {
+  return {
     uploadRateMax: int(env, "UPLOAD_RATE_MAX", 30, 1, problems),
     uploadRateWindowSec: int(
       env,
@@ -469,7 +497,7 @@ export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
 
   const drivers = parseDrivers(env, workers, problems);
 
-  const limits = parseLimits(env, problems);
+  const limits = parseLimits(env, workers, problems);
   const s3ForcePathStyle = bool(env, "S3_FORCE_PATH_STYLE", true, problems);
   const logging = parseLogging(env, problems);
   const rpId = str(env, "RP_ID") ?? baseHostname;

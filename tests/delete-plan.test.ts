@@ -82,10 +82,7 @@ describe("deletePlan", () => {
   test("removes the object and the row, then sweeps and 204s", async () => {
     const { auth, storage, plans, deleted } = fakes();
     const response = await deletePlan(
-      auth,
-      storage,
-      plans,
-      silentLogger,
+      { auth, storage, plans, logger: silentLogger },
       del(),
       ID,
     );
@@ -100,10 +97,7 @@ describe("deletePlan", () => {
   test("still 204s when the closing sweep fails", async () => {
     const { auth, storage, plans, deleted } = fakes({ sweepFails: true });
     const response = await deletePlan(
-      auth,
-      storage,
-      plans,
-      silentLogger,
+      { auth, storage, plans, logger: silentLogger },
       del(),
       ID,
     );
@@ -114,10 +108,7 @@ describe("deletePlan", () => {
   test("404s for another account's plan without touching storage", async () => {
     const { auth, storage, plans, deleted } = fakes({ caller: OTHER });
     const response = await deletePlan(
-      auth,
-      storage,
-      plans,
-      silentLogger,
+      { auth, storage, plans, logger: silentLogger },
       del(),
       ID,
     );
@@ -129,17 +120,20 @@ describe("deletePlan", () => {
   test("404s for an unknown id", async () => {
     const { auth, storage, plans } = fakes({ missing: true });
     expect(
-      (await deletePlan(auth, storage, plans, silentLogger, del(), ID)).status,
+      (
+        await deletePlan(
+          { auth, storage, plans, logger: silentLogger },
+          del(),
+          ID,
+        )
+      ).status,
     ).toBe(404);
   });
 
   test("keeps the row when the object delete fails, so a retry works", async () => {
     const { auth, storage, plans, deleted } = fakes({ storageFails: true });
     const response = await deletePlan(
-      auth,
-      storage,
-      plans,
-      silentLogger,
+      { auth, storage, plans, logger: silentLogger },
       del(),
       ID,
     );

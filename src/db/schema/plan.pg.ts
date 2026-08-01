@@ -44,7 +44,9 @@ export const plan = pgTable(
     //
     // The two values come from the tuple in src/limits.ts rather than being
     // typed out again. `sql.raw`, because this text is emitted into a migration
-    // where a bound parameter would have no meaning.
+    // where a bound parameter would have no meaning - so adding a value to the
+    // tuple is a migration, not an edit here: run `bun run db:generate` and
+    // commit both dialects' output with it. See the note on the SQLite twin.
     check(
       "plan_visibility_check",
       sql.raw(

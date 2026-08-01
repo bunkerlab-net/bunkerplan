@@ -1,0 +1,231 @@
+import { describe, expect, test } from "bun:test";
+import { sweepAccountObjects } from "../src/auth/instance.ts";
+import type {
+  AccountClosingRepo,
+  PlanRepo,
+  PlanStorage,
+} from "../src/services/types.ts";
+import {
+  type MemoryPlans,
+  memoryPlans,
+  type StoredPlan,
+  silentLogger,
+  storedPlan,
+} from "./fakes.ts";
+
+/**
+ * The irreversible half of account deletion, driven directly.
+ *
+ * Better Auth calls it as `onBeforeDeleteUser` and aborts the deletion when it
+ * throws, so what these assertions are really about is the one invariant that
+ * survives every ending: an object is never left with no row naming it. The
+ * sweep may return having removed everything, or throw having removed some of
+ * it and left those rows deleted too - what it must never do is return while
+ * an object it did not reach still has a row, because the cascade then takes
+ * that row and strands the object at `/p/{id}` forever.
+ *
+ * Reaching it through `betterAuth` would mean standing up an auth instance to
+ * seed a refusal.
+ */
+
+const OWNER = "user-a";
+
+interface Fixture {
+  /** Every id `storage.delete` was called with, in order, duplicates kept. */
+  objects: string[];
+  closing: Set<string>;
+  rows: Map<string, StoredPlan>;
+  /** The unwrapped repository, for an override that delegates to it. */
+  base: MemoryPlans;
+  plans: PlanRepo;
+  storage: PlanStorage;
+  accountClosing: AccountClosingRepo;
+}
+
+function fixture(planOverrides: Partial<PlanRepo> = {}): Fixture {
+  const objects: string[] = [];
+  const closing = new Set<string>();
+  const base = memoryPlans();
+
+  return {
+    objects,
+    closing,
+    rows: base.rows,
+    base,
+    plans: { ...base, ...planOverrides },
+    storage: {
+      put: async () => {},
+      get: async () => null,
+      delete: async (id) => {
+        objects.push(id);
+      },
+      probe: async () => {},
+    },
+    accountClosing: {
+      open: async (userId) => {
+        closing.add(userId);
+      },
+      isOpen: async (userId) => closing.has(userId),
+    },
+  };
+}
+
+/** Rows straight into the map: `insert` would spend a quota none of this is about. */
+function seed(f: Fixture, ids: string[]): void {
+  for (const id of ids) f.rows.set(id, storedPlan({ id, userId: OWNER }));
+}
+
+function run(f: Fixture, maxAttempts?: number): Promise<void> {
+  return sweepAccountObjects({
+    plans: f.plans,
+    accountClosing: f.accountClosing,
+    storage: f.storage,
+    logger: silentLogger,
+    userId: OWNER,
+    maxAttempts,
+  });
+}
+
+describe("sweepAccountObjects", () => {
+  test("marks the account, then removes every object and row", async () => {
+    const f = fixture();
+    seed(f, ["p1", "p2", "p3"]);
+
+    await run(f);
+
+    expect(f.closing.has(OWNER)).toBe(true);
+    expect(f.objects.toSorted()).toEqual(["p1", "p2", "p3"]);
+    expect(f.rows.size).toBe(0);
+  });
+
+  /**
+   * The loop re-lists until nothing comes back, so a row `deleteOwned` refuses
+   * while `listByUser` keeps returning it is the one shape that cannot finish.
+   * It must end as an error, not as a hung request and not as a return - a
+   * return hands Better Auth an all-clear, and the cascade then removes a row
+   * naming an object the sweep never got.
+   */
+  test("throws on a row it can never remove, rather than looping", async () => {
+    const f = fixture({ deleteOwned: async () => false });
+    seed(f, ["stuck"]);
+
+    await expect(run(f)).rejects.toThrow(/not making progress/);
+    expect(f.rows.size).toBe(1);
+  });
+
+  /** One object delete per plan, not one per pass: a refusal is not retried. */
+  test("sweeps a refused object once, however many passes it takes", async () => {
+    const f = fixture({ deleteOwned: async () => false });
+    seed(f, ["stuck"]);
+
+    await expect(run(f)).rejects.toThrow();
+    expect(f.objects).toEqual(["stuck"]);
+  });
+
+  /**
+   * The benign refusal: the owner deleted that plan while the sweep ran, so
+   * the row is gone by the next listing. Nothing is orphaned - no row is left
+   * naming an object - and aborting the deletion over it would be wrong.
+   */
+  test("finishes when a refused row stops being listed", async () => {
+    const f = fixture();
+    f.plans.deleteOwned = async (id, userId) => {
+      if (id !== "vanishing") return await f.base.deleteOwned(id, userId);
+      f.rows.delete(id);
+      return false;
+    };
+    seed(f, ["mine", "vanishing"]);
+
+    await expect(run(f)).resolves.toBeUndefined();
+    expect(f.rows.size).toBe(0);
+  });
+
+  test("leaves another account's plans alone", async () => {
+    const f = fixture();
+    seed(f, ["mine"]);
+    f.rows.set("theirs", storedPlan({ id: "theirs", userId: "user-b" }));
+
+    await run(f);
+
+    expect([...f.rows.keys()]).toEqual(["theirs"]);
+    expect(f.objects).toEqual(["mine"]);
+    expect(f.closing.has("user-b")).toBe(false);
+  });
+
+  describe("the per-invocation budget", () => {
+    test("does not fire on an account that fits it exactly", async () => {
+      const f = fixture();
+      seed(f, ["p1", "p2", "p3"]);
+
+      await expect(run(f, 3)).resolves.toBeUndefined();
+      expect(f.rows.size).toBe(0);
+    });
+
+    /**
+     * Past the budget the sweep stops rather than let workerd end the request
+     * with "Too many subrequests". What it removed stays removed, so the retry
+     * the message asks for resumes instead of starting over.
+     */
+    test("stops at the budget and resumes on the next attempt", async () => {
+      const f = fixture();
+      seed(f, ["p1", "p2", "p3", "p4", "p5"]);
+
+      await expect(run(f, 2)).rejects.toThrow(/Retry the deletion/);
+      expect(f.rows.size).toBe(3);
+      expect(f.objects).toHaveLength(2);
+
+      await expect(run(f, 2)).rejects.toThrow(/Retry the deletion/);
+      expect(f.rows.size).toBe(1);
+
+      await expect(run(f, 2)).resolves.toBeUndefined();
+      expect(f.rows.size).toBe(0);
+      expect(f.objects).toHaveLength(5);
+    });
+
+    /**
+     * Attempts, not removals. A refused row still spent its object delete and
+     * its row delete, so a budget counting only successes would let an account
+     * full of refusals run past the very limit this exists to respect.
+     *
+     * And the ending is the stalled one, not the resumable one: a budget spent
+     * without removing anything is a sweep no retry can advance, so the error
+     * must not ask for one.
+     */
+    test("is spent by refusals, and says so as a stall not a retry", async () => {
+      const f = fixture({ deleteOwned: async () => false });
+      seed(f, ["p1", "p2", "p3"]);
+
+      await expect(run(f, 2)).rejects.toThrow(/not making progress/);
+      expect(f.objects).toHaveLength(2);
+    });
+
+    /**
+     * The refusal that must not read as a stall: these rows were removed by
+     * their owner while the sweep ran, so they are not listed again and the
+     * only thing left is work a retry will finish.
+     */
+    test("asks for a retry when the refusals were concurrent deletes", async () => {
+      const f = fixture();
+      f.plans.deleteOwned = async (id, userId) => {
+        if (id !== "vanishing") return await f.base.deleteOwned(id, userId);
+        f.rows.delete(id);
+        return false;
+      };
+      seed(f, ["vanishing", "p1", "p2"]);
+
+      await expect(run(f, 2)).rejects.toThrow(/Retry the deletion/);
+      expect(f.rows.size).toBe(1);
+    });
+
+    test("is absent by default, which is what self-hosting gets", async () => {
+      const f = fixture();
+      seed(
+        f,
+        Array.from({ length: 50 }, (_, i) => `p${i}`),
+      );
+
+      await expect(run(f)).resolves.toBeUndefined();
+      expect(f.rows.size).toBe(0);
+    });
+  });
+});

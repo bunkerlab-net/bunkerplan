@@ -6,20 +6,27 @@ import type { SqliteAuthHandle } from "../db/sqlite-shared.ts";
 import { toSecondaryStorage } from "../kv/secondary-storage.ts";
 import { PLAN_PAGE_SIZE } from "../limits.ts";
 import type { Logger } from "../log.ts";
-import type { Db, KvStore, PlanStorage } from "../services/types.ts";
+import type {
+  AccountClosingRepo,
+  Db,
+  KvStore,
+  PlanRepo,
+  PlanStorage,
+} from "../services/types.ts";
 import { buildAuthOptions } from "./options.ts";
 
 /**
- * Pages the sweep below will make before it gives up.
- *
- * `listByUser` is re-queried until it comes back empty, so the loop's exit
- * depends on the deletes actually removing rows. A `deleteOwned` that keeps
- * refusing - a row whose owner no longer matches, a repo bug - would hand back
- * the same page forever, inside a request. This is the bound that turns that
- * into a loud failure instead of a hung Worker, set far above any real
- * account: 500 pages of `PLAN_PAGE_SIZE`.
+ * The end of a sweep that cannot finish: `deleteOwned` refuses rows
+ * `listByUser` keeps returning, and neither another pass nor another request
+ * will change that answer.
  */
-const MAX_SWEEP_PAGES = 500;
+function stalled(userId: string, listed: number): Error {
+  return new Error(
+    `account ${userId} still lists ${listed} plan(s) that deleteOwned ` +
+      "refuses to remove: the sweep is not making progress, so the account " +
+      "has not been deleted",
+  );
+}
 
 /**
  * Removes every object an account owns, ahead of the row cascade that account
@@ -33,54 +40,87 @@ const MAX_SWEEP_PAGES = 500;
  * refused, and one already in flight withdraws its own object.
  *
  * Deleted sequentially so a user with many plans cannot open hundreds of
- * concurrent subrequests and trip the Workers subrequest limit, and in pages
- * so the number of plans an account holds is not capped by whatever one query
- * returns.
+ * concurrent subrequests at once, and in pages so the number of plans an
+ * account holds is not capped by whatever one query returns.
+ *
+ * Three endings, and the listing at the top of each pass is what tells them
+ * apart. Nothing left: done. A row `deleteOwned` already refused, still
+ * listed: stalled, because the next pass and the next request would both walk
+ * into the same refusal - it throws, and no retry is suggested. Rows left but
+ * the budget spent: throws asking to be retried, which works, because every
+ * object and row already removed stays removed and the marker is idempotent.
+ *
+ * A refusal that stops being listed never reaches any of that. It is the
+ * benign case - the owner deleted that plan while the sweep ran - and is
+ * logged: the object is gone and no row is left naming it.
+ *
+ * `maxAttempts` is how many plans one call will try. A platform budget rather
+ * than a policy: on Workers an invocation may make 1000 subrequests and each
+ * plan here spends two, so a large enough account is one workerd would stop in
+ * the middle of. Attempts, not removals - a refusal spends the same two calls
+ * a removal does. Omitted off Workers, where nothing counts calls.
+ *
+ * The loop terminates because uploads are shut out by the marker, so rows only
+ * ever leave: every pass removes at least one, records a refusal that stops
+ * the next pass, or throws.
+ *
+ * Better Auth aborts the deletion when this hook throws, which is the right
+ * end for an account whose objects could not all be removed - the alternative
+ * deletes the rows naming them.
  *
  * Exported to be callable on its own: this is the irreversible half of account
  * deletion, and reaching it through `betterAuth` would mean standing up an
- * auth instance to test paging and refusals.
- *
- * Throws rather than returning a partial result. Better Auth aborts the
- * deletion when this hook throws, which is the right end for an account whose
- * objects could not all be removed - the alternative deletes the rows naming
- * them.
+ * auth instance to test paging, refusals, and the budget.
  */
 export async function sweepAccountObjects(input: {
-  db: Db;
+  plans: PlanRepo;
+  accountClosing: AccountClosingRepo;
   storage: PlanStorage;
   logger: Logger;
   userId: string;
+  maxAttempts?: number;
 }): Promise<void> {
-  const { db, storage, logger, userId } = input;
-  await db.accountClosing.open(userId);
+  const { plans, accountClosing, storage, logger, userId } = input;
+  await accountClosing.open(userId);
 
   let removed = 0;
-  let refused = 0;
-  for (let page = 0; ; page += 1) {
-    if (page === MAX_SWEEP_PAGES) {
+  let allowance = input.maxAttempts ?? Number.POSITIVE_INFINITY;
+  // Rows `deleteOwned` refused. Kept because the next listing is what makes
+  // them mean something: still there, and the sweep cannot finish; gone, and
+  // another writer removed the plan while this ran.
+  const refused = new Set<string>();
+  for (;;) {
+    const rows = await plans.listByUser(userId, PLAN_PAGE_SIZE);
+    if (rows.length === 0) break;
+    const stuck = rows.filter((row) => refused.has(row.id));
+    if (stuck.length > 0) throw stalled(userId, stuck.length);
+    if (allowance === 0) {
       throw new Error(
-        `account ${userId} still lists plans after ${MAX_SWEEP_PAGES} pages ` +
-          `of ${PLAN_PAGE_SIZE}: the sweep is not making progress, so the ` +
-          "account has not been deleted",
+        `account ${userId} holds more plans than one invocation may sweep: ` +
+          `${removed} removed, ${rows.length} left rather than run past the ` +
+          "platform's subrequest budget. Retry the deletion to continue - " +
+          "nothing already removed comes back",
       );
     }
-    const rows = await db.plans.listByUser(userId, PLAN_PAGE_SIZE);
-    if (rows.length === 0) break;
     for (const row of rows) {
+      // Out of budget: stop here and let the listing above classify what is
+      // left. Re-listing costs one call, and it is the difference between an
+      // account worth retrying and one that will refuse forever.
+      if (allowance === 0) break;
+      allowance -= 1;
       await storage.delete(row.id);
       // The boolean is the only evidence a row went. Counting the attempt
       // instead would report a refusal as a removal, and a refusal is exactly
       // the thing that makes the loop above unable to finish.
-      if (await db.plans.deleteOwned(row.id, userId)) removed += 1;
-      else refused += 1;
+      if (await plans.deleteOwned(row.id, userId)) removed += 1;
+      else refused.add(row.id);
     }
   }
 
-  if (refused > 0) {
+  if (refused.size > 0) {
     logger.warn(
-      { userId, planCount: removed, refusedCount: refused },
-      "some plans were not deleted before account deletion",
+      { userId, planCount: removed, refusedCount: refused.size },
+      "some plans were removed by another writer during the account sweep",
     );
     return;
   }
@@ -104,8 +144,15 @@ export function createAuth(input: {
   kv: KvStore;
   storage: PlanStorage;
   logger: Logger;
+  /**
+   * Plans the account sweep will attempt per request. Passed by
+   * src/runtime/cloudflare.ts and nothing else: it is the Workers subrequest
+   * budget, and a process with no such budget must not inherit a ceiling on
+   * how much of an account one deletion can finish.
+   */
+  maxSweepAttempts?: number;
 }) {
-  const { config, db, kv, storage, logger } = input;
+  const { config, db, kv, storage, logger, maxSweepAttempts } = input;
   return betterAuth(
     buildAuthOptions({
       database: drizzleAdapter(db.adapter, {
@@ -119,7 +166,14 @@ export function createAuth(input: {
       clientIpHeader: config.clientIpHeader,
       logger,
       onBeforeDeleteUser: (userId) =>
-        sweepAccountObjects({ db, storage, logger, userId }),
+        sweepAccountObjects({
+          plans: db.plans,
+          accountClosing: db.accountClosing,
+          storage,
+          logger,
+          userId,
+          maxAttempts: maxSweepAttempts,
+        }),
     }),
   );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { sweepAccountObjects } from "../src/auth/instance.ts";
 import { storeAndConfirm } from "../src/http/store-plan.ts";
-import { PLAN_PAGE_SIZE } from "../src/limits.ts";
 import type {
   AccountClosingRepo,
   PlanRepo,
@@ -64,25 +64,20 @@ function stores(holdPut = false) {
   return { objects, rows, closing, deps, plans, storage, entered, released };
 }
 
-/** The sweep `src/auth/instance.ts` performs, before the cascade. */
-async function sweep(
+/**
+ * The sweep `src/auth/instance.ts` performs, before the cascade - the real
+ * one. What these tests are about is how an upload interleaves with it, so a
+ * local reimplementation would only prove things about the copy.
+ */
+const sweep = (
   deps: {
     plans: PlanRepo;
     storage: PlanStorage;
     accountClosing: AccountClosingRepo;
   },
   userId: string,
-): Promise<void> {
-  await deps.accountClosing.open(userId);
-  for (;;) {
-    const page = await deps.plans.listByUser(userId, PLAN_PAGE_SIZE);
-    if (page.length === 0) break;
-    for (const row of page) {
-      await deps.storage.delete(row.id);
-      await deps.plans.deleteOwned(row.id, userId);
-    }
-  }
-}
+): Promise<void> =>
+  sweepAccountObjects({ ...deps, logger: silentLogger, userId });
 
 /**
  * What Better Auth's `deleteUser` does after the hook returns: the foreign key

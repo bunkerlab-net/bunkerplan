@@ -50,7 +50,13 @@ export const plan = sqliteTable(
     //
     // The two values come from the tuple in src/limits.ts rather than being
     // typed out again. `sql.raw`, because this text is emitted into a migration
-    // where a bound parameter would have no meaning.
+    // where a bound parameter would have no meaning - and "emitted into a
+    // migration" is the catch: adding a value to the tuple changes this
+    // constraint, and a constraint already applied to a database only changes
+    // when a migration says so. Run `bun run db:generate` and commit both
+    // dialects' output with the tuple change. CI runs the same command and
+    // fails on an uncommitted diff, and tests/schema-shape.test.ts pins the
+    // expression it should produce.
     check(
       "plan_visibility_check",
       sql.raw(

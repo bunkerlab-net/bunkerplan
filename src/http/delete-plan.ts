@@ -21,13 +21,16 @@ import { sweepOrphanedObject } from "./store-plan.ts";
  * and replace only, and this writes no object.
  */
 export async function deletePlan(
-  auth: AppAuth,
-  storage: PlanStorage,
-  plans: PlanRepo,
-  logger: Logger,
+  deps: {
+    auth: AppAuth;
+    storage: PlanStorage;
+    plans: PlanRepo;
+    logger: Logger;
+  },
   request: Request,
   id: string,
 ): Promise<Response> {
+  const { auth, storage, plans, logger } = deps;
   const userId = await resolveUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
 

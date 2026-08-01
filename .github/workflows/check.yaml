@@ -97,6 +97,22 @@ jobs:
       - name: Lint and format
         run: hk check --all
 
+      # A schema change is only real once its migration is committed. Nothing
+      # reconciles src/db/schema/** with drizzle/** at runtime - the tables a
+      # deployment has are the ones the migrations built - so `db:generate`
+      # leaving the tree clean is the evidence the two still agree. The
+      # `plan_visibility_check` constraint is the sharp edge: it is generated
+      # from the PLAN_VISIBILITIES tuple in src/limits.ts, where adding one
+      # word rewrites SQL that has already been applied to every database.
+      - name: Migrations match the schema
+        run: |
+          bun run db:generate
+          if [ -n "$(git status --porcelain -- drizzle)" ]; then
+            echo "::error::drizzle/ is stale - run 'bun run db:generate' and commit the result"
+            git status --porcelain -- drizzle
+            exit 1
+          fi
+
       # Built once, here. Both steps below need `dist/` and the generated
       # asset manifest - the typecheck because that manifest is a source file,
       # the suite because it serves the real Workers bundle on Miniflare - and

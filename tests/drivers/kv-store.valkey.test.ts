@@ -59,7 +59,11 @@ test.skipIf(skip)(
       // original would kill a session the user just renewed.
       await kv.set(key("extended"), "v1", 90);
       await kv.set(key("extended"), "v2", 300);
-      expect(await client.ttl(key("extended"))).toBeGreaterThan(90);
+      // Bounded like "long" above: a rewrite that kept the first deadline
+      // would still clear 90, so only the narrow bound proves 300 landed.
+      const extended = await client.ttl(key("extended"));
+      expect(extended).toBeGreaterThan(290);
+      expect(extended).toBeLessThanOrEqual(300);
       expect(await kv.get(key("extended"))).toBe("v2");
 
       // And a rewrite with no ttl clears the deadline entirely.

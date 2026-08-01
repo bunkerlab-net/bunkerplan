@@ -32,7 +32,10 @@ export function createBunSqliteDb(path: string): Db & SqliteAuthHandle {
     adapter: db,
     provider: "sqlite",
     plans: createPlanRepo(dialect),
-    uploadRateLimits: createRateLimitRepo(dialect),
+    uploadRateLimits: createRateLimitRepo(
+      dialect,
+      dialect.tables.uploadRateLimit,
+    ),
     unlockRateLimits: createUnlockRateLimitRepo(dialect),
     accountClosing: createAccountClosingRepo(dialect),
     async probe() {

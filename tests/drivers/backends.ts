@@ -327,7 +327,7 @@ function repos(
 > {
   return {
     plans: createPlanRepo(dialect),
-    rateLimits: createRateLimitRepo(dialect),
+    rateLimits: createRateLimitRepo(dialect, dialect.tables.uploadRateLimit),
     // Always sweeps: the pruning contract asserts a closed window is gone,
     // and the default only sweeps on a fraction of attempts.
     unlockRateLimits: createUnlockRateLimitRepo(dialect, () => true),
@@ -362,7 +362,8 @@ interface Fragments {
   user: SQL;
   /** A `timestamp` column on Postgres, epoch milliseconds on SQLite. */
   instant(epochMs: number): SQL;
-  now: SQL;
+  /** A thunk on both: one fixture seeds many rows, at different instants. */
+  now(): SQL;
   /** A real `boolean` on Postgres, an integer on SQLite. */
   no: SQL;
 }
@@ -393,7 +394,7 @@ function dbFixture(
         handle === undefined ? `${id}@example.test` : handleEmail(handle);
       await exec.run(
         sql`insert into ${frag.user} (id, name, email, email_verified, created_at, updated_at)
-            values (${id}, ${name}, ${email}, ${frag.no}, ${frag.now}, ${frag.now})`,
+            values (${id}, ${name}, ${email}, ${frag.no}, ${frag.now()}, ${frag.now()})`,
       );
       return id;
     },
@@ -449,7 +450,7 @@ function dbFixture(
       await exec.run(
         sql`insert into apikey (id, reference_id, key, created_at, updated_at)
             values (${`ak-${crypto.randomUUID()}`}, ${userId},
-                    ${`key-${crypto.randomUUID()}`}, ${frag.now}, ${frag.now})`,
+                    ${`key-${crypto.randomUUID()}`}, ${frag.now()}, ${frag.now()})`,
       );
     },
     countApiKeys: (userId) =>
@@ -488,7 +489,7 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
       user: sql.raw("user"),
       // Epoch milliseconds straight into an integer column.
       instant: (epochMs) => sql`${epochMs}`,
-      now: sql`${Date.now()}`,
+      now: () => sql`${Date.now()}`,
       no: sql`0`,
     },
     close,
@@ -572,7 +573,7 @@ function pgFixture(db: PgDb, close: () => Promise<void>): DbFixture {
       user: sql.raw('"user"'),
       // A `timestamp` column, so the milliseconds have to be converted.
       instant: (epochMs) => sql`to_timestamp(${epochMs}::bigint / 1000.0)`,
-      now: sql`now()`,
+      now: () => sql`now()`,
       no: sql`false`,
     },
     close,
