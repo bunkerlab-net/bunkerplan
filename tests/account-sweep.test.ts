@@ -88,6 +88,7 @@ interface Fixture {
  */
 function fixture(
   planOverrides: (base: MemoryPlans) => Partial<PlanRepo> = () => ({}),
+  storageOverrides: Partial<PlanStorage> = {},
 ): Fixture {
   const objects: string[] = [];
   const steps: string[] = [];
@@ -95,18 +96,22 @@ function fixture(
   const limits: number[] = [];
   const closing = new Set<string>();
   const base = memoryPlans();
+  /*
+   * Overrides first, recorders around them. Wrapping the base repository and
+   * then spreading the overrides on top would let an overriding test silently
+   * remove the recording, so `steps` would miss exactly the calls a test cared
+   * enough about to replace - and the budget measurement would quietly count
+   * fewer subrequests than the sweep made.
+   */
+  const overridden: PlanRepo = { ...base, ...planOverrides(base) };
   const listByUser: PlanRepo["listByUser"] = async (userId, limit) => {
     steps.push("list");
     limits.push(limit);
-    return await base.listByUser(userId, limit);
+    return await overridden.listByUser(userId, limit);
   };
-  // Recorded like the listings, so `steps` is every subrequest the sweep makes
-  // rather than most of them. The budget test derives its total from this, and
-  // adding the row deletes back in by arithmetic would be assuming the number
-  // the measurement exists to check.
   const deleteOwned: PlanRepo["deleteOwned"] = async (id, userId) => {
     steps.push("row");
-    return await base.deleteOwned(id, userId);
+    return await overridden.deleteOwned(id, userId);
   };
   /*
    * Pino's `LogFn` takes either an object and a message or a message alone, so
@@ -136,7 +141,7 @@ function fixture(
     closing,
     rows: base.rows,
     base,
-    plans: { ...base, listByUser, deleteOwned, ...planOverrides(base) },
+    plans: { ...overridden, listByUser, deleteOwned },
     storage: {
       put: async () => {},
       get: async () => null,
@@ -145,6 +150,9 @@ function fixture(
         objects.push(id);
       },
       probe: async () => {},
+      // Same seam as the repository's: supplied here rather than assigned onto
+      // the fixture afterwards, so nothing can be rewritten mid-test.
+      ...storageOverrides,
     },
     accountClosing: {
       open: async (userId) => {
@@ -351,11 +359,12 @@ describe("sweepAccountObjects", () => {
    * the row is the only handle left on it.
    */
   test("propagates a storage failure rather than deleting the row", async () => {
-    const f = fixture();
+    const f = fixture(() => ({}), {
+      delete: async () => {
+        throw new Error("bucket unreachable");
+      },
+    });
     seed(f, ["p1"]);
-    f.storage.delete = async () => {
-      throw new Error("bucket unreachable");
-    };
 
     await expect(run(f)).rejects.toThrow("bucket unreachable");
     expect(f.rows.size).toBe(1);

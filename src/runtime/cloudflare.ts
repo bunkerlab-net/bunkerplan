@@ -51,11 +51,14 @@ async function initialise(): Promise<Services> {
   const db = createD1Db(env.DB, logger);
   const kv = createWorkersKv(env.KV);
   const storage = createR2Storage(env.BUCKET);
-  // The one place the subrequest budget is known. `MAX_PLANS_PER_USER` is
-  // refused above the same ceiling here (src/config.ts), so this only ever
-  // fires for an account grown under an older, higher quota - and then it
-  // stops the sweep with a message saying to retry, rather than letting
-  // workerd end the request with "Too many subrequests".
+  // The sweep's own allowance, and the same constant `src/config.ts` refuses
+  // `MAX_PLANS_PER_USER` above. One value read in two places rather than two
+  // that have to agree, so the quota can never be set past what a deletion can
+  // finish - the drift a second number here would allow does not exist.
+  //
+  // It therefore only fires for an account grown under an older, higher quota,
+  // and then it stops the sweep with a message saying to retry rather than
+  // letting workerd end the request with "Too many subrequests".
   const auth = createAuth({
     config,
     db,

@@ -76,3 +76,21 @@ export function isStatementCancelled(cause: unknown): boolean {
     cause.code === "57014"
   );
 }
+
+/**
+ * The server refusing to keep waiting for a lock - SQLSTATE `55P03`
+ * (`lock_not_available`), which `lock_timeout` raises.
+ *
+ * Contention named exactly, where `57014` only says something was cancelled.
+ * Safe on the same grounds and then some: the statement that timed out was the
+ * wait itself, so it never held the lock and never wrote anything, and the
+ * transaction around it is aborted regardless.
+ */
+export function isLockUnavailable(cause: unknown): boolean {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    cause.code === "55P03"
+  );
+}

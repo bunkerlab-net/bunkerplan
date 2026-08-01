@@ -41,7 +41,6 @@ describe("the deployed wrangler configuration", () => {
     // `[::1]`, and the reserved `.localhost` suffix all resolve to the
     // loopback, and any of them shipped would break WebAuthn exactly as
     // `localhost` does - the relying-party origin has to match the browser's.
-    //
     // The trailing dot is stripped first because a fully qualified
     // `localhost.` is the same host and `new URL()` keeps the dot: only the
     // IPv4 form is normalised for us, so the comparisons below would let
@@ -51,6 +50,9 @@ describe("the deployed wrangler configuration", () => {
     expect(hostname).not.toEndWith(".localhost");
     expect(hostname).not.toBe("127.0.0.1");
     expect(hostname).not.toBe("[::1]");
+    // `[::ffff:127.0.0.1]`, which `new URL()` canonicalises to this hex form -
+    // the same loopback wearing an IPv6 hat.
+    expect(hostname).not.toBe("[::ffff:7f00:1]");
   });
 
   test("binds real D1 and KV ids, not the placeholder zeros", () => {

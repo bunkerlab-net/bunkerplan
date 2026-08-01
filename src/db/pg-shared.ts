@@ -7,6 +7,7 @@ import * as planSchema from "./schema/plan.pg.ts";
 import * as rateLimitSchema from "./schema/rate-limit.pg.ts";
 import {
   DatabaseUnavailable,
+  isLockUnavailable,
   isPoolTimeout,
   isStatementCancelled,
 } from "./unavailable.ts";
@@ -88,8 +89,18 @@ function pgExecutor(handle: Pick<PgDb, "execute">): SqlExecutor {
  * way out. Nothing was claimed - the lock is the first statement, before any
  * write - so the retry is safe on the plainest possible grounds.
  *
+ * `lock_timeout` bounds that wait on its own, ahead of the pool-wide
+ * `statement_timeout` which stays where it is for ordinary statements. Two
+ * things come of it. A queue deep enough to be hopeless gives its connection
+ * back in seconds rather than holding a pool slot for the full statement
+ * deadline, which matters because `POOL_MAX` waiters on one account is the
+ * whole pool. And it raises `55P03` (`lock_not_available`), which says
+ * contention exactly, where `57014` only says something here was cancelled.
+ * Both are translated, because both leave the transaction aborted with nothing
+ * written; the distinction is for whoever reads the log, not the caller.
+ *
  * The pool refusing to hand out a client is the other one, and is caught
- * outside: it happens before a transaction exists at all. Both are translated
+ * outside: it happens before a transaction exists at all. All are translated
  * here because this is the last place that knows it is Postgres; `pg` must not
  * be reachable from the handler that answers.
  */
@@ -99,11 +110,14 @@ function pgClaim(db: PgDb): Dialect["claim"] {
       return await db.transaction(
         async (tx) => {
           try {
+            // Transaction-local: `set local` reverts with the transaction, so
+            // the connection goes back to the pool with the ordinary deadline.
+            await tx.execute(sql`set local lock_timeout = '3s'`);
             await tx.execute(
               sql`select pg_advisory_xact_lock(hashtext(${userId})::bigint)`,
             );
           } catch (cause) {
-            if (isStatementCancelled(cause)) {
+            if (isLockUnavailable(cause) || isStatementCancelled(cause)) {
               throw new DatabaseUnavailable("waiting to claim a plan id", {
                 cause,
               });

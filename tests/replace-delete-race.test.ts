@@ -35,13 +35,21 @@ function stores() {
   const entered = deferred();
   const released = deferred();
   let deletes = 0;
+  /*
+   * Every write and delete in order. The end state says an object is gone; it
+   * does not say who removed it, and "the replacement cleaned up after itself"
+   * and "a later sweep happened to catch it" leave the same empty map.
+   */
+  const log: string[] = [];
 
   const storage: PlanStorage = {
     put: async (key, body) => {
+      log.push(`put ${key}`);
       objects.set(key, body.byteLength);
     },
     get: async () => null,
     delete: async (key) => {
+      log.push(`delete ${key}`);
       objects.delete(key);
       deletes += 1;
       if (deletes === 1) {
@@ -56,6 +64,7 @@ function stores() {
 
   return {
     objects,
+    log,
     rows: plans.rows,
     storage,
     plans,
@@ -124,7 +133,7 @@ describe("a replacement racing an account deletion", () => {
    * is why `replacePlan` reads it after its own write.
    */
   test("leaves no object behind when it lands between object and row", async () => {
-    const { objects, rows, storage, plans, auth, hold } = stores();
+    const { objects, log, rows, storage, plans, auth, hold } = stores();
     // `stores()` pauses the first object delete for the test above. This one
     // pauses somewhere else, so that hold is let go before it can deadlock the
     // sweep short of the row delete it is waiting on.
@@ -176,10 +185,18 @@ describe("a replacement racing an account deletion", () => {
     release.resolve();
     await sweeping;
 
-    // 404, because the plan this replaced is being deleted. What matters is
-    // the second assertion: the bytes it wrote are gone with it.
+    // 404, because the plan this replaced is being deleted.
     expect(replaced.status).toBe(404);
     expect(rows.size).toBe(0);
     expect(objects.size).toBe(0);
+
+    /*
+     * And it was the replacement that cleaned up after itself, not luck. The
+     * sweep deleted the object before this test released it, the replacement
+     * put its own bytes back into that gap, and the delete after the `put` is
+     * `replacePlan` withdrawing them on the marker. An empty map alone would
+     * read identically if the object had simply never been rewritten.
+     */
+    expect(log).toEqual([`delete ${ID}`, `put ${ID}`, `delete ${ID}`]);
   });
 });

@@ -173,15 +173,25 @@ export function memoryPlans(
     return handle;
   };
   /**
-   * The account a handle names, or `undefined`.
+   * The account a value names, whether it is an id or a handle.
+   *
+   * Both, and in that order, because `accountId` in src/db/plans.shared.ts
+   * coalesces a lookup by `user.id` ahead of one by the handle's derived
+   * email. `PUT .../grants` takes either, and the e2e suite grants by raw id -
+   * a fake that only knew handles would refuse what every backend accepts.
+   *
+   * The ids are the values in `handles`, which is the nearest thing here to a
+   * `user` table: an id nothing maps to is an account that does not exist.
    *
    * `Object.hasOwn` rather than a bare index: `handles["__proto__"]` and
    * `handles["constructor"]` answer from the prototype, so a plain lookup
    * would resolve those two strings to something and hand a grant to a
    * "user id" that is a function. The real repositories match a row.
    */
-  const accountFor = (handle: string): string | undefined =>
-    Object.hasOwn(handles, handle) ? handles[handle] : undefined;
+  const accountFor = (account: string): string | undefined => {
+    if (Object.values(handles).includes(account)) return account;
+    return Object.hasOwn(handles, account) ? handles[account] : undefined;
+  };
 
   return {
     rows,

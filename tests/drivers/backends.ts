@@ -334,11 +334,20 @@ function repos(
   | "unlockRateLimitsOneAtATime"
   | "accountClosing"
 > {
-  // The production wiring, so the contract suites exercise the repositories a
-  // deployment gets rather than a second set assembled here. `rateLimits` is
-  // the fixture's name for the upload bucket, and the unlock ones are rebuilt
-  // to sweep every time: the pruning contract asserts a closed window is gone,
-  // and the default fires on a fraction of attempts.
+  /*
+   * The production wiring, so the contract suites exercise the repositories a
+   * deployment gets rather than a second set assembled here. `rateLimits` is
+   * simply the fixture's name for the upload bucket.
+   *
+   * The two unlock buckets are rebuilt rather than taken from `wired`, because
+   * `createDialectRepos` deliberately exposes no seam for them: a deployment
+   * gets `sometimes` and the full batch, and a parameter for changing that
+   * would exist only for these tests. `UnlockSweepOptions` is the whole of
+   * what varies - `shouldSweep` and `batch` - so rebuilding here passes the
+   * same `dialect` and logger production does and differs in nothing else. If
+   * that options type ever grows a third member, this is the place that has to
+   * learn about it.
+   */
   const wired = createDialectRepos(dialect, silentLogger);
   return {
     plans: wired.plans,

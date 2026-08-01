@@ -66,7 +66,7 @@ describe("the Postgres claim", () => {
     expect(recorded.configs).toEqual([{ isolationLevel: "read committed" }]);
   });
 
-  test("takes the advisory lock before the body reads anything", async () => {
+  test("bounds and takes the lock before the body reads anything", async () => {
     const { db, recorded } = recordingDb();
 
     await pgDialect(db).claim("user-a", async (executor) => {
@@ -74,10 +74,13 @@ describe("the Postgres claim", () => {
       return null;
     });
 
-    // The lock is what makes count-and-claim one critical section; a body that
-    // ran before it would be counting against an unguarded table.
-    expect(recorded.statements[0]).toContain("pg_advisory_xact_lock");
-    expect(recorded.statements[1]).toBe("select 1 as body");
+    // The deadline first, or it would not apply to the wait it exists to
+    // bound. Then the lock, which is what makes count-and-claim one critical
+    // section - a body that ran before it would be counting against an
+    // unguarded table.
+    expect(recorded.statements[0]).toContain("lock_timeout");
+    expect(recorded.statements[1]).toContain("pg_advisory_xact_lock");
+    expect(recorded.statements[2]).toBe("select 1 as body");
   });
 
   test("hands the body the transaction, not the pool", async () => {
@@ -94,6 +97,7 @@ describe("the Postgres claim", () => {
     // would carry, and nothing here may.
     expect(returned).toBe("body-result");
     expect(recorded.statements).toEqual([
+      expect.stringContaining("lock_timeout"),
       expect.stringContaining("pg_advisory_xact_lock"),
       "insert into marker default values",
     ]);
@@ -147,6 +151,20 @@ describe("a claim that runs out of time", () => {
     // The queue this models: the lock is the first statement, so nothing was
     // written before it was cut short, and drizzle rolls back on the way out.
     await expect(claim(lockFails(CANCELLED))).rejects.toBeInstanceOf(
+      DatabaseUnavailable,
+    );
+  });
+
+  test("translates the lock wait hitting its own timeout", async () => {
+    // SQLSTATE 55P03, raised by the `lock_timeout` the claim sets. The wait
+    // itself is what expired, so it never held the lock and never wrote -
+    // contention named exactly, where 57014 only says something was cancelled.
+    const contended = Object.assign(
+      new Error("canceling statement due to lock timeout"),
+      { code: "55P03" },
+    );
+
+    await expect(claim(lockFails(contended))).rejects.toBeInstanceOf(
       DatabaseUnavailable,
     );
   });
