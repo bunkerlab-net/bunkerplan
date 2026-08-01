@@ -20,19 +20,31 @@ export class DatabaseUnavailable extends Error {
 }
 
 /**
- * Whether a thrown value is Postgres refusing to wait any longer.
+ * Whether a thrown value is the server having cancelled its own statement.
  *
- * Two deadlines produce it and they report differently. `statement_timeout` is
- * the server cancelling its own query, which arrives as SQLSTATE `57014`
- * (`query_canceled`). `query_timeout` is `pg` giving up from this end, which
- * never reached the server and so carries no SQLSTATE at all - only a message.
- * Matching the text is unpleasant and is what the client-side deadline leaves;
- * it is narrow, and the code covers the case that matters most.
+ * SQLSTATE `57014` (`query_canceled`) and nothing else, because this decides
+ * whether the caller is told to retry and only this code earns that. The
+ * server raised it, which means the server is still there, the statement did
+ * not run, and the transaction around it is aborted. Repeating the request is
+ * safe because the first attempt provably did nothing.
+ *
+ * `pg`'s own `query_timeout` is deliberately not included. It fires from this
+ * end without the server having answered, so what happened over there is
+ * unknown - the statement may still be running, and if the deadline landed on
+ * a `COMMIT` the transaction may yet commit. Nothing may promise a safe retry
+ * on that. src/db/postgres.ts sets the client deadline past the server's so
+ * the defined one wins the race and this is the ordinary answer; a client-side
+ * timeout means the server stopped answering entirely, which is a fault
+ * rather than a queue.
+ *
+ * Matched on the code alone, never the message. Text varies by server locale
+ * and would catch unrelated failures that merely say "timeout".
  */
 export function isTimeout(cause: unknown): boolean {
-  if (typeof cause !== "object" || cause === null) return false;
-  if ("code" in cause && cause.code === "57014") return true;
   return (
-    cause instanceof Error && cause.message.toLowerCase().includes("timeout")
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    cause.code === "57014"
   );
 }

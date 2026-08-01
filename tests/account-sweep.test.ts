@@ -53,6 +53,12 @@ interface Fixture {
    */
   steps: string[];
   /**
+   * The `limit` each listing asked for. The fixture ignores it - the fake
+   * returns everything - so without recording it a sweep that paged by one
+   * would satisfy every assertion here while making 400 round trips.
+   */
+  limits: number[];
+  /**
    * What the sweep logged. The one report an operator gets of a deletion that
    * finished with something odd about it, so the counts in it are a contract
    * rather than decoration.
@@ -76,27 +82,37 @@ function fixture(planOverrides: Partial<PlanRepo> = {}): Fixture {
   const objects: string[] = [];
   const steps: string[] = [];
   const logs: LogLine[] = [];
+  const limits: number[] = [];
   const closing = new Set<string>();
   const base = memoryPlans();
   const listByUser: PlanRepo["listByUser"] = async (userId, limit) => {
     steps.push("list");
+    limits.push(limit);
     return await base.listByUser(userId, limit);
   };
-  // Pino's `LogFn` may be called with the message alone, so `message` is
-  // optional here or this does not satisfy it. The sweep always passes both;
-  // the fallback is what makes the signature honest rather than a cast.
+  /*
+   * Pino's `LogFn` takes either an object and a message or a message alone, so
+   * both arrive here and the shape has to be worked out rather than asserted.
+   * A cast would let a message-only call record a bare string as `fields`,
+   * which every `toEqual` below would then compare against happily.
+   */
   const record =
-    (level: LogLine["level"]) => (fields: unknown, message?: string) => {
+    (level: LogLine["level"]) => (first: unknown, second?: string) => {
+      const messageOnly = typeof first === "string";
       logs.push({
         level,
-        fields: (fields ?? {}) as Record<string, unknown>,
-        message: message ?? "",
+        fields:
+          !messageOnly && typeof first === "object" && first !== null
+            ? { ...first }
+            : {},
+        message: (messageOnly ? first : second) ?? "",
       });
     };
 
   return {
     objects,
     steps,
+    limits,
     logs,
     logger: { warn: record("warn"), info: record("info") },
     closing,
@@ -185,6 +201,11 @@ test("a full account's sweep issues no more calls than that", async () => {
   const subrequests = f.steps.length + WORKERS_MAX_PLANS_PER_USER;
 
   expect(f.rows.size).toBe(0);
+  // The page size the sweep actually asked for, not the one the arithmetic
+  // assumed. The fake ignores `limit` and hands back everything, so a sweep
+  // that paged by one would still finish - and still pass the count above,
+  // which is exactly the drift this measurement exists to catch.
+  expect(f.limits).toEqual([PLAN_PAGE_SIZE, PLAN_PAGE_SIZE]);
   expect(subrequests).toBeLessThanOrEqual(
     WORKERS_SUBREQUEST_LIMIT - AUTH_RESERVE,
   );

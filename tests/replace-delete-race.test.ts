@@ -3,7 +3,7 @@ import { sweepAccountObjects } from "../src/auth/instance.ts";
 import { deletePlan } from "../src/http/delete-plan.ts";
 import { replacePlan } from "../src/http/replace-plan.ts";
 import type { PlanStorage } from "../src/services/types.ts";
-import { openRateLimits } from "./app-harness.ts";
+import { openAccounts, openRateLimits } from "./app-harness.ts";
 import {
   deferred,
   fakeAuth,
@@ -92,7 +92,7 @@ describe("a replacement racing a delete", () => {
         config: CONFIG,
         plans,
         uploadRateLimits: openRateLimits,
-        accountClosing: { open: async () => {}, isOpen: async () => false },
+        accountClosing: openAccounts,
         storage,
         logger: silentLogger,
       },

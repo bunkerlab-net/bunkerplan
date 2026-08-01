@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type ReplacePlanDeps, replacePlan } from "../src/http/replace-plan.ts";
 import type { PlanStorage } from "../src/services/types.ts";
-import { openRateLimits } from "./app-harness.ts";
+import { openAccounts, openRateLimits } from "./app-harness.ts";
 import {
   fakeAuth,
   type MemoryPlans,
@@ -79,7 +79,7 @@ function fakes(
       config: CONFIG,
       plans,
       uploadRateLimits: openRateLimits,
-      accountClosing: { open: async () => {}, isOpen: async () => false },
+      accountClosing: openAccounts,
       storage,
       logger: silentLogger,
     },

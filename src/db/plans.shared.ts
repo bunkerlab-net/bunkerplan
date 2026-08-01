@@ -94,10 +94,15 @@ async function claimRow(
   const { plan } = dialect.tables;
   return await dialect.claim(row.userId, async (executor) => {
     // `insert ... select ... where` rather than `insert ... values`: the quota
-    // has to be part of the writing statement, and only the `select` form
-    // takes a `where`. It is also what makes `on conflict` legal here - SQLite
-    // cannot parse `on conflict` after a bare `values` in an upsert-shaped
-    // insert without the clause disambiguating where the conflict target ends.
+    // has to be decided by the writing statement itself, and only the `select`
+    // form takes a `where` to decide it in.
+    //
+    // The `where` is then load-bearing twice over. SQLite parses `on conflict`
+    // after `values` without trouble, but after a `select` it needs one to see
+    // where the select ends - "ON CONFLICT clause does not match any PRIMARY
+    // KEY or UNIQUE constraint" is what a bare `insert ... select ... on
+    // conflict` gets there. So the clause stays even if the quota condition
+    // ever moves elsewhere.
     const claimed = await executor.rows<{ id: string }>(sql`
       insert into ${plan} (id, user_id, label, size, visibility, share_code_hash)
       select ${row.id}, ${row.userId}, ${row.label}, ${row.size},

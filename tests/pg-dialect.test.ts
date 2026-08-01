@@ -127,7 +127,8 @@ describe("a claim that runs out of time", () => {
 
   test("translates the server cancelling its own statement", async () => {
     // SQLSTATE 57014, `query_canceled`, which is what `statement_timeout`
-    // raises.
+    // raises. The server answered, so the statement provably did not run and
+    // its transaction is aborted - the one failure a retry is safe after.
     const cancelled = Object.assign(
       new Error("canceling statement due to statement timeout"),
       { code: "57014" },
@@ -136,12 +137,14 @@ describe("a claim that runs out of time", () => {
     await expect(claim(cancelled)).rejects.toBeInstanceOf(DatabaseUnavailable);
   });
 
-  test("translates the client giving up before the server answered", async () => {
-    // `query_timeout` never reaches the server, so it carries no SQLSTATE and
-    // the message is all there is to go on.
-    await expect(claim(new Error("Query read timeout"))).rejects.toBeInstanceOf(
-      DatabaseUnavailable,
-    );
+  test("leaves a client-side deadline alone", async () => {
+    // `pg`'s own `query_timeout` never reached the server, so whether the
+    // statement ran is unknown - it may still be running, and on a `COMMIT` it
+    // may yet commit. Nothing may call that retryable. src/db/postgres.ts sets
+    // it past the server's deadline precisely so this is the unusual case.
+    await expect(
+      claim(new Error("Query read timeout")),
+    ).rejects.not.toBeInstanceOf(DatabaseUnavailable);
   });
 
   test("leaves every other failure alone", async () => {

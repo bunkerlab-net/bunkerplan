@@ -183,13 +183,25 @@ describe("the published document", () => {
     const upload = doc.paths["/api/plans"]?.["put"] as {
       responses: Record<
         string,
-        { description: string; headers?: Record<string, unknown> }
+        {
+          description: string;
+          headers?: Record<string, { description: string; schema: unknown }>;
+        }
       >;
     };
 
     const busy = upload.responses["503"];
+    // Both halves of the advice: that the attempt changed nothing, and that
+    // repeating it is the thing to do. Either alone leaves a client guessing.
     expect(busy?.description).toContain("Nothing was stored");
-    expect(busy?.headers).toHaveProperty("retry-after");
+    expect(busy?.description).toContain("repeating the request is safe");
+
+    // The header is the wait itself, so its shape is part of the contract - a
+    // client reads a number out of it. Documented without a schema it is a
+    // string as far as a generated client is concerned.
+    const wait = busy?.headers?.["retry-after"];
+    expect(wait?.description).toContain("Seconds");
+    expect(wait?.schema).toEqual({ type: "integer", minimum: 0 });
   });
 
   /**

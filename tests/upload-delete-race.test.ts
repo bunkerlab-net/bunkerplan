@@ -11,6 +11,7 @@ import {
   memoryPlans,
   type StoredPlan,
   silentLogger,
+  storedPlan,
 } from "./fakes.ts";
 
 /**
@@ -98,16 +99,24 @@ type SeedRow = Parameters<PlanRepo["insert"]>[0];
 /**
  * A row with the fields no test here varies already filled in, so each seed
  * site shows only what it is actually choosing.
+ *
+ * Off `storedPlan` rather than a second set of defaults. `PlanRepo.insert`
+ * takes the stored shape minus `createdAt` and `grants` - both of which the
+ * database owns - so the two agree by construction instead of by being edited
+ * together. `size` is the one deliberate difference: these tests count
+ * objects, not bytes, and one is the smallest thing to write.
  */
 function planRow(overrides: Partial<SeedRow> & Pick<SeedRow, "id">): SeedRow {
-  return {
+  const {
+    createdAt: _createdAt,
+    grants: _grants,
+    ...row
+  } = storedPlan({
     userId: OWNER,
-    label: null,
     size: 1,
-    visibility: "private",
-    shareCodeHash: null,
     ...overrides,
-  };
+  });
+  return row;
 }
 
 async function claim(plans: PlanRepo, id: string): Promise<void> {

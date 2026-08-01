@@ -273,10 +273,15 @@ describe("the unlock rate limit", () => {
   test("refuses a blank header rather than reserving an empty bucket", async () => {
     const { limits, spent } = fakeLimits(true);
 
+    // Off `CONFIG` rather than the literal, because this is the one case where
+    // the two must be the same header - a mismatch here would pass for the
+    // wrong reason, by looking exactly like the header never arriving. Not the
+    // shared `CLIENT_IP_HEADER` from tests/app-harness.ts: that names a
+    // different header, and the point is the one this config asked for.
     const { refused, reason } = await refusalOf(
       limits,
       CONFIG,
-      post({ "cf-connecting-ip": "" }),
+      post({ [CONFIG.clientIpHeader]: "" }),
     );
 
     expect(refused.status).toBe(429);

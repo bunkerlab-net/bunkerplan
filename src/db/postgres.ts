@@ -19,8 +19,16 @@ import { createDialectRepos } from "./repos.ts";
  *
  * `query_timeout` is the client-side half of that. `statement_timeout` needs a
  * server well enough to enforce it; one that accepts a connection and then
- * stops answering is bounded only from this end. Set to the same value, so the
- * two agree on how long a query may take rather than racing each other.
+ * stops answering is bounded only from this end.
+ *
+ * Set past the server's rather than equal to it, on purpose. Equal, the two
+ * race, and which fires is a coin toss - but only the server's has a defined
+ * outcome: `57014` means the statement did not run and its transaction is
+ * aborted, which is what lets `isTimeout` promise a safe retry. The client's
+ * deadline says only that no answer arrived, leaving whatever the server is
+ * doing unknown. Letting the server win means the client's deadline fires
+ * only when the server has genuinely stopped answering, which is a fault
+ * rather than a queue and is reported as one.
  *
  * Both bounds are what keeps the plan claim from eating the pool. Concurrent
  * uploads by one account queue on the advisory lock `pgDialect.claim` takes,
@@ -40,6 +48,8 @@ import { createDialectRepos } from "./repos.ts";
 const POOL_MAX = 10;
 const CONNECTION_TIMEOUT_MS = 5_000;
 const STATEMENT_TIMEOUT_MS = 15_000;
+/** Past `statement_timeout`, so the deadline with defined semantics wins. */
+const QUERY_TIMEOUT_MS = STATEMENT_TIMEOUT_MS + 1_000;
 
 const ABANDONED = "health probe abandoned; connection discarded";
 
@@ -142,7 +152,7 @@ export function createPostgresDb(
     max: POOL_MAX,
     connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
     statement_timeout: STATEMENT_TIMEOUT_MS,
-    query_timeout: STATEMENT_TIMEOUT_MS,
+    query_timeout: QUERY_TIMEOUT_MS,
   });
 
   /*
