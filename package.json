@@ -44,19 +44,19 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.5",
-    "@cloudflare/workers-types": "^5.20260728.1",
+    "@biomejs/biome": "^2.5.6",
+    "@cloudflare/workers-types": "^5.20260730.1",
     "@happy-dom/global-registrator": "^20.11.1",
-    "@scalar/api-reference": "^1.63.0",
-    "@scalar/openapi-parser": "^0.28.10",
+    "@scalar/api-reference": "^1.64.0",
+    "@scalar/openapi-parser": "^0.28.11",
     "@types/bun": "latest",
     "@types/pg": "^8.20.0",
     "auth": "^1.6.25",
     "drizzle-kit": "^0.31.10",
     "happy-dom": "^20.11.1",
-    "miniflare": "^4.20260722.0",
+    "miniflare": "^4.20260730.0",
     "sort-package-json": "^4.0.0",
-    "wrangler": "^4.114.0"
+    "wrangler": "^4.115.0"
   },
   "peerDependencies": {
     "typescript": "^7.0.2"
