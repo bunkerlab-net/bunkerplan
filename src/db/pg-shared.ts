@@ -60,23 +60,30 @@ export function pgDialect(db: PgDb): Dialect {
     // whichever way it ends. The body reads and writes through the transaction,
     // which is the only reason the executor is handed to it.
     //
-    // The lock is only half of it: the count must also see what the previous
-    // holder committed, which read committed gives by taking a fresh snapshot
-    // per statement. Under repeatable read or serializable the whole
-    // transaction reads one snapshot taken before the lock was granted, so the
-    // second claimant counts the account as it stood before the first one
-    // wrote and the ceiling admits one too many. Nothing here or in
-    // src/db/postgres.ts sets an isolation level, so this runs at the server
-    // default - a deployment that raises it, in `postgresql.conf` or through
-    // `options=` on `DATABASE_URL`, breaks the quota rather than tightening
-    // it.
+    // The lock is only half of it. The count must also see what the previous
+    // holder committed, and only read committed does: it takes a fresh
+    // snapshot per statement, so the count issued after the lock is granted
+    // sees the row the last holder wrote. Repeatable read and serializable
+    // read the whole transaction from one snapshot taken before the wait, so
+    // the second claimant counts the account as it stood before the first one
+    // wrote, and the ceiling admits one plan too many per waiter.
+    //
+    // Stated on the transaction rather than left to the server, because the
+    // server's answer is `default_transaction_isolation` - a `postgresql.conf`
+    // line or an `options=` parameter on `DATABASE_URL`, neither of which this
+    // deployment controls, and both of which would loosen the quota while
+    // reading like a tightening. `begin isolation level read committed` says
+    // what this needs, on a statement nobody can configure out from under it.
     claim: (userId, body) =>
-      db.transaction(async (tx) => {
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtext(${userId})::bigint)`,
-        );
-        return await body(pgExecutor(tx));
-      }),
+      db.transaction(
+        async (tx) => {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtext(${userId})::bigint)`,
+          );
+          return await body(pgExecutor(tx));
+        },
+        { isolationLevel: "read committed" },
+      ),
 
     // Drizzle asks node-postgres to leave timestamps as the strings Postgres
     // sent, so the column's own mapper is what reads one - which is also what
