@@ -79,6 +79,7 @@ function fakes(
       config: CONFIG,
       plans,
       uploadRateLimits: openRateLimits,
+      accountClosing: { open: async () => {}, isOpen: async () => false },
       storage,
       logger: silentLogger,
     },

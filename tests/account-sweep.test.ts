@@ -126,6 +126,33 @@ test("the sweep ceiling fits one Workers invocation", () => {
   );
 });
 
+/**
+ * And the same ceiling measured rather than computed.
+ *
+ * The arithmetic above restates the formula the constant was chosen from, so
+ * the two agree by construction and would keep agreeing if the sweep itself
+ * started making a call neither of them knows about. This counts what the
+ * implementation actually issues for a full account.
+ */
+test("a full account's sweep issues no more calls than that", async () => {
+  const f = fixture();
+  seed(
+    f,
+    Array.from({ length: WORKERS_MAX_PLANS_PER_USER }, (_, i) => `p${i}`),
+  );
+
+  await run(f, WORKERS_MAX_PLANS_PER_USER);
+
+  // `steps` records the marker, every listing, and every object delete; the
+  // row deletes are the removals, one per plan.
+  const subrequests = f.steps.length + WORKERS_MAX_PLANS_PER_USER;
+
+  expect(f.rows.size).toBe(0);
+  expect(subrequests).toBeLessThanOrEqual(
+    WORKERS_SUBREQUEST_LIMIT - AUTH_RESERVE,
+  );
+});
+
 describe("sweepAccountObjects", () => {
   /**
    * The marker first, before anything is listed. An upload that claims a row

@@ -206,6 +206,7 @@ describe("replacing a plan whose row vanishes underneath", () => {
     config: CONFIG,
     plans,
     uploadRateLimits: openRateLimits,
+    accountClosing: { open: async () => {}, isOpen: async () => false },
     storage,
   });
 

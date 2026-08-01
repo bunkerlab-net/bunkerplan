@@ -31,18 +31,26 @@ function recordingDb(): { db: PgDb; recorded: Recorded } {
   // The driver's own renderer, so a chunk carrying a bound parameter reads as
   // `$1` here rather than as an object.
   const render = new PgDialect();
-  const execute = async (query: SQL) => {
+  // Two distinct functions, deliberately. One shared `execute` would record a
+  // statement identically whichever handle issued it, so the test below could
+  // not tell a body running on the transaction from one running on the pool -
+  // which is the difference it exists to assert.
+  const onTransaction = async (query: SQL) => {
     recorded.statements.push(render.sqlToQuery(query).sql.trim());
     return { rows: [] };
   };
+  const onPool = async (query: SQL) => {
+    recorded.statements.push(`POOL: ${render.sqlToQuery(query).sql.trim()}`);
+    return { rows: [] };
+  };
   const db = {
-    execute,
+    execute: onPool,
     transaction: async (
       body: (tx: unknown) => Promise<unknown>,
       config?: PgTransactionConfig,
     ) => {
       recorded.configs.push(config);
-      return await body({ execute });
+      return await body({ execute: onTransaction });
     },
   };
   return { db: db as unknown as PgDb, recorded };
@@ -81,11 +89,15 @@ describe("the Postgres claim", () => {
 
     // A body writing outside the transaction escapes the lock and the rollback
     // both, which is the whole reason the executor is passed in rather than
-    // closed over.
+    // closed over. The `POOL:` prefix is what a statement issued on the pool
+    // would carry, and nothing here may.
     expect(returned).toBe("body-result");
     expect(recorded.statements).toEqual([
       expect.stringContaining("pg_advisory_xact_lock"),
       "insert into marker default values",
     ]);
+    expect(recorded.statements.filter((s) => s.startsWith("POOL:"))).toEqual(
+      [],
+    );
   });
 });

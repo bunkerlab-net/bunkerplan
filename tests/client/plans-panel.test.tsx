@@ -743,6 +743,33 @@ describe("PlansPanel row actions", () => {
     ).toBe(false);
   });
 
+  test("two presses in one tick delete once, not twice", async () => {
+    /*
+     * `disabled` above closes the window only from the next render, and `busy`
+     * is state - so two clicks dispatched before that render both run from the
+     * enabled one. The second would ask to delete a plan the first is already
+     * removing, and answer "no such plan" for a row that went exactly as asked:
+     * an error beside a table that is now correct.
+     *
+     * The ref inside `useWriteLatch` is what closes it, and it is the same
+     * latch the credentials panels take rather than a second one.
+     */
+    const removal = deferred<void>();
+    api.listPlans = async () => [plan()];
+    api.deletePlan = removal.answer;
+    const view = await mountAsync(<PlansPanel />);
+
+    const press = new MouseEvent("click", { bubbles: true, cancelable: true });
+    const again = new MouseEvent("click", { bubbles: true, cancelable: true });
+    view.byText("button", "Delete").dispatchEvent(press);
+    view.byText("button", "Delete").dispatchEvent(again);
+    removal.release();
+    await flush();
+
+    expect(countOf("deletePlan")).toBe(1);
+    expect(view.maybe(".error")).toBeNull();
+  });
+
   test("a successful mutation clears the previous error", async () => {
     api.listPlans = async () => [plan()];
     api.deletePlan = async () => {

@@ -78,6 +78,7 @@ function registerPlanItem(app: Hono, getServices: GetServices): void {
         plans: db.plans,
         uploadRateLimits: db.uploadRateLimits,
         storage,
+        accountClosing: db.accountClosing,
         logger,
       },
       c.req.raw,

@@ -3,6 +3,7 @@ import type { AppAuth } from "../auth/instance.ts";
 import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
 import type {
+  AccountClosingRepo,
   PlanRepo,
   PlanStorage,
   RateLimitRepo,
@@ -14,7 +15,7 @@ import { resolveUserId } from "./require-user.ts";
 import { readUploadBody } from "./upload-body.ts";
 import { checkUploadRate } from "./upload-rate-limit.ts";
 
-/** Six things, so they arrive named - as `CreatePlanDeps` does next door. */
+/** Seven things, so they arrive named - as `CreatePlanDeps` does next door. */
 export interface ReplacePlanDeps {
   auth: AppAuth;
   config: Pick<
@@ -24,6 +25,7 @@ export interface ReplacePlanDeps {
   plans: PlanRepo;
   uploadRateLimits: RateLimitRepo;
   storage: PlanStorage;
+  accountClosing: AccountClosingRepo;
   logger: Logger;
 }
 
@@ -48,7 +50,15 @@ export async function replacePlan(
   request: Request,
   id: string,
 ): Promise<Response> {
-  const { auth, config, logger, plans, storage, uploadRateLimits } = deps;
+  const {
+    accountClosing,
+    auth,
+    config,
+    logger,
+    plans,
+    storage,
+    uploadRateLimits,
+  } = deps;
 
   const userId = await resolveUserId(auth, request);
   if (userId === null) return problem(401, "authentication required");
@@ -68,8 +78,36 @@ export async function replacePlan(
   try {
     await storage.put(id, body);
   } catch (error) {
+    // The row stays. A failed `put` leaves the previous object in place, so
+    // the plan is still whole and still the caller's - unlike an upload, where
+    // the row was claimed for an object that never landed.
     logger.error({ err: error, planId: id }, "plan replacement failed");
     return problem(502, "storage unavailable");
+  }
+
+  /*
+   * Read after the write, and this is the interleaving it exists for: the
+   * account sweep removes an object before the row naming it, so a
+   * replacement landing between those two puts the object back, passes
+   * `resize` against a row that is still there, and then loses that row to
+   * the sweep. What is left is an object served at `/p/{id}` that nothing
+   * owns and nothing can delete.
+   *
+   * `resize` cannot see it - the row is present when it runs - and reading
+   * the marker before the write would say nothing about a deletion that
+   * started since. Read here, a `false` orders this `put` ahead of the
+   * marker, and therefore ahead of the sweep's own object delete, so the
+   * sweep takes this object with the row.
+   *
+   * The deletion that already finished is the other half, and `resize` does
+   * catch that one: `account_closing` cascades with the user, so the marker
+   * is gone by then and the row is too. Same pair, same reasons, as
+   * `storeAndConfirm` - which is not reused here only because its compensation
+   * for a failed write is to drop the row.
+   */
+  if (await accountClosing.isOpen(userId)) {
+    await sweepOrphanedObject(storage, logger, id);
+    return notFound();
   }
 
   if (!(await plans.resize(id, userId, body.byteLength))) {
