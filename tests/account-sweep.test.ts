@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { sweepAccountObjects } from "../src/auth/instance.ts";
 import { PLAN_PAGE_SIZE, WORKERS_MAX_PLANS_PER_USER } from "../src/limits.ts";
+import type { Logger } from "../src/log.ts";
 import type {
   AccountClosingRepo,
   PlanRepo,
@@ -10,7 +11,6 @@ import {
   type MemoryPlans,
   memoryPlans,
   type StoredPlan,
-  silentLogger,
   storedPlan,
 } from "./fakes.ts";
 
@@ -31,6 +31,13 @@ import {
 
 const OWNER = "user-a";
 
+/** One `logger` call, so the sweep's own account of itself can be asserted. */
+interface LogLine {
+  level: "warn" | "info";
+  fields: Record<string, unknown>;
+  message: string;
+}
+
 interface Fixture {
   /** Every id `storage.delete` was called with, in order, duplicates kept. */
   objects: string[];
@@ -42,6 +49,13 @@ interface Fixture {
    * ordering can say so.
    */
   steps: string[];
+  /**
+   * What the sweep logged. The one report an operator gets of a deletion that
+   * finished with something odd about it, so the counts in it are a contract
+   * rather than decoration.
+   */
+  logs: LogLine[];
+  logger: Logger;
   /** The unwrapped repository, for an override that delegates to it. */
   base: MemoryPlans;
   plans: PlanRepo;
@@ -52,16 +66,24 @@ interface Fixture {
 function fixture(planOverrides: Partial<PlanRepo> = {}): Fixture {
   const objects: string[] = [];
   const steps: string[] = [];
+  const logs: LogLine[] = [];
   const closing = new Set<string>();
   const base = memoryPlans();
   const listByUser: PlanRepo["listByUser"] = async (userId, limit) => {
     steps.push("list");
     return await base.listByUser(userId, limit);
   };
+  const record =
+    (level: LogLine["level"]) =>
+    (fields: Record<string, unknown>, message: string) => {
+      logs.push({ level, fields, message });
+    };
 
   return {
     objects,
     steps,
+    logs,
+    logger: { warn: record("warn"), info: record("info") } as unknown as Logger,
     closing,
     rows: base.rows,
     base,
@@ -95,7 +117,7 @@ function run(f: Fixture, maxAttempts?: number): Promise<void> {
     plans: f.plans,
     accountClosing: f.accountClosing,
     storage: f.storage,
-    logger: silentLogger,
+    logger: f.logger,
     userId: OWNER,
     maxAttempts,
   });
@@ -171,6 +193,17 @@ describe("sweepAccountObjects", () => {
     expect(f.steps.slice(0, 3)).toEqual(["open", "list", "delete"]);
     expect(f.objects.toSorted()).toEqual(["p1", "p2", "p3"]);
     expect(f.rows.size).toBe(0);
+
+    // One line, at info, counting what went. No `refusedCount`: the field is
+    // what distinguishes a sweep that met something odd from one that did not,
+    // so reporting a zero on every clean deletion would make it say nothing.
+    expect(f.logs).toEqual([
+      {
+        level: "info",
+        fields: { userId: OWNER, planCount: 3 },
+        message: "deleted plan objects before account deletion",
+      },
+    ]);
   });
 
   /**
@@ -201,8 +234,14 @@ describe("sweepAccountObjects", () => {
    * The benign refusal: the owner deleted that plan while the sweep ran, so
    * the row is gone by the next listing. Nothing is orphaned - no row is left
    * naming an object - and aborting the deletion over it would be wrong.
+   *
+   * It is not silent either. The account is gone irreversibly and one of its
+   * plans took a path nobody watched, so the warning is the only record that
+   * it happened - and the counts are what make it readable, since "some plans"
+   * with no numbers says nothing about whether one row raced or half the
+   * account did.
    */
-  test("finishes when a refused row stops being listed", async () => {
+  test("finishes when a refused row stops being listed, and says so", async () => {
     const f = fixture();
     f.plans.deleteOwned = async (id, userId) => {
       if (id !== "vanishing") return await f.base.deleteOwned(id, userId);
@@ -213,6 +252,18 @@ describe("sweepAccountObjects", () => {
 
     await expect(run(f)).resolves.toBeUndefined();
     expect(f.rows.size).toBe(0);
+
+    // Warn, not info: a deletion that finished is still a deletion, but not
+    // the one that was asked for. `planCount` counts what this sweep removed
+    // and `refusedCount` what went by another route - one each here.
+    expect(f.logs).toEqual([
+      {
+        level: "warn",
+        fields: { userId: OWNER, planCount: 1, refusedCount: 1 },
+        message:
+          "some plans were removed by another writer during the account sweep",
+      },
+    ]);
   });
 
   /**
