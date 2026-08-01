@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import type { Logger } from "../log.ts";
 import type { Db } from "../services/types.ts";
 import { createAccountClosingRepo } from "./account-closing.shared.ts";
 import { createPlanRepo } from "./plans.shared.ts";
@@ -20,7 +21,10 @@ import {
  * why the D1 driver lives in its own file. It also requires the Bun runtime;
  * self-hosters on plain Node must use DB_DRIVER=postgres.
  */
-export function createBunSqliteDb(path: string): Db & SqliteAuthHandle {
+export function createBunSqliteDb(
+  path: string,
+  logger: Pick<Logger, "warn">,
+): Db & SqliteAuthHandle {
   const handle = new Database(path, { create: true });
   // SQLite defaults foreign key enforcement to OFF per connection. Without
   // this the ON DELETE CASCADE constraints silently do nothing and account
@@ -36,7 +40,7 @@ export function createBunSqliteDb(path: string): Db & SqliteAuthHandle {
       dialect,
       dialect.tables.uploadRateLimit,
     ),
-    unlockRateLimits: createUnlockRateLimitRepo(dialect),
+    unlockRateLimits: createUnlockRateLimitRepo(dialect, logger),
     accountClosing: createAccountClosingRepo(dialect),
     async probe() {
       await db.run(sql`select 1`);

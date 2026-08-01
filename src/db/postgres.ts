@@ -158,7 +158,7 @@ export function createPostgresDb(
       dialect,
       dialect.tables.uploadRateLimit,
     ),
-    unlockRateLimits: createUnlockRateLimitRepo(dialect),
+    unlockRateLimits: createUnlockRateLimitRepo(dialect, logger),
     accountClosing: createAccountClosingRepo(dialect),
     probe: (signal) => probeOnce(pool, signal),
   };

@@ -48,7 +48,7 @@ async function initialise(): Promise<Services> {
   const config = loadConfig(settings, { workers: true });
 
   const logger = createLogger(config);
-  const db = createD1Db(env.DB);
+  const db = createD1Db(env.DB, logger);
   const kv = createWorkersKv(env.KV);
   const storage = createR2Storage(env.BUCKET);
   // The one place the subrequest budget is known. `MAX_PLANS_PER_USER` is

@@ -63,6 +63,7 @@ import type {
   RateLimitRepo,
 } from "../../src/services/types.ts";
 import { createS3Storage } from "../../src/storage/s3.ts";
+import { silentLogger } from "../fakes.ts";
 import { migrationFiles } from "../migration-files.ts";
 
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
@@ -330,7 +331,11 @@ function repos(
     rateLimits: createRateLimitRepo(dialect, dialect.tables.uploadRateLimit),
     // Always sweeps: the pruning contract asserts a closed window is gone,
     // and the default only sweeps on a fraction of attempts.
-    unlockRateLimits: createUnlockRateLimitRepo(dialect, () => true),
+    unlockRateLimits: createUnlockRateLimitRepo(
+      dialect,
+      silentLogger,
+      () => true,
+    ),
     accountClosing: createAccountClosingRepo(dialect),
   };
 }

@@ -1,10 +1,21 @@
 import { describe, expect, test } from "bun:test";
+import { sql } from "drizzle-orm";
 import { pino } from "pino";
 import { z } from "zod";
 import { ref } from "../src/api/schemas.ts";
+import type { Dialect } from "../src/db/dialect.ts";
 import { retryAfterSeconds, sometimes } from "../src/db/rate-limit-window.ts";
+import { createUnlockRateLimitRepo } from "../src/db/rate-limits.shared.ts";
+import { accountClosing } from "../src/db/schema/account-closing.sqlite.ts";
+import { user } from "../src/db/schema/auth.sqlite.ts";
+import { plan, planGrant } from "../src/db/schema/plan.sqlite.ts";
+import {
+  unlockRateLimit,
+  uploadRateLimit,
+} from "../src/db/schema/rate-limit.sqlite.ts";
 import { healthz, PROBE_TIMEOUT_MS, type Probed } from "../src/http/healthz.ts";
 import { replacePlan } from "../src/http/replace-plan.ts";
+import type { Logger } from "../src/log.ts";
 import type {
   PlanObject,
   PlanRepo,
@@ -528,6 +539,77 @@ describe("the fixed-window arithmetic both limiters share", () => {
     // the path the per-address cap cannot bound.
     expect(fired).toBeGreaterThan(4000 / 16 / 3);
     expect(fired).toBeLessThan((4000 / 16) * 3);
+  });
+});
+
+describe("the unlock bucket's opportunistic prune", () => {
+  /**
+   * `sometimes` fires on one call in sixteen, so a prune that throws would
+   * refuse that fraction of redemptions - on the one route with no credential
+   * to retry with. The prune is housekeeping and the count is the decision;
+   * only the second may fail the request.
+   */
+
+  /** A window far enough back that the wait is the floored one second. */
+  const WINDOW_START = 1_700_000_000_000;
+
+  /**
+   * The counter's allowed answer, whatever it is asked: `consumeOne` reads one
+   * row back from its upsert, so a stub that always returns one is a bucket
+   * that always has room. It is the prune above it that is under test.
+   */
+  const dialect = (run: () => Promise<void>): Dialect => ({
+    rows: async () => [{ windowStart: WINDOW_START }] as never,
+    run,
+    tables: {
+      plan,
+      planGrant,
+      user,
+      accountClosing,
+      uploadRateLimit,
+      unlockRateLimit,
+    },
+    claim: async (_userId, body) => await body({ rows: async () => [], run }),
+    createdAt: (value) => new Date(Number(value)),
+    floor: (expr) => sql`max(${expr}, 0)`,
+  });
+
+  test("a prune that fails is logged, and the redemption still passes", async () => {
+    const warnings: unknown[] = [];
+    const logger = {
+      warn: (...args: unknown[]) => {
+        warnings.push(args);
+      },
+    } as unknown as Logger;
+    const repo = createUnlockRateLimitRepo(
+      dialect(async () => {
+        throw new Error("database is locked");
+      }),
+      logger,
+      () => true,
+    );
+
+    expect(await repo.consume("addr", 3, 60)).toEqual({
+      allowed: true,
+      retryAfter: 1,
+      windowStart: WINDOW_START,
+    });
+    expect(warnings).toHaveLength(1);
+  });
+
+  test("and a prune that succeeds says nothing", async () => {
+    const logger = {
+      warn: () => {
+        throw new Error("nothing to warn about");
+      },
+    } as unknown as Logger;
+    const repo = createUnlockRateLimitRepo(
+      dialect(async () => {}),
+      logger,
+      () => true,
+    );
+
+    expect((await repo.consume("addr", 3, 60)).allowed).toBe(true);
   });
 });
 

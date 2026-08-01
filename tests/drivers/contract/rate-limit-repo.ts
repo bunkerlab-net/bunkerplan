@@ -69,6 +69,25 @@ export function describeRateLimitRepo(
         expect(refused.retryAfter).toBeLessThanOrEqual(WINDOW);
       });
 
+      /**
+       * The insert claims a brand new key unconditionally - the `count < max`
+       * test lives on the conflict branch, which a first call never reaches -
+       * so a bucket allowing nothing has to be refused before the statement
+       * runs. Asserted on both dialects because the row is what would carry
+       * the mistake: a counter written for a limit that permits no calls.
+       */
+      test.each([0, -1])(
+        "a max of %i refuses and writes nothing",
+        async (max) => {
+          const key = await account();
+
+          const refused = await consume(key, max);
+          expect(refused.allowed).toBe(false);
+          expect(refused.retryAfter).toBe(WINDOW);
+          expect(await fixture.countRateLimits(key)).toBe(0);
+        },
+      );
+
       test("an allowed call also reports the time left", async () => {
         const first = await consume(await account());
         expect(first.allowed).toBe(true);

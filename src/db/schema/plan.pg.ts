@@ -8,8 +8,9 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { PLAN_VISIBILITIES, type PlanVisibility } from "../../limits.ts";
+import type { PlanVisibility } from "../../limits.ts";
 import { user } from "./auth.pg.ts";
+import { PLAN_VISIBILITY_CHECK } from "./visibility-check.ts";
 
 export const plan = pgTable(
   "plan",
@@ -39,20 +40,12 @@ export const plan = pgTable(
     // `$type` is a compile-time claim and the repo is not the only writer -
     // a migration or a console session can put anything in this column, and
     // the read gate treats every value that is not "public" as private.
-    // Unqualified to match the SQLite twin, where the qualified form breaks
-    // the table rebuild - see the note there.
     //
-    // The two values come from the tuple in src/limits.ts rather than being
-    // typed out again. `sql.raw`, because this text is emitted into a migration
-    // where a bound parameter would have no meaning - so adding a value to the
-    // tuple is a migration, not an edit here: run `bun run db:generate` and
-    // commit both dialects' output with it. See the note on the SQLite twin.
-    check(
-      "plan_visibility_check",
-      sql.raw(
-        `"visibility" in (${PLAN_VISIBILITIES.map((v) => `'${v}'`).join(", ")})`,
-      ),
-    ),
+    // The expression itself is src/db/schema/visibility-check.ts, shared with
+    // the SQLite twin so both dialects emit identical migration text. `sql.raw`
+    // for the same reason it does: this goes into a migration, where a bound
+    // parameter would have no meaning.
+    check("plan_visibility_check", sql.raw(PLAN_VISIBILITY_CHECK)),
   ],
 );
 

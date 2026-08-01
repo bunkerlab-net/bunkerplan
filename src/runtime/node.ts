@@ -37,7 +37,7 @@ async function initialise(): Promise<Services> {
     db = createPostgresDb(connectionString, logger);
   } else if (config.dbDriver === "sqlite") {
     const { createBunSqliteDb } = await import("../db/bun-sqlite.ts");
-    db = createBunSqliteDb(config.sqlitePath);
+    db = createBunSqliteDb(config.sqlitePath, logger);
   } else {
     throw new Error(
       `DB_DRIVER=${config.dbDriver} is only available on Cloudflare Workers; ` +

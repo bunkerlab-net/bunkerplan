@@ -1,4 +1,5 @@
 import { type SQLWrapper, sql } from "drizzle-orm";
+import type { Logger } from "../log.ts";
 import type { RateLimitRepo, RateLimitResult } from "../services/types.ts";
 import type { Dialect } from "./dialect.ts";
 import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
@@ -54,6 +55,12 @@ async function consumeOne(
   const windowMs = windowSeconds * 1000;
   const now = Date.now();
   const cutoff = now - windowMs;
+
+  // A bucket that allows nothing refuses without touching the table. The
+  // insert below claims a brand new key unconditionally - there is no conflict
+  // for `count < max` to be tested against - so a `max` of zero would let the
+  // first request per key through the very limit forbidding it.
+  if (max < 1) return { allowed: false, retryAfter: windowSeconds };
 
   // `window_start` is epoch milliseconds, reported as a number by SQLite and as
   // a string by Postgres, whose column is a `bigint` - hence the conversion on
@@ -132,17 +139,27 @@ export function createRateLimitRepo(
  */
 export function createUnlockRateLimitRepo(
   dialect: Dialect,
+  logger: Pick<Logger, "warn">,
   shouldSweep: () => boolean = sometimes,
 ): RateLimitRepo {
   const unlock = dialect.tables.unlockRateLimit;
   const counter = createRateLimitRepo(dialect, unlock);
   return {
     async consume(key, max, windowSeconds) {
+      // Housekeeping, and never the decision. A prune that fails - lock
+      // contention on SQLite, a blip on the way to Postgres - must not refuse
+      // a redemption the counter would have allowed, and the next sweep tries
+      // again. A failure that is really the database being gone surfaces on
+      // the consume below, which is the call that has to be right.
       if (shouldSweep()) {
-        await dialect.run(sql`
-          delete from ${unlock}
-          where window_start <= ${Date.now() - windowSeconds * 1000}
-        `);
+        try {
+          await dialect.run(sql`
+            delete from ${unlock}
+            where window_start <= ${Date.now() - windowSeconds * 1000}
+          `);
+        } catch (cause) {
+          logger.warn({ err: cause }, "unlock rate-limit sweep failed");
+        }
       }
       return await counter.consume(key, max, windowSeconds);
     },

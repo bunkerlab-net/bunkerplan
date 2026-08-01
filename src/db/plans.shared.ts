@@ -34,8 +34,21 @@ async function updateOwned(
   /** Extra condition the row must also satisfy, folded into the same write. */
   guard?: SQL,
 ): Promise<boolean> {
+  /*
+   * `PlanWrite` is a `Partial`, and without `exactOptionalPropertyTypes` an
+   * explicit `undefined` typechecks into it. Bound as a value it would reach
+   * the driver, so the entries are filtered - and a write left with nothing to
+   * set throws rather than returning `false`, which is this function's word
+   * for "no row matched" and would report a caller's bug as a missing plan.
+   */
+  const writes = Object.entries(fields).filter(
+    ([, value]) => value !== undefined,
+  );
+  if (writes.length === 0) {
+    throw new TypeError(`updateOwned called with nothing to set for ${id}`);
+  }
   const assignments = sql.join(
-    Object.entries(fields).map(
+    writes.map(
       ([column, value]) =>
         sql`${sql.identifier(WRITABLE[column as keyof PlanWrite])} = ${value}`,
     ),
@@ -208,12 +221,12 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
         size: number;
         created_at: unknown;
         visibility: PlanVisibility;
-        share_code_hash: string | null;
+        has_share_code: unknown;
         has_grants: unknown;
       }>(sql`
         select p.id as id, p.label as label, p.size as size,
                p.created_at as created_at, p.visibility as visibility,
-               p.share_code_hash as share_code_hash,
+               (p.share_code_hash is not null) as has_share_code,
                exists (
                  select 1 from ${planGrant} g where g.plan_id = p.id
                ) as has_grants
@@ -228,9 +241,10 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
         size: row.size,
         createdAt: dialect.createdAt(row.created_at),
         visibility: row.visibility,
-        // The hash must not escape the repo: the dashboard only needs to know
-        // whether a code exists.
-        hasShareCode: row.share_code_hash !== null,
+        // Answered in SQL, so the hash is never read into this process at all.
+        // The dashboard needs to know a code exists, and the value is what
+        // would let a holder forge the plan's unlock cookie.
+        hasShareCode: Boolean(row.has_share_code),
         hasGrants: Boolean(row.has_grants),
       }));
     },

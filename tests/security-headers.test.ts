@@ -89,10 +89,17 @@ describe("applySecurityHeaders - plan responses", () => {
     },
   );
 
-  test("strips the marker so it never leaves the process", () => {
-    const response = marked({ status: 200 });
-    expect(get(response, PLAN_DOCUMENT_HEADER)).toBeNull();
-  });
+  /**
+   * Both branches, because they are different code: the `304` path used to
+   * send almost no headers, and a marker that survived it would leak an
+   * internal name to the client on exactly the responses nobody inspects.
+   */
+  test.each([200, 304])(
+    "strips the marker off a %i so it never leaves the process",
+    (status) => {
+      expect(get(marked({ status }), PLAN_DOCUMENT_HEADER)).toBeNull();
+    },
+  );
 
   test("the pinned policy sandboxes and blocks fetching", () => {
     const csp = get(marked({ status: 200 }), "content-security-policy");

@@ -47,7 +47,9 @@ services:
       retries: 10
 
   minio-init:
-    image: docker.io/minio/mc
+    # Pinned like the server above. `mc` releases on its own cadence, so this
+    # tag does not track the `minio` one and is bumped separately.
+    image: docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
         condition: service_healthy
