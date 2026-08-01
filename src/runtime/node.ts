@@ -1,13 +1,8 @@
-import { createAuth } from "../auth/instance.ts";
+import { type AuthDb, createAuth } from "../auth/instance.ts";
 import { loadConfig } from "../config.ts";
 import { createLogger } from "../log.ts";
-import type {
-  Db,
-  KvStore,
-  PlanStorage,
-  RuntimeTarget,
-  Services,
-} from "../services/types.ts";
+import type { Services } from "../services/context.ts";
+import type { KvStore, PlanStorage, RuntimeTarget } from "../services/types.ts";
 
 /**
  * Node/Bun wiring. Structurally matches src/runtime/cloudflare.ts.
@@ -33,7 +28,7 @@ async function initialise(): Promise<Services> {
   // idle client failing - see src/db/postgres.ts.
   const logger = createLogger(config);
 
-  let db: Db;
+  let db: AuthDb;
   if (config.dbDriver === "postgres") {
     const { createPostgresDb } = await import("../db/postgres.ts");
     // loadConfig already rejects a missing DATABASE_URL for this driver; the

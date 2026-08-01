@@ -1,51 +1,91 @@
-import type { PlanVisibility } from "../services/types.ts";
+import { PLAN_VISIBILITIES, type PlanVisibility } from "../limits.ts";
 
 /**
- * What the `?visibility=` upload parameter accepts.
+ * What the two routes that set visibility accept, and the one parser that
+ * reads them: `?visibility=` on upload, and the body of
+ * `PUT /api/plans/:id/sharing`.
  *
  * `"code"` is an upload *intent*, not a stored state: it stores `private` and
  * mints a share code in the same insert, returning the plaintext once in the
  * 201 body. Keeping it out of the stored enum is what stops a third visibility
  * from leaking into the column, the dashboard, and the published document.
  */
-export type UploadVisibility = "public" | "private" | "code";
+export type UploadVisibility = PlanVisibility | "code";
 
-export type UploadVisibilityResult =
-  | { ok: true; requested: UploadVisibility }
+export type VisibilityResult =
+  | {
+      ok: true;
+      /** What the caller asked for, `"code"` included. */
+      requested: UploadVisibility;
+      /** What that means for the column, which has no `"code"`. */
+      stored: PlanVisibility;
+    }
   | { ok: false; reason: string };
 
-export type PlanVisibilityResult =
-  | { ok: true; visibility: PlanVisibility }
-  | { ok: false; reason: string };
-
-/**
- * Reads `?visibility=`. Absent means private: the issue this implements asks
- * for plans to be private unless their owner says otherwise, and a default
- * that leaked in the other direction would be silent.
- */
-export function parseUploadVisibility(
-  raw: string | null,
-): UploadVisibilityResult {
-  if (raw === null) return { ok: true, requested: "private" };
-  if (raw === "public" || raw === "private" || raw === "code") {
-    return { ok: true, requested: raw };
-  }
-  return { ok: false, reason: "visibility must be public, private, or code" };
-}
-
-/** The value that reaches the `visibility` column. `"code"` stores `private`. */
-export function storedVisibility(requested: UploadVisibility): PlanVisibility {
-  return requested === "public" ? "public" : "private";
+export interface VisibilityOptions {
+  /** Whether the `"code"` upload intent is one of the accepted values. */
+  code: boolean;
+  /**
+   * What no value at all means. Absent `?visibility=` means private: the issue
+   * this implements asks for plans to be private unless their owner says
+   * otherwise, and a default that leaked in the other direction would be
+   * silent. A sharing body that names nothing is a client mistake rather than a
+   * request to make the plan private, so that caller passes `"refuse"`.
+   */
+  absent: PlanVisibility | "refuse";
+  /**
+   * Where the value is: a bare one, as a query parameter is, or the
+   * `visibility` field of a parsed JSON body.
+   *
+   * Named rather than sniffed. An object is never a legal visibility, so the
+   * two could be told apart - but then a body that is a bare JSON string would
+   * read as a visibility, and `PUT .../sharing` refuses one today.
+   */
+  from: "value" | "body";
 }
 
 /**
- * The body of `PUT /api/plans/:id/sharing`, which has no `"code"` intent:
- * giving an existing plan a code is `POST /api/plans/:id/share-code`, because
- * that is the request that hands back a plaintext code.
+ * Reads a requested visibility, refusing anything outside the accepted set.
+ *
+ * The accepted set is derived from `PLAN_VISIBILITIES`, so neither the check
+ * nor the refusal message can name a value the column does not hold.
  */
-export function parsePlanVisibility(raw: unknown): PlanVisibilityResult {
-  if (raw === "public" || raw === "private") {
-    return { ok: true, visibility: raw };
+export function parseVisibility(
+  raw: unknown,
+  options: VisibilityOptions,
+): VisibilityResult {
+  const accepted: readonly UploadVisibility[] = options.code
+    ? [...PLAN_VISIBILITIES, "code"]
+    : PLAN_VISIBILITIES;
+  // Both spellings come off the same tuple, so a refusal cannot name a value
+  // the column does not hold, and the intent is appended where it is accepted.
+  const reason = options.code
+    ? `visibility must be ${PLAN_VISIBILITIES.join(", ")}, or code`
+    : `visibility must be ${PLAN_VISIBILITIES.join(" or ")}`;
+
+  const value =
+    options.from === "body"
+      ? typeof raw === "object" && raw !== null && "visibility" in raw
+        ? raw.visibility
+        : undefined
+      : raw;
+
+  if (value === null || value === undefined) {
+    return options.absent === "refuse"
+      ? { ok: false, reason }
+      : { ok: true, requested: options.absent, stored: options.absent };
   }
-  return { ok: false, reason: "visibility must be public or private" };
+
+  for (const candidate of accepted) {
+    if (value === candidate) {
+      return {
+        ok: true,
+        requested: candidate,
+        // `"code"` is the intent that stores `private`; the other two store
+        // themselves.
+        stored: candidate === "public" ? "public" : "private",
+      };
+    }
+  }
+  return { ok: false, reason };
 }

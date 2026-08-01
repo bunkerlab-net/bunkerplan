@@ -54,10 +54,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # `bun run deploy` is the path a local deploy already takes: refuse the
-      # dev placeholders, build, then deploy the generated config rather than
-      # wrangler.jsonc. Calling wrangler directly here would be a second
-      # mechanism, free to drift from the one people run by hand.
+      # `bun run deploy` is the path a local deploy already takes: build, then
+      # `wrangler deploy` against wrangler.jsonc. Calling wrangler directly
+      # here would be a second mechanism, free to drift from the one people
+      # run by hand.
       - name: Deploy Worker
         run: bun run deploy
         env:

@@ -1,7 +1,7 @@
 import type { AppAuth } from "../auth/instance.ts";
 import type { PlanRepo, PlanStorage } from "../services/types.ts";
 import { resolvePlanAccess } from "./plan-access.ts";
-import { PLAN_CSP } from "./security-headers.ts";
+import { PLAN_CSP, PLAN_DOCUMENT_HEADER } from "./security-headers.ts";
 import type { ShareCookieConfig } from "./share-auth.ts";
 
 /**
@@ -57,6 +57,11 @@ export async function servePlan(
   // headers (RFC 9111 4.3.4) would then hold the plan under a policy that lets
   // it script the real origin.
   const headers: Record<string, string> = {
+    // The marker rides in the same literal as the policy so the two cannot be
+    // set apart: `applySecurityHeaders` strips it and overwrites the policy
+    // with the same constant on every response that carries it. This is the
+    // only place that sets it - the gate and the 404 are the app's own HTML.
+    [PLAN_DOCUMENT_HEADER]: "1",
     "content-security-policy": PLAN_CSP,
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",

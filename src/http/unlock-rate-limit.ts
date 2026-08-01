@@ -1,26 +1,13 @@
 import type { Config } from "../config.ts";
-import type { Logger } from "../log.ts";
 import type { RateLimitRepo } from "../services/types.ts";
 import { problem } from "./problem.ts";
 import { unlockBucketKey } from "./share-auth.ts";
 
-type UnlockRateConfig = Pick<
+/** Exported so the route that owns the budget names one contract, not a copy. */
+export type UnlockRateConfig = Pick<
   Config,
   "clientIpHeader" | "secret" | "unlockRateMax" | "unlockRateWindowSec"
 >;
-
-/**
- * Configs that have already reported a missing trusted header.
- *
- * The warning below names one deployment-wide misconfiguration, and this route
- * takes no credential: repeating it per request lets a stranger turn a flood of
- * refused unlocks into a flood of log lines. Keyed on the config object, so it
- * is once per config per isolate - `getServices` memoises one config, which
- * makes that once per isolate in production, and a fresh one each time a new
- * isolate starts. A caller that builds its own config gets its own first
- * warning; a test wanting one has to pass a config no earlier call has seen.
- */
-const reported = new WeakSet<UnlockRateConfig>();
 
 /**
  * The share-code redemption budget for the calling address.
@@ -79,8 +66,22 @@ export interface UnlockHold {
   readonly windowStart: number;
 }
 
-/** Either the 429 to return, or the reservation the attempt now holds. */
-export type UnlockReservation = { readonly refused: Response } | UnlockHold;
+/**
+ * Either the 429 to return, or the reservation the attempt now holds.
+ *
+ * A refusal says which of the two it is. `no-client-address` is one
+ * deployment-wide misconfiguration rather than a fact about this caller, and
+ * this route takes no credential: repeating it per request would let a stranger
+ * turn a flood of refused unlocks into a flood of log lines. So the reason
+ * travels out instead of being logged here, and the route that owns the budget
+ * says it once per app - see `createUnlockRoute` in src/http/unlock.ts.
+ */
+export interface UnlockRefusal {
+  readonly refused: Response;
+  readonly reason: "no-client-address" | "budget-spent";
+}
+
+export type UnlockReservation = UnlockRefusal | UnlockHold;
 
 /**
  * Takes one count before the code is compared.
@@ -99,32 +100,23 @@ export async function reserveUnlockAttempt(
   limits: RateLimitRepo,
   config: UnlockRateConfig,
   request: Request,
-  logger: Pick<Logger, "warn">,
 ): Promise<UnlockReservation> {
   const bucket = await bucketFor(config, request);
   if (bucket === null) {
     /*
-     * Said out loud, because the symptom is silent: every redemption on this
-     * deployment answers 429 and no reader can tell why. Configuration refuses
-     * to load without naming a header, so reaching here means the proxy in
-     * front is not sending the one it was told to trust.
+     * Configuration refuses to load without naming a header, so reaching here
+     * means the proxy in front is not sending the one it was told to trust.
+     * The symptom is otherwise silent - every redemption on this deployment
+     * answers 429 and no reader can tell why - so the caller says it out loud,
+     * once. The refusal below is still every time.
      *
-     * Once, per the note on `reported`. The refusal below is still every time.
-     */
-    if (!reported.has(config)) {
-      reported.add(config);
-      logger.warn(
-        { header: config.clientIpHeader },
-        "no trusted client address header, so every unlock is refused",
-      );
-    }
-    /*
-     * A minute, not the one second a spent budget gets. Nothing here refills:
-     * the deployment refuses every unlock until an operator changes the proxy,
-     * so "try again immediately" invites a client to retry forever against an
-     * answer that cannot change.
+     * `retry-after` is a minute, not the one second a spent budget gets.
+     * Nothing here refills: the deployment refuses every unlock until an
+     * operator changes the proxy, so "try again immediately" invites a client
+     * to retry forever against an answer that cannot change.
      */
     return {
+      reason: "no-client-address",
       refused: problem(429, "rate limit exceeded", { "retry-after": "60" }),
     };
   }
@@ -137,6 +129,7 @@ export async function reserveUnlockAttempt(
   if (limit.allowed) return { bucket, windowStart: limit.windowStart };
 
   return {
+    reason: "budget-spent",
     refused: problem(429, "rate limit exceeded", {
       "retry-after": String(limit.retryAfter),
     }),
@@ -154,7 +147,7 @@ export async function reserveUnlockAttempt(
  * the same 200 either way.
  *
  * What must not happen is a redemption the reader completed turning into a
- * 500, and that is what the caller's `catch` in src/app.ts prevents.
+ * 500, and that is what the caller's `catch` in src/http/unlock.ts prevents.
  */
 export async function refundUnlockAttempt(
   limits: RateLimitRepo,

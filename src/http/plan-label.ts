@@ -1,10 +1,13 @@
+import { MAX_PLAN_LABEL_LENGTH } from "../limits.ts";
+
 /**
  * Plan labels are owner-facing text. They are not part of the stored object,
  * not part of the public URL, and not unique - the id remains the identity.
  * The only constraint that matters is that a label stays short enough to read
- * in a dashboard table cell.
+ * in a dashboard table cell, which is what `MAX_PLAN_LABEL_LENGTH` in
+ * src/limits.ts is: the dashboard's input, the Zod schemas, and this parser
+ * all read the one number.
  */
-export const MAX_PLAN_LABEL_LENGTH = 100;
 
 export type PlanLabelResult =
   | { ok: true; label: string | null }

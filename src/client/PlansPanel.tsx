@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "hono/jsx";
-import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
+import { MAX_PLAN_LABEL_LENGTH, type PlanVisibility } from "../limits.ts";
 import {
   addGrants,
   clearShareCode,
@@ -8,7 +8,6 @@ import {
   listPlans,
   type PlanSharing,
   type PlanSummary,
-  type PlanVisibility,
   relabelPlan,
   removeGrant,
   replacePlan,
@@ -18,6 +17,7 @@ import {
 } from "./api.ts";
 import { inputOf } from "./dom.ts";
 import { useCopy } from "./use-copy.ts";
+import { useWriteLatch } from "./write-latch.ts";
 
 /**
  * What the Sharing column says at a glance.
@@ -53,7 +53,19 @@ function isHtml(file: File): boolean {
   return file.type === "text/html" || /\.html?$/i.test(file.name);
 }
 
-/** Runs work through the panel's one busy flag and one error line. */
+/**
+ * What a failure says when the call carried nothing to say.
+ *
+ * One wording for the whole panel rather than one per mutation, because it is
+ * very nearly unreachable: every wrapper in src/client/api.ts throws the
+ * server's own reason, and `readError` falls back to the status line, which is
+ * never empty. It exists for a rejection from somewhere else entirely - an
+ * aborted fetch, a value thrown that is not an `Error` - where the alternative
+ * is a blank error line or "[object Object]".
+ */
+const FAILED = "the change could not be made";
+
+/** Runs work through the panel's one busy flag, error line, and write latch. */
 type Guard = (work: () => Promise<unknown>) => Promise<boolean>;
 
 interface SharingEditorProps {
@@ -97,7 +109,29 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
   // a grant gates anything. Both stay on screen rather than vanishing - they
   // are real state that applies again the moment this goes private.
   const inert = state.visibility === "public";
-  const shared = { plan, guard, reload: load, locked: busy || inert };
+
+  /**
+   * A mutation and both refreshes it owes, in one place.
+   *
+   * Sharing state is read twice over: the row's Sharing column comes off the
+   * plan list (`hasShareCode`, `hasGrants`), and this editor's own view of it
+   * comes from `getSharing`. `guard` re-lists, `load` re-reads the editor, and
+   * a mutation that refreshed only one leaves the two contradicting each other
+   * on screen - a row saying "Private" beside an editor showing the code that
+   * was just minted. Handed to the blocks instead of the pair, so a mutation
+   * site cannot hold one half and forget the other.
+   *
+   * `VisibilityChoice` stays on `guard`: it is not missing a refresh, it takes
+   * the new state straight out of the response it already has, and routing it
+   * through here would spend a second request to learn what it was just told.
+   */
+  const mutate = (work: () => Promise<unknown>) =>
+    guard(async () => {
+      await work();
+      await load();
+    });
+
+  const shared = { plan, mutate, locked: busy || inert };
 
   return (
     <div className="sharing">
@@ -150,15 +184,17 @@ function SharingPlaceholder(props: {
 }
 
 /**
- * What both mutating blocks need to act and then refresh. `locked` folds in the
- * public-plan case, so a block gated entirely by visibility needs nothing else.
- * `ShareCodeBlock` takes `busy` as well, because one of its controls has to keep
- * working while public - see there.
+ * What both mutating blocks need to act. One `mutate` rather than the guard and
+ * the editor's reload separately: refreshing both halves of the sharing state
+ * is not a thing a block is trusted to remember - see `SharingEditor`.
+ *
+ * `locked` folds in the public-plan case, so a block gated entirely by
+ * visibility needs nothing else. `ShareCodeBlock` takes `busy` as well, because
+ * one of its controls has to keep working while public - see there.
  */
 interface BlockProps {
   plan: PlanSummary;
-  guard: Guard;
-  reload: () => Promise<void>;
+  mutate: Guard;
   locked: boolean;
 }
 
@@ -237,7 +273,7 @@ function ShareCodeBlock(
     busy: boolean;
   },
 ) {
-  const { plan, guard, reload, locked } = props;
+  const { plan, mutate, locked } = props;
   const [code, setCode] = useState<string | null>(null);
 
   // Removing the code is the only thing that makes this false: a visibility
@@ -249,16 +285,14 @@ function ShareCodeBlock(
   }, [props.hasShareCode]);
 
   const rotate = () =>
-    void guard(async () => {
+    void mutate(async () => {
       setCode(await rotateShareCode(plan.id));
-      await reload();
     });
 
   const clear = () =>
-    void guard(async () => {
+    void mutate(async () => {
       await clearShareCode(plan.id);
       setCode(null);
-      await reload();
     });
 
   return (
@@ -376,7 +410,7 @@ function ShareLink({
 }
 
 function GrantsBlock(props: BlockProps & { grants: string[] }) {
-  const { plan, guard, reload, locked } = props;
+  const { plan, mutate, locked } = props;
   const [handle, setHandle] = useState("");
   /** What the last submission named that nothing answers to. */
   const [unknown, setUnknown] = useState<string[]>([]);
@@ -394,7 +428,7 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
     // as the request takes, and keeps it for good if the request throws.
     setUnknown([]);
     setFailed([]);
-    void guard(async () => {
+    void mutate(async () => {
       // Sent as typed: the server splits on commas, so a list written here
       // and a list written against the API are parsed by the same code.
       const result = await addGrants(plan.id, wanted);
@@ -403,14 +437,12 @@ function GrantsBlock(props: BlockProps & { grants: string[] }) {
       // Whatever did not land stays in the field, so a typo can be corrected
       // and a failure retried without retyping the ones that worked.
       setHandle([...result.unknown, ...result.failed].join(", "));
-      await reload();
     });
   };
 
   const revoke = (granted: string) =>
-    void guard(async () => {
+    void mutate(async () => {
       await removeGrant(plan.id, granted);
-      await reload();
     });
 
   return (
@@ -761,7 +793,6 @@ function useSwallowedFileDrags() {
 function usePlanList() {
   const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   /**
    * False until the first list call has answered. Without it the panel says
    * "No plans yet" for the length of that request, which is the wrong thing
@@ -784,33 +815,29 @@ function usePlanList() {
     void refresh();
   }, [refresh]);
 
+  const { busy, write } = useWriteLatch(setError, refresh);
+
   /**
-   * Resolves false when `work` threw, so a caller can undo its optimism.
+   * Resolves false when `work` threw or the latch refused it, so a caller can
+   * undo its optimism either way. The thrown reason is what the error line
+   * shows, verbatim: the validator names the tag it objected to, and that is
+   * actionable where a bare 422 is not.
    *
-   * Memoised for a stable prop identity: it is handed down to the table and
-   * to the sharing editor on every render. The editor no longer loads through
-   * it - reading a row is not a mutation, so it fetches directly - and
-   * nothing has it in a dependency array today, but a changing identity is
-   * the kind of thing that turns a future `useEffect` here into a loop.
+   * The latch is what `write` brings that this panel did not have: two Delete
+   * presses in one tick both ran, because `busy` is state and `disabled` needs
+   * a render to appear - so the second reached the network for a row the first
+   * was already removing. The credentials panels were already guarded that way;
+   * this is the same guard rather than a second one.
+   *
+   * Still memoised here, for a stable prop identity: it is handed down to the
+   * table and to the sharing editor on every render. The editor no longer loads
+   * through it - reading a row is not a mutation, so it fetches directly - and
+   * nothing has it in a dependency array today, but a changing identity is the
+   * kind of thing that turns a future `useEffect` here into a loop.
    */
   const guard = useCallback(
-    async (work: () => Promise<unknown>): Promise<boolean> => {
-      setBusy(true);
-      try {
-        await work();
-        setError(null);
-        await refresh();
-        return true;
-      } catch (cause) {
-        // The validator's reason is rendered verbatim so a rejection is
-        // actionable rather than a bare 422.
-        setError(cause instanceof Error ? cause.message : String(cause));
-        return false;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [refresh],
+    (work: () => Promise<unknown>) => write(work, FAILED),
+    [write],
   );
 
   return { plans, error, setError, busy, guard, loaded };

@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { pino } from "pino";
-import { replacePlan } from "../src/http/replace-plan.ts";
-import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
-import { basePlanRepoStub } from "./plan-repo-stub.ts";
+import { type ReplacePlanDeps, replacePlan } from "../src/http/replace-plan.ts";
+import type { PlanStorage } from "../src/services/types.ts";
+import { openRateLimits } from "./app-harness.ts";
+import {
+  fakeAuth,
+  type MemoryPlans,
+  memoryPlans,
+  silentLogger,
+  storedPlan,
+} from "./fakes.ts";
 
 const OWNER = "user-a";
 const OTHER = "user-b";
@@ -11,12 +17,11 @@ const ID = "plan-1";
 const CONFIG = {
   maxUploadBytes: 2 * 1024 * 1024,
   publicBaseUrl: "https://plans.example.test",
+  uploadRateMax: 100,
+  uploadRateWindowSec: 60,
 };
 
 const HTML = "<!doctype html><html><body><p>new</p></body></html>";
-
-/** Silent: these tests assert on responses and side effects, not on output. */
-const logger = pino({ level: "silent" });
 
 interface Written {
   objects: { key: string; size: number }[];
@@ -26,13 +31,15 @@ interface Written {
 
 function fakes(
   options: {
-    owner?: string | null;
+    /** Who the session resolves to; the handler authenticates itself now. */
+    caller?: string;
+    /** No row at all, rather than one belonging to somebody else. */
+    missing?: boolean;
     /** A row deleted between the ownership check and the size update. */
     rowVanishes?: boolean;
     storageFails?: boolean;
   } = {},
-) {
-  const owner = options.owner === undefined ? OWNER : options.owner;
+): { deps: ReplacePlanDeps; written: Written } {
   const written: Written = { objects: [], sizes: [], removed: [] };
 
   const storage: PlanStorage = {
@@ -47,22 +54,36 @@ function fakes(
     probe: async () => {},
   };
 
-  const plans: PlanRepo = {
-    ...basePlanRepoStub,
-    insert: async () => "created",
-    listByUser: async () => [],
-    findOwner: async () => owner,
-    relabel: async () => false,
+  const memory = memoryPlans(
+    options.missing === true ? [] : [storedPlan({ id: ID, userId: OWNER })],
+  );
+  /*
+   * A thin wrapper, not a second repository: `resize` is the one method whose
+   * calls this suite has to see, and staging the concurrent delete means
+   * refusing it while everything else - ownership above all - keeps answering
+   * the way the SQL does.
+   */
+  const plans: MemoryPlans = {
+    ...memory,
     resize: async (id, userId, size) => {
       if (options.rowVanishes === true) return false;
-      if (id !== ID || userId !== owner) return false;
+      if (!(await memory.resize(id, userId, size))) return false;
       written.sizes.push(size);
       return true;
     },
-    deleteOwned: async () => false,
   };
 
-  return { storage, plans, written };
+  return {
+    deps: {
+      auth: fakeAuth({ sessionUser: options.caller ?? OWNER }).auth,
+      config: CONFIG,
+      plans,
+      uploadRateLimits: openRateLimits,
+      storage,
+      logger: silentLogger,
+    },
+    written,
+  };
 }
 
 function put(body = HTML): Request {
@@ -75,16 +96,8 @@ function put(body = HTML): Request {
 
 describe("replacePlan", () => {
   test("writes the object, records the size, and echoes the unchanged URL", async () => {
-    const { storage, plans, written } = fakes();
-    const response = await replacePlan(
-      storage,
-      plans,
-      logger,
-      put(),
-      ID,
-      OWNER,
-      CONFIG,
-    );
+    const { deps, written } = fakes();
+    const response = await replacePlan(deps, put(), ID);
 
     expect(response.status).toBe(200);
     expect((await response.json()) as { id: string; url: string }).toEqual({
@@ -96,48 +109,24 @@ describe("replacePlan", () => {
   });
 
   test("404s for another account's plan without touching its object", async () => {
-    const { storage, plans, written } = fakes();
-    const response = await replacePlan(
-      storage,
-      plans,
-      logger,
-      put(),
-      ID,
-      OTHER,
-      CONFIG,
-    );
+    const { deps, written } = fakes({ caller: OTHER });
+    const response = await replacePlan(deps, put(), ID);
 
     expect(response.status).toBe(404);
     expect(written).toEqual({ objects: [], sizes: [], removed: [] });
   });
 
   test("404s for an unknown id", async () => {
-    const { storage, plans, written } = fakes({ owner: null });
-    const response = await replacePlan(
-      storage,
-      plans,
-      logger,
-      put(),
-      ID,
-      OWNER,
-      CONFIG,
-    );
+    const { deps, written } = fakes({ missing: true });
+    const response = await replacePlan(deps, put(), ID);
 
     expect(response.status).toBe(404);
     expect(written.objects).toEqual([]);
   });
 
   test("takes the object back out when the row goes away underneath it", async () => {
-    const { storage, plans, written } = fakes({ rowVanishes: true });
-    const response = await replacePlan(
-      storage,
-      plans,
-      logger,
-      put(),
-      ID,
-      OWNER,
-      CONFIG,
-    );
+    const { deps, written } = fakes({ rowVanishes: true });
+    const response = await replacePlan(deps, put(), ID);
 
     expect(response.status).toBe(404);
     expect(written.sizes).toEqual([]);
@@ -148,34 +137,18 @@ describe("replacePlan", () => {
   });
 
   test("422s a document that is not standalone, leaving the plan alone", async () => {
-    const { storage, plans, written } = fakes();
+    const { deps, written } = fakes();
     const html =
       '<!doctype html><html><body><script src="https://cdn.example.com/x.js"></script></body></html>';
-    const response = await replacePlan(
-      storage,
-      plans,
-      logger,
-      put(html),
-      ID,
-      OWNER,
-      CONFIG,
-    );
+    const response = await replacePlan(deps, put(html), ID);
 
     expect(response.status).toBe(422);
     expect(written).toEqual({ objects: [], sizes: [], removed: [] });
   });
 
   test("502s when the object write fails, leaving the row untouched", async () => {
-    const { storage, plans, written } = fakes({ storageFails: true });
-    const response = await replacePlan(
-      storage,
-      plans,
-      logger,
-      put(),
-      ID,
-      OWNER,
-      CONFIG,
-    );
+    const { deps, written } = fakes({ storageFails: true });
+    const response = await replacePlan(deps, put(), ID);
 
     expect(response.status).toBe(502);
     // Nothing was written, so nothing has to be undone: the plan still serves

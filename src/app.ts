@@ -5,7 +5,6 @@ import { createPlan } from "./http/create-plan.ts";
 import { deletePlan } from "./http/delete-plan.ts";
 import { healthz } from "./http/healthz.ts";
 import { listPlans } from "./http/list-plans.ts";
-import { unlockPlan } from "./http/plan-access.ts";
 import {
   clearShareCode,
   getPlanSharing,
@@ -17,14 +16,9 @@ import {
 import { problem } from "./http/problem.ts";
 import { relabelPlan } from "./http/relabel-plan.ts";
 import { replacePlan } from "./http/replace-plan.ts";
-import { resolveUserId } from "./http/require-user.ts";
 import { applySecurityHeaders } from "./http/security-headers.ts";
 import { servePlan } from "./http/serve-plan.ts";
-import {
-  refundUnlockAttempt,
-  reserveUnlockAttempt,
-} from "./http/unlock-rate-limit.ts";
-import { checkUploadRate } from "./http/upload-rate-limit.ts";
+import { createUnlockRoute } from "./http/unlock.ts";
 import { isPlanId } from "./ids.ts";
 import type { AssetManifest } from "./server/assets.ts";
 import {
@@ -33,7 +27,8 @@ import {
   renderNotFound,
   renderPlanGate,
 } from "./server/pages.tsx";
-import type { RuntimeTarget, Services } from "./services/types.ts";
+import type { Services } from "./services/context.ts";
+import type { RuntimeTarget } from "./services/types.ts";
 
 export interface AppDeps {
   /** Memoised by both runtime modules, so this costs one await after boot. */
@@ -72,54 +67,38 @@ function registerPlanCollection(app: Hono, getServices: GetServices): void {
 function registerPlanItem(app: Hono, getServices: GetServices): void {
   // Replaces the document behind an id the caller already owns, so a plan can
   // be revised without its URL changing. Owner-scoped: an id belonging to
-  // another account 404s and its object is never touched.
+  // another account 404s and its object is never touched. It resolves its own
+  // caller and spends its own upload allowance - see src/http/replace-plan.ts.
   app.put("/api/plans/:id", async (c) => {
     const { auth, config, db, logger, storage } = await getServices();
-
-    const userId = await resolveUserId(auth, c.req.raw);
-    if (userId === null) return problem(401, "authentication required");
-
-    const limited = await checkUploadRate(db.uploadRateLimits, config, userId);
-    if (limited !== null) return limited;
-
     return await replacePlan(
+      {
+        auth,
+        config,
+        plans: db.plans,
+        uploadRateLimits: db.uploadRateLimits,
+        storage,
+        logger,
+      },
+      c.req.raw,
+      c.req.param("id"),
+    );
+  });
+
+  app.patch("/api/plans/:id", async (c) => {
+    const { auth, db } = await getServices();
+    return await relabelPlan(auth, db.plans, c.req.raw, c.req.param("id"));
+  });
+
+  app.delete("/api/plans/:id", async (c) => {
+    const { auth, db, logger, storage } = await getServices();
+    return await deletePlan(
+      auth,
       storage,
       db.plans,
       logger,
       c.req.raw,
       c.req.param("id"),
-      userId,
-      config,
-    );
-  });
-
-  // A key or a session, like PUT and DELETE beside it: a caller that may
-  // replace the document or destroy the plan outright is not one to refuse a
-  // rename over, and `?label=` already lets a key name a plan at upload.
-  //
-  // Unmetered, as `DELETE` is: the upload allowance covers upload and replace
-  // only. What bounds this one is the 4 KB body cap in src/http/relabel-plan.ts.
-  app.patch("/api/plans/:id", async (c) => {
-    const { auth, db } = await getServices();
-
-    const userId = await resolveUserId(auth, c.req.raw);
-    if (userId === null) return problem(401, "authentication required");
-
-    return await relabelPlan(db.plans, c.req.raw, c.req.param("id"), userId);
-  });
-
-  app.delete("/api/plans/:id", async (c) => {
-    const { auth, db, logger, storage } = await getServices();
-
-    const userId = await resolveUserId(auth, c.req.raw);
-    if (userId === null) return problem(401, "authentication required");
-
-    return await deletePlan(
-      storage,
-      db.plans,
-      logger,
-      c.req.param("id"),
-      userId,
     );
   });
 }
@@ -185,82 +164,27 @@ function registerPlanSharing(app: Hono, getServices: GetServices): void {
  * Redeeming a share code, which is the one route here that takes no credential.
  *
  * Its own registrar because everything above is session-only: this is how
- * someone holding just a code gets in. Throttled per client address rather than
- * per plan - the plan id travels in the share link, so a per-plan bucket would
- * let anyone holding that link lock the real readers out. Its own counter
- * table, because `upload_rate_limit.key` is a foreign key onto `user.id` and
- * there is no user here.
- *
- * The budget is taken before the attempt and given back by one that turned
- * out to be a redemption - reserve first, refund on success, rather than
- * charging afterwards. A caller that walks away mid-request has therefore
- * already been counted, which is the safe direction. A correct code still
- * costs nothing in the end, because what is being rationed is guessing: the
- * share link is opened by everyone it was sent to, and charging those meant a
- * link pasted into one channel locked out the colleagues behind the same
- * egress address. See src/http/unlock-rate-limit.ts.
+ * someone holding just a code gets in. The budget arithmetic - reserve before
+ * the attempt, refund the one that turned out to be a redemption - lives in
+ * src/http/unlock.ts with the reasons for it, so it can be exercised without a
+ * server; `createUnlockRoute` is called once here because the closure it
+ * returns is what says the missing-header warning once per app.
  */
 function registerPlanUnlock(app: Hono, getServices: GetServices): void {
+  const unlock = createUnlockRoute();
+
   app.post("/api/plans/:id/unlock", async (c) => {
     const { config, db, logger } = await getServices();
-    const reservation = await reserveUnlockAttempt(
-      db.unlockRateLimits,
-      config,
-      c.req.raw,
-      logger,
-    );
-    if ("refused" in reservation) return reservation.refused;
-
-    /*
-     * A redemption was never the thing being rationed, so a count that did not
-     * buy a guess goes back. Both endings qualify: the `204`, and a throw -
-     * the budget rations guessing, and a route that fell over told nobody
-     * whether the code was right.
-     *
-     * Every other ending keeps its count, and not only the wrong-code `401`.
-     * A `404` is an unknown plan id, which is the same enumeration by another
-     * name; a `400` or `413` is a caller this endpoint cannot answer, and a
-     * caller who can spend the budget on malformed bodies for free can hold
-     * the window open while spending it elsewhere. Refunding narrowly is the
-     * safe direction: the budget errs one lower rather than one higher.
-     *
-     * Swallowed on failure, and only on the refund: the reader has their
-     * cookie, or their 500, and losing a refund leaves the budget one lower
-     * than it should be - which errs towards refusing rather than towards
-     * letting a guesser through.
-     */
-    const refund = async () => {
-      try {
-        await refundUnlockAttempt(db.unlockRateLimits, reservation);
-      } catch (cause) {
-        // The bucket and window, so a budget that never recovers can be found
-        // rather than only known about. The bucket is already a keyed digest
-        // of the address, not the address - see `unlockBucketKey`.
-        logger.warn(
-          {
-            err: cause,
-            bucket: reservation.bucket,
-            windowStart: reservation.windowStart,
-          },
-          "unlock reservation was not refunded",
-        );
-      }
-    };
-
-    let response: Response;
-    try {
-      response = await unlockPlan(
-        db.plans,
+    return await unlock(
+      {
+        plans: db.plans,
+        limits: db.unlockRateLimits,
         config,
-        c.req.raw,
-        c.req.param("id"),
-      );
-    } catch (cause) {
-      await refund();
-      throw cause;
-    }
-    if (response.ok) await refund();
-    return response;
+        logger,
+      },
+      c.req.raw,
+      c.req.param("id"),
+    );
   });
 }
 
@@ -376,9 +300,11 @@ function registerPlanPage(app: Hono, deps: AppDeps): void {
     // A miss renders the site's own 404 page, which is trusted HTML and takes
     // the app policy rather than the plan one.
     if (served === null) return c.html(renderNotFound(assets), 404);
-    // 401 rather than 200 is load-bearing: `applySecurityHeaders` pins the
-    // plan sandbox onto `/p/*` only at 200 and 304, and under it this page
-    // could neither sign in nor post a code.
+    // 401 rather than 200: the gate is the app's own page, answering "you are
+    // not allowed this yet". It cannot be swept into the plan sandbox by
+    // mistake - `applySecurityHeaders` sandboxes only responses carrying
+    // `PLAN_DOCUMENT_HEADER`, which `servePlan` sets on the document itself
+    // and nothing else sets.
     if ("gate" in served) {
       return c.html(
         renderPlanGate(assets, planId, config.publicBaseUrl, {

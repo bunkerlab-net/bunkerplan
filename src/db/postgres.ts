@@ -2,13 +2,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import type { Logger } from "../log.ts";
 import type { Db } from "../services/types.ts";
-import { createPgAccountClosingRepo } from "./account-closing.pg.ts";
-import { pgSchema } from "./pg-shared.ts";
-import { createPgPlanRepo } from "./plans.pg.ts";
+import { createAccountClosingRepo } from "./account-closing.shared.ts";
+import { type PgAuthHandle, pgDialect, pgSchema } from "./pg-shared.ts";
+import { createPlanRepo } from "./plans.shared.ts";
 import {
-  createPgRateLimitRepo,
-  createPgUnlockRateLimitRepo,
-} from "./rate-limits.pg.ts";
+  createRateLimitRepo,
+  createUnlockRateLimitRepo,
+} from "./rate-limits.shared.ts";
 
 /**
  * Postgres always enforces foreign keys, so the ON DELETE CASCADE constraints
@@ -126,7 +126,7 @@ async function probeOnce(pool: pg.Pool, signal?: AbortSignal): Promise<void> {
 export function createPostgresDb(
   connectionString: string,
   logger: Pick<Logger, "warn">,
-): Db {
+): Db & PgAuthHandle {
   const pool = new pg.Pool({
     connectionString,
     max: POOL_MAX,
@@ -149,13 +149,14 @@ export function createPostgresDb(
   });
 
   const db = drizzle(pool, { schema: pgSchema });
+  const dialect = pgDialect(db);
   return {
     adapter: db,
     provider: "pg",
-    plans: createPgPlanRepo(db),
-    uploadRateLimits: createPgRateLimitRepo(db),
-    unlockRateLimits: createPgUnlockRateLimitRepo(db),
-    accountClosing: createPgAccountClosingRepo(db),
+    plans: createPlanRepo(dialect),
+    uploadRateLimits: createRateLimitRepo(dialect),
+    unlockRateLimits: createUnlockRateLimitRepo(dialect),
+    accountClosing: createAccountClosingRepo(dialect),
     probe: (signal) => probeOnce(pool, signal),
   };
 }

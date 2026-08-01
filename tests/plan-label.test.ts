@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  MAX_PLAN_LABEL_LENGTH,
-  parsePlanLabel,
-} from "../src/http/plan-label.ts";
+import { parsePlanLabel } from "../src/http/plan-label.ts";
+import { MAX_PLAN_LABEL_LENGTH } from "../src/limits.ts";
 
 describe("parsePlanLabel", () => {
   test("treats absent and blank as unlabelled", () => {

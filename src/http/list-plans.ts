@@ -1,7 +1,8 @@
 import type { PlanList } from "../api/schemas.ts";
 import type { AppAuth } from "../auth/instance.ts";
 import type { Config } from "../config.ts";
-import { PLAN_PAGE_SIZE, type PlanRepo } from "../services/types.ts";
+import { PLAN_PAGE_SIZE } from "../limits.ts";
+import type { PlanRepo } from "../services/types.ts";
 import { planUrl } from "./plan-url.ts";
 import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";

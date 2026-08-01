@@ -1,12 +1,9 @@
 import type { AppAuth } from "../auth/instance.ts";
 import { MAX_SHARE_CODE_LENGTH } from "../config.ts";
 import { isPlanId } from "../ids.ts";
-import type {
-  PlanAccessRow,
-  PlanRepo,
-  PlanVisibility,
-} from "../services/types.ts";
-import { readBoundedBody } from "./bounded-body.ts";
+import type { PlanVisibility } from "../limits.ts";
+import type { PlanAccessRow, PlanRepo } from "../services/types.ts";
+import { readJsonBody } from "./bounded-body.ts";
 import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";
 import {
@@ -156,7 +153,7 @@ export async function resolvePlanAccess(
  * just a code has no credential to send. The route is throttled a layer up,
  * per client address - see `reserveUnlockAttempt`, which takes a count before
  * this runs and hands it back when this answers a redemption, or throws. A
- * refusal keeps its count; src/app.ts is where that is decided and why.
+ * refusal keeps its count; src/http/unlock.ts is where that is decided and why.
  *
  * Throttled not because a reachable rate would help against guessing the
  * code, which rests on its entropy, but because an unauthenticated write
@@ -169,24 +166,16 @@ export async function unlockPlan(
   request: Request,
   planId: string,
 ): Promise<Response> {
-  // 413 for the bound, matching `readJson` on the sharing routes: a body over
-  // the ceiling is a different fact from a malformed one, and answering the
-  // same 400 for both would be this codebase disagreeing with itself about the
-  // same condition. Everything after it is one 400, because a missing code, a
-  // non-string code, and unparseable JSON all mean the same thing to the only
-  // caller - the gate page's fetch.
-  const encoded = await readBoundedBody(request, MAX_UNLOCK_BODY_BYTES);
-  if (encoded === null) {
-    return problem(413, `body exceeds ${MAX_UNLOCK_BODY_BYTES} bytes`);
-  }
+  // Read through `readJsonBody`, which owns both refusals: 413 for the bound
+  // and 400 `body must be JSON` for a body that will not parse. A body over the
+  // ceiling is a different fact from a malformed one, so the two are different
+  // statuses; what is *in* a parsed body is this handler's business, and a
+  // missing, non-string, or empty `code` is one 400 below, because all three
+  // mean the same thing to the only caller - the gate page's fetch.
+  const read = await readJsonBody(request, MAX_UNLOCK_BODY_BYTES);
+  if (!read.ok) return read.response;
 
-  let body: unknown;
-  try {
-    body = JSON.parse(new TextDecoder().decode(encoded));
-  } catch {
-    return problem(400, "code is required");
-  }
-
+  const { body } = read;
   if (typeof body !== "object" || body === null || !("code" in body)) {
     return problem(400, "code is required");
   }

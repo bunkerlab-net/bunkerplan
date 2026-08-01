@@ -37,8 +37,12 @@
  */
 import * as z from "zod";
 import { MAX_SHARE_CODE_LENGTH, MIN_SHARE_CODE_LENGTH } from "../config.ts";
-import { MAX_GRANTS_PER_REQUEST } from "../http/account-list.ts";
-import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
+import {
+  MAX_FINDINGS,
+  MAX_GRANTS_PER_REQUEST,
+  MAX_PLAN_LABEL_LENGTH,
+  PLAN_VISIBILITIES,
+} from "../limits.ts";
 
 /**
  * The schemas that become `components.schemas` entries. Anything not
@@ -205,13 +209,15 @@ export const ErrorBody = component(
       errors: z
         .array(z.string())
         // At least two, because one fault is reported through `error` alone,
-        // and never more than one response carries. Written out rather than
-        // imported from the validator, which would pull an HTML parser into
-        // every module that loads these schemas: the two are held together by
-        // `tests/upload-body.test.ts`, which parses real refusals through this
-        // schema, so a gate that reported 1 or 11 would fail there.
+        // and never more than `MAX_FINDINGS`, which is what the HTML gate stops
+        // collecting at. Imported now that the number lives in src/limits.ts:
+        // the old copy was written out because reaching into the validator would
+        // have pulled an HTML parser into every module that loads these schemas,
+        // and a leaf module costs nothing. `tests/upload-body.test.ts` still
+        // parses real refusals through this schema, so a gate that reported 1 or
+        // 11 would fail there.
         .min(2)
-        .max(10)
+        .max(MAX_FINDINGS)
         .optional()
         .meta({
           description:
@@ -247,12 +253,13 @@ export const ErrorBody = component(
 export type ErrorBody = z.infer<typeof ErrorBody>;
 
 /**
- * What a plan's `visibility` column holds. `code` is an upload intent, not a
- * stored state - see `PlanVisibilityQuery`.
+ * What a plan's `visibility` column holds, from the one tuple the request
+ * parsers and the database CHECK constraints also read. `code` is an upload
+ * intent, not a stored state - see `PlanVisibilityQuery`.
  */
 export const PlanVisibility = component(
   "PlanVisibility",
-  z.enum(["public", "private"]).meta({
+  z.enum(PLAN_VISIBILITIES).meta({
     title: "PlanVisibility",
     description:
       "public: anyone holding the URL may read it. private: only the owner, " +
@@ -562,11 +569,12 @@ export const PlanLabelQuery = z
   });
 
 /**
- * The optional `?visibility=` on upload. `code` is an intent rather than a
- * stored state: it stores `private` and mints a share code in the same
- * statement.
+ * The optional `?visibility=` on upload: the stored set plus the one intent.
+ * `code` is an intent rather than a stored state - it stores `private` and mints
+ * a share code in the same statement - which is why it is spelled here, beside
+ * the tuple, rather than being in it.
  */
-export const PlanVisibilityQuery = z.enum(["public", "private", "code"]).meta({
+export const PlanVisibilityQuery = z.enum([...PLAN_VISIBILITIES, "code"]).meta({
   description:
     "Who may read the new plan. Defaults to private. `code` stores it " +
     "private and mints a share code, returned once in the response body.",

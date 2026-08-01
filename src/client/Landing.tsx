@@ -39,6 +39,10 @@ function Hero() {
  * The card carries the flow first and the account second. Registering is a
  * single passkey ceremony, which is a footnote to the button rather than a
  * headline of its own.
+ *
+ * `origin` is deliberately not in this shape: only the snippet needs it, and a
+ * card that declared the whole of `LandingProps` while reading five of its six
+ * fields is how a prop ends up threaded to something that never wanted it.
  */
 function HowItWorks({
   handle,
@@ -46,7 +50,7 @@ function HowItWorks({
   busy,
   onRegister,
   onSignIn,
-}: LandingProps) {
+}: Omit<LandingProps, "origin">) {
   return (
     <section className="card card-feature">
       <p className="eyebrow">How it works</p>
@@ -160,12 +164,12 @@ function Features({ origin }: { origin: string }) {
   );
 }
 
-export function Landing(props: LandingProps) {
+export function Landing({ origin, ...card }: LandingProps) {
   return (
     <div className="shell">
       <Hero />
-      <HowItWorks {...props} />
-      <Features origin={props.origin} />
+      <HowItWorks {...card} />
+      <Features origin={origin} />
     </div>
   );
 }

@@ -60,9 +60,9 @@ These names are the API. They are not renamed across releases.
 | `MAX_UPLOAD_BYTES`       | no              | `2097152` (2 MiB)             |                                                                          |
 | `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`   |
 | `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
-| `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | clamped to a minimum of 60                                               |
+| `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | minimum 60; a shorter window multiplies the sustained rate               |
 | `UNLOCK_RATE_MAX`        | no              | `30`                          | share-code redemptions per window per client address                     |
-| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | no minimum; a database row, so no KV TTL floor applies                   |
+| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | no minimum; a redemption stores nothing the floor would guard            |
 | `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                 |
 | `SHARE_CODE_LENGTH`      | no              | `16`                          | characters in a share code; mixed-case alphanumeric, 16 to 64            |
 | `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                    |

@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { pino } from "pino";
-import type { AppAuth } from "../src/auth/instance.ts";
 import type { Config } from "../src/config.ts";
 import { type CreatePlanDeps, createPlan } from "../src/http/create-plan.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
+import { fakeAuth, silentLogger } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /**
@@ -28,18 +27,6 @@ const CONFIG = {
   uploadRateMax: 100,
   uploadRateWindowSec: 60,
 } as unknown as Config;
-
-/** Silent: these tests assert on responses, not on output. */
-const logger = pino({ level: "silent" });
-
-function fakeAuth(): AppAuth {
-  return {
-    api: {
-      verifyApiKey: async () => ({ valid: true, key: { referenceId: OWNER } }),
-      getSession: async () => null,
-    },
-  } as unknown as AppAuth;
-}
 
 function deps(over: Partial<PlanRepo> = {}): {
   deps: CreatePlanDeps;
@@ -66,7 +53,7 @@ function deps(over: Partial<PlanRepo> = {}): {
   };
   return {
     deps: {
-      auth: fakeAuth(),
+      auth: fakeAuth({ keyUser: OWNER }).auth,
       config: CONFIG,
       plans,
       accountClosing: { open: async () => {}, isOpen: async () => false },
@@ -79,7 +66,7 @@ function deps(over: Partial<PlanRepo> = {}): {
         refund: async () => {},
       },
       storage,
-      logger,
+      logger: silentLogger,
     },
     stored,
   };

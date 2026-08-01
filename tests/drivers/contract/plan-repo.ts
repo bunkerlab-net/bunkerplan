@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { newPlanId } from "../../../src/ids.ts";
-import type { PlanRepo, PlanVisibility } from "../../../src/services/types.ts";
+import type { PlanVisibility } from "../../../src/limits.ts";
+import type { PlanRepo } from "../../../src/services/types.ts";
 import { type DbFixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
 
 /**

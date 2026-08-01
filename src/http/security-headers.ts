@@ -55,9 +55,6 @@ export const PLAN_CSP = [
   "base-uri 'none'",
 ].join("; ");
 
-/** Plans are the only untrusted HTML this app serves, and only from here. */
-export const PLAN_PATH_PREFIX = "/p/";
-
 /**
  * The app's own policy.
  *
@@ -111,6 +108,21 @@ const SECURITY_HEADERS: Record<string, string> = {
 const HSTS = "max-age=31536000; includeSubDomains";
 
 /**
+ * Marks a response as carrying an uploaded plan document.
+ *
+ * Set by `servePlan` in the same header literal that carries its
+ * `content-security-policy`, and consumed - then stripped - by
+ * `applySecurityHeaders`, which overwrites the policy with `PLAN_CSP` on any
+ * response wearing it. The middleware used to infer "this is a plan" from the
+ * `/p/` path plus a 200/304 status, which made the gate's 401 load-bearing
+ * for CSP selection and would have swept any future 200 on that path into the
+ * sandbox. The marker keeps the decision where the knowledge is: only the
+ * code that just read a plan object can say the body is one, and the app's
+ * own pages on the same path - the gate, the 404 - never set it.
+ */
+export const PLAN_DOCUMENT_HEADER = "x-bunkerplan-plan-document";
+
+/**
  * Applies the app header set to a response, and pins the plan policy on any
  * response that carries a plan.
  *
@@ -123,19 +135,18 @@ const HSTS = "max-age=31536000; includeSubDomains";
  * route and this function cannot disagree, and a plan response that forgets
  * the header still cannot reach a client without it.
  *
- * Matched on status as well as path because `/p/{unknown}` falls through to
- * the app's own 404 page, which is trusted HTML and needs the app policy.
+ * Which responses those are is `PLAN_DOCUMENT_HEADER` above: `servePlan`
+ * declares them, this function reads the marker and strips it so it never
+ * leaves the process.
  */
 export function applySecurityHeaders(
   request: Request,
   response: Response,
 ): Response {
-  const url = new URL(request.url);
-  const carriesPlan =
-    url.pathname.startsWith(PLAN_PATH_PREFIX) &&
-    (response.status === 200 || response.status === 304);
-
   const headers = new Headers(response.headers);
+  const carriesPlan = headers.has(PLAN_DOCUMENT_HEADER);
+  headers.delete(PLAN_DOCUMENT_HEADER);
+
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     if (!headers.has(name)) headers.set(name, value);
   }
@@ -143,6 +154,7 @@ export function applySecurityHeaders(
 
   // Only over TLS: sending HSTS from a plaintext origin is ignored by
   // browsers, and pinning localhost to https would break development.
+  const url = new URL(request.url);
   if (url.protocol === "https:" && !headers.has("strict-transport-security")) {
     headers.set("strict-transport-security", HSTS);
   }

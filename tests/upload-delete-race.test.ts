@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { pino } from "pino";
 import { storeAndConfirm } from "../src/http/store-plan.ts";
-import {
-  type AccountClosingRepo,
-  PLAN_PAGE_SIZE,
-  type PlanRepo,
-  type PlanStorage,
+import { PLAN_PAGE_SIZE } from "../src/limits.ts";
+import type {
+  AccountClosingRepo,
+  PlanRepo,
+  PlanStorage,
 } from "../src/services/types.ts";
-import { basePlanRepoStub } from "./plan-repo-stub.ts";
+import {
+  deferred,
+  memoryPlans,
+  type StoredPlan,
+  silentLogger,
+} from "./fakes.ts";
 
 /**
  * Uploading claims a row and then writes the object. Deleting an account marks
@@ -24,20 +28,8 @@ import { basePlanRepoStub } from "./plan-repo-stub.ts";
 const OWNER = "user-a";
 const ID = "plan-1";
 
-/** Silent: these assert on stored state, not output. */
-const logger = pino({ level: "silent" });
-
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve = (): void => {};
-  const promise = new Promise<void>((settle) => {
-    resolve = settle;
-  });
-  return { promise, resolve };
-}
-
 function stores(holdPut = false) {
   const objects = new Map<string, number>();
-  const rows = new Map<string, { userId: string }>();
   const closing = new Set<string>();
 
   const entered = deferred();
@@ -58,34 +50,8 @@ function stores(holdPut = false) {
     probe: async () => {},
   };
 
-  const plans: PlanRepo = {
-    ...basePlanRepoStub,
-    insert: async (row) => {
-      if (rows.has(row.id)) return "duplicate";
-      rows.set(row.id, { userId: row.userId });
-      return "created";
-    },
-    listByUser: async (userId) =>
-      [...rows.entries()]
-        .filter(([, row]) => row.userId === userId)
-        .map(([id]) => ({
-          id,
-          label: null,
-          size: 0,
-          createdAt: new Date(),
-          visibility: "private" as const,
-          hasShareCode: false,
-          hasGrants: false,
-        })),
-    findOwner: async (id) => rows.get(id)?.userId ?? null,
-    relabel: async () => false,
-    resize: async () => false,
-    deleteOwned: async (id, userId) => {
-      if (rows.get(id)?.userId !== userId) return false;
-      rows.delete(id);
-      return true;
-    },
-  };
+  const plans = memoryPlans();
+  const rows = plans.rows;
 
   const accountClosing: AccountClosingRepo = {
     open: async (userId) => {
@@ -94,7 +60,7 @@ function stores(holdPut = false) {
     isOpen: async (userId) => closing.has(userId),
   };
 
-  const deps = { storage, plans, accountClosing, logger };
+  const deps = { storage, plans, accountClosing, logger: silentLogger };
   return { objects, rows, closing, deps, plans, storage, entered, released };
 }
 
@@ -124,7 +90,7 @@ async function sweep(
  * marker, which is the case the marker check alone cannot see.
  */
 function cascade(
-  rows: Map<string, { userId: string }>,
+  rows: Map<string, StoredPlan>,
   closing: Set<string>,
   userId: string,
 ): void {

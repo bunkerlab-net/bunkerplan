@@ -2,12 +2,12 @@ import type { PlanCreated } from "../api/schemas.ts";
 import type { AppAuth } from "../auth/instance.ts";
 import type { Config } from "../config.ts";
 import { newPlanId, newShareCode } from "../ids.ts";
+import type { PlanVisibility } from "../limits.ts";
 import type { Logger } from "../log.ts";
 import type {
   AccountClosingRepo,
   PlanRepo,
   PlanStorage,
-  PlanVisibility,
   RateLimitRepo,
 } from "../services/types.ts";
 import {
@@ -17,11 +17,7 @@ import {
 } from "./account-list.ts";
 import { parsePlanLabel } from "./plan-label.ts";
 import { planUrl } from "./plan-url.ts";
-import {
-  parseUploadVisibility,
-  storedVisibility,
-  type UploadVisibility,
-} from "./plan-visibility.ts";
+import { parseVisibility, type UploadVisibility } from "./plan-visibility.ts";
 import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";
 import { hashShareCode } from "./share-auth.ts";
@@ -45,7 +41,10 @@ export interface CreatePlanDeps {
 interface Admitted {
   userId: string;
   label: string | null;
+  /** `"code"` included, because that intent decides whether a code is minted. */
   requested: UploadVisibility;
+  /** The same request as it reaches the column, where there is no `"code"`. */
+  visibility: PlanVisibility;
   /** Accounts named by `?grants=`; empty when the parameter was absent. */
   accounts: string[];
 }
@@ -105,7 +104,11 @@ async function admit(
   const query = new URL(request.url).searchParams;
   const parsed = parsePlanLabel(query.get("label"));
   if (!parsed.ok) return problem(400, parsed.reason);
-  const wanted = parseUploadVisibility(query.get("visibility"));
+  const wanted = parseVisibility(query.get("visibility"), {
+    code: true,
+    absent: "private",
+    from: "value",
+  });
   if (!wanted.ok) return problem(400, wanted.reason);
 
   // Absent means "share with nobody", which is not the same as present and
@@ -122,6 +125,7 @@ async function admit(
     userId,
     label: parsed.label,
     requested: wanted.requested,
+    visibility: wanted.stored,
     accounts,
   };
 }
@@ -259,7 +263,7 @@ export async function createPlan(
 
   const admitted = await admit(deps, request);
   if (admitted instanceof Response) return admitted;
-  const { userId, label, requested, accounts } = admitted;
+  const { userId, label, requested, visibility, accounts } = admitted;
 
   const body = await readUploadBody(request, config.maxUploadBytes);
   if (body instanceof Response) return body;
@@ -279,7 +283,7 @@ export async function createPlan(
     userId,
     label,
     body.byteLength,
-    storedVisibility(requested),
+    visibility,
     code === null ? null : await hashShareCode(code),
     config,
   );

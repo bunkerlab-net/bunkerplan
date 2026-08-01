@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config.ts";
+import {
+  CLIENT_IP_HEADER,
+  SELF_HOSTED as DRIVERS,
+  REQUIRED as MINIMUM,
+} from "./config-env.ts";
 
 /**
  * The refusals `loadConfig` makes, and the defaults it falls back to.
@@ -16,21 +21,13 @@ import { loadConfig } from "../src/config.ts";
  * is pinned to its own message.
  */
 
-const REQUIRED = {
-  BETTER_AUTH_SECRET: "x".repeat(32),
-  PUBLIC_BASE_URL: "https://plans.example.com",
-  CLIENT_IP_HEADER: "x-forwarded-for",
-};
-
-const SELF_HOSTED = {
-  ...REQUIRED,
-  STORAGE_DRIVER: "s3",
-  S3_BUCKET: "plans",
-  DB_DRIVER: "postgres",
-  DATABASE_URL: "postgres://localhost/plans",
-  KV_DRIVER: "valkey",
-  VALKEY_URL: "redis://localhost:6379",
-};
+/*
+ * The header added to both: off Workers the loader refuses to guess one, and
+ * without it every message below would carry a second complaint. The refusal
+ * itself belongs to tests/config.test.ts - see tests/config-env.ts.
+ */
+const REQUIRED = { ...MINIMUM, ...CLIENT_IP_HEADER };
+const SELF_HOSTED = { ...DRIVERS, ...CLIENT_IP_HEADER };
 
 /** The message `loadConfig` threw, or a failure saying it did not throw. */
 function refusal(env: Record<string, unknown>, workers = false): string {
@@ -110,6 +107,37 @@ describe("the drivers and their companions", () => {
     expect(config.dbDriver).toBe("d1");
     expect(config.kvDriver).toBe("kv");
   });
+
+  /**
+   * On Workers a driver name is not an implementation choice: the platform
+   * three are bindings, and nothing else is in the bundle at all. Accepting
+   * `DB_DRIVER=postgres` there built a Worker that resolved a driver it could
+   * not import, which surfaced as a runtime failure on the first request
+   * rather than at boot.
+   */
+  test.each([
+    ["DB_DRIVER", "postgres", "d1"],
+    ["KV_DRIVER", "valkey", "kv"],
+    ["STORAGE_DRIVER", "s3", "r2"],
+  ])("%s=%s is refused on Workers", (key, given, only) => {
+    const message = refusal({ ...REQUIRED, [key]: given }, true);
+
+    expect(message).toContain(
+      `${key} must be "${only}" on Cloudflare Workers, got "${given}"`,
+    );
+  });
+
+  test.each(["DB_DRIVER", "KV_DRIVER", "STORAGE_DRIVER"])(
+    "naming the platform's own %s explicitly is still accepted",
+    (key) => {
+      const only = { DB_DRIVER: "d1", KV_DRIVER: "kv", STORAGE_DRIVER: "r2" }[
+        key
+      ];
+      expect(() =>
+        loadConfig({ ...REQUIRED, [key]: only } as never, { workers: true }),
+      ).not.toThrow();
+    },
+  );
 
   test("an unknown driver is refused and lists what is allowed", () => {
     const message = refusal({ ...SELF_HOSTED, STORAGE_DRIVER: "gcs" });
@@ -264,31 +292,24 @@ describe("integer settings", () => {
     ).toBe(expected);
   });
 
-  test("a rate window below the floor is raised rather than refused", () => {
-    // Unlike the others: a one-second window is a legal number that would make
-    // the limiter useless, so it is clamped.
-    const config = loadConfig(
-      { ...SELF_HOSTED, UPLOAD_RATE_WINDOW_SEC: "1" } as never,
-      {},
+  test("a rate window below the floor is refused, not silently raised", () => {
+    // A one-second window is a legal number that would make the limiter
+    // useless. Refusing says so at boot; clamping left the deployment running
+    // a limit the operator did not configure and could not see.
+    expect(refusal({ ...SELF_HOSTED, UPLOAD_RATE_WINDOW_SEC: "1" })).toContain(
+      'UPLOAD_RATE_WINDOW_SEC must be an integer >= 60, got "1"',
     );
-
-    expect(config.uploadRateWindowSec).toBeGreaterThan(1);
   });
 
-  test("the unlock window is deliberately not clamped", () => {
+  test("the unlock window has no such floor", () => {
     const config = loadConfig(
-      {
-        ...SELF_HOSTED,
-        UPLOAD_RATE_WINDOW_SEC: "1",
-        UNLOCK_RATE_WINDOW_SEC: "1",
-      } as never,
+      { ...SELF_HOSTED, UNLOCK_RATE_WINDOW_SEC: "1" } as never,
       {},
     );
 
     // The floor exists because Workers KV rejects an `expirationTtl` under
     // 60s, and the unlock counter is a database row with no TTL. A shorter
     // window is a weaker limit, which is the operator's call to make.
-    expect(config.uploadRateWindowSec).toBe(60);
     expect(config.unlockRateWindowSec).toBe(1);
   });
 });

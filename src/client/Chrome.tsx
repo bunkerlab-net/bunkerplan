@@ -77,7 +77,8 @@ function NavControls({
   );
 }
 
-export function SiteNav(props: NavProps) {
+/** Composed only by `SiteFrame` below, which is what pages reach for. */
+function SiteNav(props: NavProps) {
   return (
     <nav className="nav">
       <div className="shell nav-inner">

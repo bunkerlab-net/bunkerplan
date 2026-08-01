@@ -8,7 +8,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import type { PlanVisibility } from "../../services/types.ts";
+import { PLAN_VISIBILITIES, type PlanVisibility } from "../../limits.ts";
 import { user } from "./auth.pg.ts";
 
 export const plan = pgTable(
@@ -41,7 +41,16 @@ export const plan = pgTable(
     // the read gate treats every value that is not "public" as private.
     // Unqualified to match the SQLite twin, where the qualified form breaks
     // the table rebuild - see the note there.
-    check("plan_visibility_check", sql`"visibility" in ('public', 'private')`),
+    //
+    // The two values come from the tuple in src/limits.ts rather than being
+    // typed out again. `sql.raw`, because this text is emitted into a migration
+    // where a bound parameter would have no meaning.
+    check(
+      "plan_visibility_check",
+      sql.raw(
+        `"visibility" in (${PLAN_VISIBILITIES.map((v) => `'${v}'`).join(", ")})`,
+      ),
+    ),
   ],
 );
 

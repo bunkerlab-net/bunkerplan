@@ -4,52 +4,8 @@ import { SiteFrame } from "./Chrome.tsx";
 import { Dashboard } from "./Dashboard.tsx";
 import { Landing } from "./Landing.tsx";
 import { PlanGate } from "./PlanGate.tsx";
+import type { DashboardProps, LandingProps, PageProps } from "./page-props.ts";
 import { usePasskeyAction } from "./passkey.ts";
-
-/**
- * Everything a page needs that only the server knows. Serialised into the
- * document and read back on hydration, so both renders start from the same
- * inputs - which is what keeps the markup identical.
- *
- * A union rather than one widened shape: the gate carries a plan id and
- * whether that plan has a share code, and neither is meaningful anywhere
- * else. `Page` narrows on `name`, so a page cannot read a field its own
- * renderer was never handed.
- */
-interface BasePageProps {
-  path: string;
-  origin: string;
-}
-
-export interface LandingProps extends BasePageProps {
-  name: "landing";
-}
-
-export interface DashboardProps extends BasePageProps {
-  name: "dashboard";
-}
-
-export interface GateProps extends BasePageProps {
-  name: "gate";
-  planId: string;
-  hasCode: boolean;
-  /**
-   * True on `/s/{id}`, the trusted page a share link points at.
-   *
-   * The share code travels in the fragment, and `/p/{id}` serves the uploaded
-   * document itself - untrusted HTML, which can read its own `location.hash`.
-   * So the link lands here instead: this page is the app's own, spends the code,
-   * and only then sends the reader to the plan. A reader who arrives with no
-   * code in the fragment is forwarded straight there, because there is nothing
-   * for this page to do and `/p/{id}` is what decides whether they may read it.
-   *
-   * False on `/p/{id}`, where the same component is the refusal page: there,
-   * forwarding on an empty fragment would reload the page it is already on.
-   */
-  relay: boolean;
-}
-
-export type PageProps = LandingProps | DashboardProps | GateProps;
 
 /**
  * The landing page is the root for everyone. A signed-in visitor is not

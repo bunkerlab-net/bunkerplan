@@ -1,6 +1,4 @@
-import type { AppAuth } from "../auth/instance.ts";
-import type { Config } from "../config.ts";
-import type { Logger } from "../log.ts";
+import type { PlanVisibility } from "../limits.ts";
 
 /**
  * Which wiring the entry point chose. Exported by both
@@ -112,8 +110,6 @@ export interface RateLimitRepo {
   refund(key: string, windowStart: number): Promise<void>;
 }
 
-export type PlanVisibility = "public" | "private";
-
 /**
  * What the read gate needs, in one row.
  *
@@ -188,7 +184,8 @@ export interface PlanRepo {
    * it is - so paging by it would hide them from the dashboard, and worse,
    * would make account deletion sweep only that many objects while the foreign
    * key removed every row, orphaning the remainder permanently. Use
-   * `PLAN_PAGE_SIZE` and page until a query comes back short.
+   * `PLAN_PAGE_SIZE` from src/limits.ts and page until a query comes back
+   * short.
    */
   listByUser(userId: string, limit: number): Promise<PlanRow[]>;
   findOwner(id: string): Promise<string | null>;
@@ -248,12 +245,6 @@ export interface PlanRepo {
 }
 
 /**
- * Rows fetched per `listByUser` call. Fixed, so it cannot drift with the
- * quota - see the note there.
- */
-export const PLAN_PAGE_SIZE = 500;
-
-/**
  * The admission gate for account deletion.
  *
  * Deleting an account removes objects the database does not know about, so it
@@ -269,9 +260,12 @@ export interface AccountClosingRepo {
 
 export interface Db {
   /**
-   * The value handed to `drizzleAdapter()`. `unknown` because the D1,
-   * bun-sqlite, and node-postgres drizzle instances are structurally different
-   * types; `src/auth/instance.ts` holds the single cast.
+   * The value handed to `drizzleAdapter()`. `unknown` here because the D1,
+   * bun-sqlite, and node-postgres drizzle instances are structurally
+   * different types; the pairing with `provider` is restored where it
+   * matters - `createAuth` takes `Db` intersected with the per-dialect
+   * handle types the drivers return (SqliteAuthHandle, PgAuthHandle), so a
+   * mistagged handle cannot typecheck into it.
    */
   adapter: unknown;
   /** Drizzle provider name for the adapter. */
@@ -285,13 +279,4 @@ export interface Db {
   unlockRateLimits: RateLimitRepo;
   accountClosing: AccountClosingRepo;
   probe(signal?: AbortSignal): Promise<void>;
-}
-
-export interface Services {
-  config: Config;
-  auth: AppAuth;
-  logger: Logger;
-  storage: PlanStorage;
-  kv: KvStore;
-  db: Db;
 }

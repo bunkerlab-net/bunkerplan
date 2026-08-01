@@ -1,4 +1,4 @@
-export type PlanVisibility = "public" | "private";
+import type { PlanVisibility } from "../limits.ts";
 
 export interface PlanSummary {
   id: string;

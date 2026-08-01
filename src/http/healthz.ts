@@ -1,5 +1,6 @@
 import type { Health } from "../api/schemas.ts";
-import type { RuntimeTarget, Services } from "../services/types.ts";
+import type { Services } from "../services/context.ts";
+import type { RuntimeTarget } from "../services/types.ts";
 
 /** The probe reads no configuration, so it takes only what it exercises. */
 export type Probed = Pick<Services, "storage" | "db" | "kv" | "logger">;

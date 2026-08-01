@@ -1,17 +1,7 @@
-import { and, eq, lte, sql } from "drizzle-orm";
+import { type SQLWrapper, sql } from "drizzle-orm";
 import type { RateLimitRepo, RateLimitResult } from "../services/types.ts";
+import type { Dialect } from "./dialect.ts";
 import { retryAfterSeconds, sometimes } from "./rate-limit-window.ts";
-import {
-  unlockRateLimit,
-  uploadRateLimit,
-} from "./schema/rate-limit.sqlite.ts";
-import type { SqliteDb } from "./sqlite-shared.ts";
-
-/**
- * Either counter table. They differ only in name and in whether the key
- * cascades from `user`, neither of which the statements below can see.
- */
-export type RateLimitTable = typeof uploadRateLimit | typeof unlockRateLimit;
 
 /**
  * Gives one count back, for a reservation the caller decided not to keep.
@@ -22,22 +12,23 @@ export type RateLimitTable = typeof uploadRateLimit | typeof unlockRateLimit;
  * budget somebody else opened - taking one off it would charge them for a
  * request they never made.
  *
- * `max(x, 0)` rather than Postgres's `greatest`: the two dialects spell the
- * floor differently, which is why each writes its own statement here.
+ * The floor is the one thing the two engines spell differently - `max` against
+ * `greatest` - which `dialect.floor` names once.
  */
 async function refundOne(
-  db: SqliteDb,
-  t: RateLimitTable,
+  dialect: Dialect,
+  counter: SQLWrapper,
   key: string,
   windowStart: number,
 ): Promise<void> {
   // Floored, so a repeat cannot drive the count negative - but not idempotent:
   // two refunds of one reservation give back two counts. The caller reaches
   // this once per reservation, on the path that took one.
-  await db
-    .update(t)
-    .set({ count: sql`max(${t.count} - 1, 0)` })
-    .where(and(eq(t.key, key), eq(t.windowStart, windowStart)));
+  await dialect.run(sql`
+    update ${counter}
+    set "count" = ${dialect.floor(sql`"count" - 1`)}
+    where "key" = ${key} and window_start = ${windowStart}
+  `);
 }
 
 /**
@@ -54,8 +45,8 @@ async function refundOne(
  * first requests for the same key.
  */
 async function consumeOne(
-  db: SqliteDb,
-  t: RateLimitTable,
+  dialect: Dialect,
+  counter: SQLWrapper,
   key: string,
   max: number,
   windowSeconds: number,
@@ -64,43 +55,46 @@ async function consumeOne(
   const now = Date.now();
   const cutoff = now - windowMs;
 
-  const consumed = await db
-    .insert(t)
-    .values({ key, count: 1, windowStart: now })
-    .onConflictDoUpdate({
-      target: t.key,
-      set: {
-        count: sql`case when ${t.windowStart} <= ${cutoff} then 1 else ${t.count} + 1 end`,
-        windowStart: sql`case when ${t.windowStart} <= ${cutoff} then ${now} else ${t.windowStart} end`,
-      },
-      setWhere: sql`${t.windowStart} <= ${cutoff} or ${t.count} < ${max}`,
-    })
-    .returning({ windowStart: t.windowStart });
+  // `window_start` is epoch milliseconds, reported as a number by SQLite and as
+  // a string by Postgres, whose column is a `bigint` - hence the conversion on
+  // every read of it here.
+  const consumed = await dialect.rows<{ windowStart: number | string }>(sql`
+    insert into ${counter} ("key", "count", window_start)
+    values (${key}, 1, ${now})
+    on conflict ("key") do update set
+      "count" = case when ${counter}.window_start <= ${cutoff} then 1
+                     else ${counter}."count" + 1 end,
+      window_start = case when ${counter}.window_start <= ${cutoff} then ${now}
+                          else ${counter}.window_start end
+    where ${counter}.window_start <= ${cutoff} or ${counter}."count" < ${max}
+    returning window_start as "windowStart"
+  `);
 
   const row = consumed[0];
   if (row !== undefined) {
+    const windowStart = Number(row.windowStart);
     return {
       allowed: true,
-      retryAfter: retryAfterSeconds(row.windowStart, now, windowMs),
+      retryAfter: retryAfterSeconds(windowStart, now, windowMs),
       // The window this count came out of, so a refund can name it.
-      windowStart: row.windowStart,
+      windowStart,
     };
   }
 
   // Refused. Re-read only to say how long the caller must wait; if the row has
   // since gone, a whole window is the safe answer.
-  const current = await db
-    .select({ windowStart: t.windowStart })
-    .from(t)
-    .where(eq(t.key, key))
-    .limit(1);
+  const current = await dialect.rows<{ windowStart: number | string }>(sql`
+    select window_start as "windowStart" from ${counter}
+    where "key" = ${key}
+    limit 1
+  `);
   const start = current[0]?.windowStart;
   return {
     allowed: false,
     retryAfter:
       start === undefined
         ? windowSeconds
-        : retryAfterSeconds(start, now, windowMs),
+        : retryAfterSeconds(Number(start), now, windowMs),
   };
 }
 
@@ -109,14 +103,14 @@ async function consumeOne(
  * the bucket differs. `unlock_rate_limit` is structurally the same table
  * without the user cascade.
  */
-export function createSqliteRateLimitRepo(
-  db: SqliteDb,
-  t: RateLimitTable = uploadRateLimit,
+export function createRateLimitRepo(
+  dialect: Dialect,
+  counter: SQLWrapper = dialect.tables.uploadRateLimit,
 ): RateLimitRepo {
   return {
     consume: (key, max, windowSeconds) =>
-      consumeOne(db, t, key, max, windowSeconds),
-    refund: (key, windowStart) => refundOne(db, t, key, windowStart),
+      consumeOne(dialect, counter, key, max, windowSeconds),
+    refund: (key, windowStart) => refundOne(dialect, counter, key, windowStart),
   };
 }
 
@@ -132,19 +126,19 @@ export function createSqliteRateLimitRepo(
  * `shouldSweep` is injected so the pruning test can ask for one instead of
  * rolling dice until it gets one.
  */
-export function createSqliteUnlockRateLimitRepo(
-  db: SqliteDb,
+export function createUnlockRateLimitRepo(
+  dialect: Dialect,
   shouldSweep: () => boolean = sometimes,
 ): RateLimitRepo {
-  const counter = createSqliteRateLimitRepo(db, unlockRateLimit);
+  const unlock = dialect.tables.unlockRateLimit;
+  const counter = createRateLimitRepo(dialect, unlock);
   return {
     async consume(key, max, windowSeconds) {
       if (shouldSweep()) {
-        await db
-          .delete(unlockRateLimit)
-          .where(
-            lte(unlockRateLimit.windowStart, Date.now() - windowSeconds * 1000),
-          );
+        await dialect.run(sql`
+          delete from ${unlock}
+          where window_start <= ${Date.now() - windowSeconds * 1000}
+        `);
       }
       return await counter.consume(key, max, windowSeconds);
     },

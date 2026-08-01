@@ -36,6 +36,24 @@
 import type { Token } from "parse5";
 import { SAXParser, type StartTag } from "parse5-sax-parser";
 
+/**
+ * How many distinct refusals one response carries.
+ *
+ * Shared with the API surface rather than declared here: the Error schema's
+ * `errors` array is capped to the same number, and the OpenAPI document quotes
+ * it. A cap at all because the walk is over attacker-supplied bytes: a 2 MB
+ * document can name far more external references than anybody wants in an
+ * error body, and an uncapped collector would build that list before anyone
+ * could refuse it. Ten is past the point where a document has a systemic
+ * problem rather than a typo, and the count of what was dropped travels with
+ * the response so a caller cannot mistake the cap for the whole truth.
+ *
+ * Counted over a keyed collection rather than an array: identical references
+ * appearing twice produce an identical refusal, and reporting it once is more
+ * useful than reporting it as many times as it was written.
+ */
+import { MAX_FINDINGS } from "../limits.ts";
+
 type Attribute = Token.Attribute;
 
 /**
@@ -536,22 +554,6 @@ function refreshTarget(content: string): string | null {
  */
 const MAX_TARGET_LENGTH = 120;
 const UNPRINTABLE = /[\s\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]+/gu;
-
-/**
- * How many distinct refusals one response carries.
- *
- * A cap because the walk is over attacker-supplied bytes: a 2 MB document can
- * name far more external references than anybody wants in an error body, and
- * an uncapped collector would build that list before anyone could refuse it.
- * Ten is past the point where a document has a systemic problem rather than a
- * typo, and the count of what was dropped travels with the response so a
- * caller cannot mistake the cap for the whole truth.
- *
- * A keyed collection rather than an array: identical references appearing twice
- * produce an identical refusal, and reporting it once is more useful than
- * reporting it as many times as it was written.
- */
-const MAX_FINDINGS = 10;
 
 /**
  * Hints are clauses appended to a refusal, joined by `; ` after a single dash.

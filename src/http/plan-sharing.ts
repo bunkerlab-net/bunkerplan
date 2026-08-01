@@ -6,15 +6,12 @@ import type {
 import type { AppAuth } from "../auth/instance.ts";
 import type { Config } from "../config.ts";
 import { newShareCode } from "../ids.ts";
+import { MAX_ACCOUNT_LIST_BYTES } from "../limits.ts";
 import type { Logger } from "../log.ts";
 import type { PlanRepo } from "../services/types.ts";
-import {
-  applyGrants,
-  MAX_ACCOUNT_LIST_BYTES,
-  parseAccountList,
-} from "./account-list.ts";
-import { readBoundedBody } from "./bounded-body.ts";
-import { parsePlanVisibility } from "./plan-visibility.ts";
+import { applyGrants, parseAccountList } from "./account-list.ts";
+import { readJsonBody } from "./bounded-body.ts";
+import { parseVisibility } from "./plan-visibility.ts";
 import { problem } from "./problem.ts";
 import { resolveSessionUserId } from "./require-user.ts";
 import { hashShareCode } from "./share-auth.ts";
@@ -43,19 +40,10 @@ const MAX_GRANT_BODY_BYTES = MAX_ACCOUNT_LIST_BYTES;
 /** The same, for `{ "visibility": "private" }`. */
 const MAX_SHARING_BODY_BYTES = 256;
 
-/** The parsed JSON body, or the response that refuses it. */
-async function readJson(
-  request: Request,
-  maxBytes: number,
-): Promise<{ body: unknown } | Response> {
-  const encoded = await readBoundedBody(request, maxBytes);
-  if (encoded === null) return problem(413, `body exceeds ${maxBytes} bytes`);
-  try {
-    return { body: JSON.parse(new TextDecoder().decode(encoded)) };
-  } catch {
-    return problem(400, "body must be JSON");
-  }
-}
+/*
+ * Both bodies are read through `readJsonBody`, which owns the 413/400 pair the
+ * three JSON routes used to spell for themselves. See src/http/bounded-body.ts.
+ */
 
 /**
  * The whole sharing state in one response, so the dashboard renders a row from
@@ -105,18 +93,21 @@ export async function setPlanSharing(
   const ownerId = await resolveSessionUserId(auth, request);
   if (ownerId === null) return problem(401, "authentication required");
 
-  const read = await readJson(request, MAX_SHARING_BODY_BYTES);
-  if (read instanceof Response) return read;
+  const read = await readJsonBody(request, MAX_SHARING_BODY_BYTES);
+  if (!read.ok) return read.response;
 
-  const { body } = read;
-  const wanted = parsePlanVisibility(
-    typeof body === "object" && body !== null && "visibility" in body
-      ? body.visibility
-      : undefined,
-  );
+  // No `"code"` intent here: giving an existing plan a code is
+  // `POST /api/plans/:id/share-code`, because that is the request that hands
+  // back a plaintext code. Absent refuses rather than defaulting - a body that
+  // names nothing is a client mistake, not a request to make the plan private.
+  const wanted = parseVisibility(read.body, {
+    code: false,
+    absent: "refuse",
+    from: "body",
+  });
   if (!wanted.ok) return problem(400, wanted.reason);
 
-  if (!(await plans.setVisibility(planId, ownerId, wanted.visibility))) {
+  if (!(await plans.setVisibility(planId, ownerId, wanted.stored))) {
     return problem(404, "not found");
   }
   return await sharingState(plans, planId, ownerId);
@@ -203,8 +194,8 @@ export async function grantPlan(
   const ownerId = await resolveSessionUserId(auth, request);
   if (ownerId === null) return problem(401, "authentication required");
 
-  const read = await readJson(request, MAX_GRANT_BODY_BYTES);
-  if (read instanceof Response) return read;
+  const read = await readJsonBody(request, MAX_GRANT_BODY_BYTES);
+  if (!read.ok) return read.response;
 
   const { body } = read;
   if (typeof body !== "object" || body === null || !("accounts" in body)) {

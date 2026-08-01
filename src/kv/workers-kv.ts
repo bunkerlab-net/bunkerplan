@@ -1,10 +1,8 @@
 import type { KvStore } from "../services/types.ts";
+import { MIN_TTL_SECONDS } from "./min-ttl.ts";
 
 // KVNamespace is an ambient global from the generated
 // worker-configuration.d.ts - see `bun run cf-typegen`.
-
-/** Workers KV rejects `expirationTtl` below 60 seconds. */
-const MIN_TTL_SECONDS = 60;
 
 export function createWorkersKv(namespace: KVNamespace): KvStore {
   return {

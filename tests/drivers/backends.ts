@@ -39,20 +39,19 @@ import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import { Miniflare } from "miniflare";
 import pg from "pg";
 import { loadConfig } from "../../src/config.ts";
-import { createPgAccountClosingRepo } from "../../src/db/account-closing.pg.ts";
-import { createSqliteAccountClosingRepo } from "../../src/db/account-closing.sqlite.ts";
-import { pgSchema } from "../../src/db/pg-shared.ts";
-import { createPgPlanRepo } from "../../src/db/plans.pg.ts";
-import { createSqlitePlanRepo } from "../../src/db/plans.sqlite.ts";
+import { createAccountClosingRepo } from "../../src/db/account-closing.shared.ts";
+import type { Dialect } from "../../src/db/dialect.ts";
+import { type PgDb, pgDialect, pgSchema } from "../../src/db/pg-shared.ts";
+import { createPlanRepo } from "../../src/db/plans.shared.ts";
 import {
-  createPgRateLimitRepo,
-  createPgUnlockRateLimitRepo,
-} from "../../src/db/rate-limits.pg.ts";
+  createRateLimitRepo,
+  createUnlockRateLimitRepo,
+} from "../../src/db/rate-limits.shared.ts";
 import {
-  createSqliteRateLimitRepo,
-  createSqliteUnlockRateLimitRepo,
-} from "../../src/db/rate-limits.sqlite.ts";
-import { sqliteSchema } from "../../src/db/sqlite-shared.ts";
+  type SqliteDb,
+  sqliteDialect,
+  sqliteSchema,
+} from "../../src/db/sqlite-shared.ts";
 import { handleEmail } from "../../src/ids.ts";
 import { createValkeyKv, type ValkeyKv } from "../../src/kv/valkey.ts";
 import { createWorkersKv } from "../../src/kv/workers-kv.ts";
@@ -315,102 +314,150 @@ export async function d1Db(): Promise<DbFixture> {
 // Self-hosted: bun:sqlite, Postgres, Valkey, MinIO.
 // ---------------------------------------------------------------------------
 
-type SqliteDb = Parameters<typeof createSqlitePlanRepo>[0];
-
 /**
- * One set of helpers for both SQLite drivers. D1 and bun:sqlite differ in how
- * a statement is dispatched, not in the SQL, so they share this - and a suite
- * passing on one and failing on the other then means a real driver difference
- * rather than a difference in how the test reached the database.
+ * The four repositories, which no longer differ by dialect: `Dialect` is the
+ * seam, and every driver difference lives behind it. Named once so a fifth
+ * repository is one edit rather than two.
  */
-function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
+function repos(
+  dialect: Dialect,
+): Pick<
+  DbFixture,
+  "plans" | "rateLimits" | "unlockRateLimits" | "accountClosing"
+> {
   return {
-    plans: createSqlitePlanRepo(db),
-    rateLimits: createSqliteRateLimitRepo(db),
+    plans: createPlanRepo(dialect),
+    rateLimits: createRateLimitRepo(dialect),
     // Always sweeps: the pruning contract asserts a closed window is gone,
     // and the default only sweeps on a fraction of attempts.
-    unlockRateLimits: createSqliteUnlockRateLimitRepo(db, () => true),
-    accountClosing: createSqliteAccountClosingRepo(db),
+    unlockRateLimits: createUnlockRateLimitRepo(dialect, () => true),
+    accountClosing: createAccountClosingRepo(dialect),
+  };
+}
+
+/**
+ * How a fixture reaches its database for the helper SQL below.
+ *
+ * The repositories go through `Dialect`, but these helpers deliberately do
+ * not: they exist to write and read state the repositories cannot, so a bug
+ * in the seam must not be able to hide by breaking both sides the same way.
+ * The two drivers dispatch a statement differently - `run`/`all` against a
+ * SQLite handle, `execute` against a pool - and that is the whole of it.
+ */
+interface Exec {
+  run(statement: SQL): Promise<void>;
+  /** The `v` column of the first row of a `select ... as v`, or zero. */
+  count(statement: SQL): Promise<number>;
+}
+
+/**
+ * The three places the helper SQL genuinely cannot be shared.
+ *
+ * Everything else below is one statement for both servers. Keeping the
+ * differences to a named list is what makes it obvious that there are only
+ * three, rather than leaving two 15-method bodies to be diffed by eye.
+ */
+interface Fragments {
+  /** `user` is reserved in Postgres and must be quoted; SQLite must not. */
+  user: SQL;
+  /** A `timestamp` column on Postgres, epoch milliseconds on SQLite. */
+  instant(epochMs: number): SQL;
+  now: SQL;
+  /** A real `boolean` on Postgres, an integer on SQLite. */
+  no: SQL;
+}
+
+/**
+ * One `DbFixture` body for both dialects.
+ *
+ * Everything past the repositories is a helper the conformance suites need
+ * but cannot express portably. It was written out twice, and the two copies
+ * differed only in how a statement was dispatched and in the three fragments
+ * above - which is not a difference worth 100 duplicated lines, and is how
+ * the `insertPlanWithVisibility` helper came to be added to one and not the
+ * other.
+ */
+function dbFixture(
+  dialect: Dialect,
+  exec: Exec,
+  frag: Fragments,
+  close: () => Promise<void>,
+): DbFixture {
+  return {
+    ...repos(dialect),
 
     seedUser: async (handle) => {
       const id = `u-${crypto.randomUUID()}`;
       const name = handle ?? id;
       const email =
         handle === undefined ? `${id}@example.test` : handleEmail(handle);
-      await db.run(
-        sql`insert into user (id, name, email, email_verified, created_at, updated_at)
-            values (${id}, ${name}, ${email}, 0, ${Date.now()}, ${Date.now()})`,
+      await exec.run(
+        sql`insert into ${frag.user} (id, name, email, email_verified, created_at, updated_at)
+            values (${id}, ${name}, ${email}, ${frag.no}, ${frag.now}, ${frag.now})`,
       );
       return id;
     },
     deleteUser: async (userId) => {
-      await db.run(sql`delete from user where id = ${userId}`);
+      await exec.run(sql`delete from ${frag.user} where id = ${userId}`);
     },
+    // `created_at` is a timestamp on Postgres and epoch milliseconds on
+    // SQLite, which is exactly why the contracts never write this themselves.
     backdatePlan: async (id, epochMs) => {
-      await db.run(
-        sql`update plan set created_at = ${epochMs} where id = ${id}`,
+      await exec.run(
+        sql`update plan set created_at = ${frag.instant(epochMs)} where id = ${id}`,
       );
     },
     backdateRateWindow: async (key, epochMs) => {
-      await db.run(
+      await exec.run(
         sql`update upload_rate_limit set window_start = ${epochMs} where key = ${key}`,
       );
     },
     countPlans: (userId) =>
-      sqliteCount(
-        db,
-        sql`select count(*) as v from plan where user_id = ${userId}`,
-      ),
+      exec.count(sql`select count(*) as v from plan where user_id = ${userId}`),
     rateWindowStart: (key) =>
-      sqliteCount(
-        db,
+      exec.count(
         sql`select window_start as v from upload_rate_limit where key = ${key}`,
       ),
     countRateLimits: (key) =>
-      sqliteCount(
-        db,
+      exec.count(
         sql`select count(*) as v from upload_rate_limit where key = ${key}`,
       ),
     backdateUnlockWindow: async (key, epochMs) => {
-      await db.run(
+      await exec.run(
         sql`update unlock_rate_limit set window_start = ${epochMs} where key = ${key}`,
       );
     },
     countUnlockRows: () =>
-      sqliteCount(db, sql`select count(*) as v from unlock_rate_limit`),
+      exec.count(sql`select count(*) as v from unlock_rate_limit`),
     countAccountClosings: (userId) =>
-      sqliteCount(
-        db,
+      exec.count(
         sql`select count(*) as v from account_closing where user_id = ${userId}`,
       ),
     addPasskey: async (userId, credentialId) => {
-      await db.run(
+      await exec.run(
         sql`insert into passkey
               (id, public_key, user_id, credential_id, counter, device_type, backed_up)
             values (${`pk-${crypto.randomUUID()}`}, 'pk', ${userId}, ${credentialId},
-                    0, 'singleDevice', 0)`,
+                    0, 'singleDevice', ${frag.no})`,
       );
     },
     countPasskeys: (userId) =>
-      sqliteCount(
-        db,
+      exec.count(
         sql`select count(*) as v from passkey where user_id = ${userId}`,
       ),
     addApiKey: async (userId) => {
-      const now = Date.now();
-      await db.run(
+      await exec.run(
         sql`insert into apikey (id, reference_id, key, created_at, updated_at)
             values (${`ak-${crypto.randomUUID()}`}, ${userId},
-                    ${`key-${crypto.randomUUID()}`}, ${now}, ${now})`,
+                    ${`key-${crypto.randomUUID()}`}, ${frag.now}, ${frag.now})`,
       );
     },
     countApiKeys: (userId) =>
-      sqliteCount(
-        db,
+      exec.count(
         sql`select count(*) as v from apikey where reference_id = ${userId}`,
       ),
     insertPlanWithVisibility: async (id, userId, visibility) => {
-      await db.run(
+      await exec.run(
         sql`insert into plan (id, user_id, size, visibility)
             values (${id}, ${userId}, 1, ${visibility})`,
       );
@@ -419,9 +466,33 @@ function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
   };
 }
 
-async function sqliteCount(db: SqliteDb, statement: SQL): Promise<number> {
-  const rows = await db.all<{ v: number }>(statement);
-  return Number(rows[0]?.v ?? 0);
+/**
+ * One set of helpers for both SQLite drivers. D1 and bun:sqlite differ in how
+ * a statement is dispatched, not in the SQL, so they share this - and a suite
+ * passing on one and failing on the other then means a real driver difference
+ * rather than a difference in how the test reached the database.
+ */
+function sqliteFixture(db: SqliteDb, close: () => Promise<void>): DbFixture {
+  return dbFixture(
+    sqliteDialect(db),
+    {
+      run: async (statement) => {
+        await db.run(statement);
+      },
+      count: async (statement) => {
+        const rows = await db.all<{ v: number }>(statement);
+        return Number(rows[0]?.v ?? 0);
+      },
+    },
+    {
+      user: sql.raw("user"),
+      // Epoch milliseconds straight into an integer column.
+      instant: (epochMs) => sql`${epochMs}`,
+      now: sql`${Date.now()}`,
+      no: sql`0`,
+    },
+    close,
+  );
 }
 
 export async function bunSqliteDb(): Promise<DbFixture> {
@@ -472,98 +543,40 @@ export async function postgresDb(): Promise<DbFixture> {
     await db.execute(sql.raw(statement));
   }
 
-  const count = async (statement: SQL): Promise<number> => {
-    const result = await db.execute<{ v: string }>(statement);
-    return Number(result.rows[0]?.v ?? 0);
-  };
+  return pgFixture(db, async () => {
+    await pool.query(`drop schema if exists "${schema}" cascade`);
+    await pool.end();
+  });
+}
 
-  return {
-    plans: createPgPlanRepo(db),
-    rateLimits: createPgRateLimitRepo(db),
-    // Always sweeps, as above.
-    unlockRateLimits: createPgUnlockRateLimitRepo(db, () => true),
-    accountClosing: createPgAccountClosingRepo(db),
-
-    seedUser: async (handle) => {
-      const id = `u-${crypto.randomUUID()}`;
-      const name = handle ?? id;
-      const email =
-        handle === undefined ? `${id}@example.test` : handleEmail(handle);
-      await db.execute(
-        sql`insert into "user" (id, name, email, email_verified, created_at, updated_at)
-            values (${id}, ${name}, ${email}, false, now(), now())`,
-      );
-      return id;
+/**
+ * The Postgres half of the same body, named for symmetry with
+ * `sqliteFixture`. It had no name at all: it was an object literal inside
+ * `postgresDb`, which is how the two copies drifted without anyone noticing.
+ */
+function pgFixture(db: PgDb, close: () => Promise<void>): DbFixture {
+  return dbFixture(
+    pgDialect(db),
+    {
+      run: async (statement) => {
+        await db.execute(statement);
+      },
+      count: async (statement) => {
+        // `count(*)` comes back as a string here, not a number.
+        const result = await db.execute<{ v: string }>(statement);
+        return Number(result.rows[0]?.v ?? 0);
+      },
     },
-    deleteUser: async (userId) => {
-      await db.execute(sql`delete from "user" where id = ${userId}`);
+    {
+      // Reserved word, so the identifier has to be quoted.
+      user: sql.raw('"user"'),
+      // A `timestamp` column, so the milliseconds have to be converted.
+      instant: (epochMs) => sql`to_timestamp(${epochMs}::bigint / 1000.0)`,
+      now: sql`now()`,
+      no: sql`false`,
     },
-    // `created_at` is a timestamp here and epoch milliseconds on SQLite, which
-    // is exactly why the contracts never write this themselves.
-    backdatePlan: async (id, epochMs) => {
-      await db.execute(
-        sql`update plan set created_at = to_timestamp(${epochMs}::bigint / 1000.0)
-            where id = ${id}`,
-      );
-    },
-    backdateRateWindow: async (key, epochMs) => {
-      await db.execute(
-        sql`update upload_rate_limit set window_start = ${epochMs} where key = ${key}`,
-      );
-    },
-    countPlans: (userId) =>
-      count(sql`select count(*) as v from plan where user_id = ${userId}`),
-    rateWindowStart: (key) =>
-      count(
-        sql`select window_start as v from upload_rate_limit where key = ${key}`,
-      ),
-    countRateLimits: (key) =>
-      count(
-        sql`select count(*) as v from upload_rate_limit where key = ${key}`,
-      ),
-    backdateUnlockWindow: async (key, epochMs) => {
-      await db.execute(
-        sql`update unlock_rate_limit set window_start = ${epochMs} where key = ${key}`,
-      );
-    },
-    countUnlockRows: () =>
-      count(sql`select count(*) as v from unlock_rate_limit`),
-    countAccountClosings: (userId) =>
-      count(
-        sql`select count(*) as v from account_closing where user_id = ${userId}`,
-      ),
-    addPasskey: async (userId, credentialId) => {
-      await db.execute(
-        sql`insert into passkey
-              (id, public_key, user_id, credential_id, counter, device_type, backed_up)
-            values (${`pk-${crypto.randomUUID()}`}, 'pk', ${userId}, ${credentialId},
-                    0, 'singleDevice', false)`,
-      );
-    },
-    countPasskeys: (userId) =>
-      count(sql`select count(*) as v from passkey where user_id = ${userId}`),
-    addApiKey: async (userId) => {
-      await db.execute(
-        sql`insert into apikey (id, reference_id, key, created_at, updated_at)
-            values (${`ak-${crypto.randomUUID()}`}, ${userId},
-                    ${`key-${crypto.randomUUID()}`}, now(), now())`,
-      );
-    },
-    countApiKeys: (userId) =>
-      count(
-        sql`select count(*) as v from apikey where reference_id = ${userId}`,
-      ),
-    insertPlanWithVisibility: async (id, userId, visibility) => {
-      await db.execute(
-        sql`insert into plan (id, user_id, size, visibility)
-            values (${id}, ${userId}, 1, ${visibility})`,
-      );
-    },
-    close: async () => {
-      await pool.query(`drop schema if exists "${schema}" cascade`);
-      await pool.end();
-    },
-  };
+    close,
+  );
 }
 
 export async function valkeyKv(): Promise<Fixture<ValkeyKv>> {

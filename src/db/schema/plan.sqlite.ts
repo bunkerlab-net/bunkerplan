@@ -7,7 +7,7 @@ import {
   sqliteTable,
   text,
 } from "drizzle-orm/sqlite-core";
-import type { PlanVisibility } from "../../services/types.ts";
+import { PLAN_VISIBILITIES, type PlanVisibility } from "../../limits.ts";
 import { user } from "./auth.sqlite.ts";
 
 export const plan = sqliteTable(
@@ -47,7 +47,16 @@ export const plan = sqliteTable(
     // qualified reference is emitted as `"__new_plan"."visibility"` and is
     // re-parsed after the rename, when that table name no longer exists -
     // "error in table plan after rename: no such column".
-    check("plan_visibility_check", sql`"visibility" in ('public', 'private')`),
+    //
+    // The two values come from the tuple in src/limits.ts rather than being
+    // typed out again. `sql.raw`, because this text is emitted into a migration
+    // where a bound parameter would have no meaning.
+    check(
+      "plan_visibility_check",
+      sql.raw(
+        `"visibility" in (${PLAN_VISIBILITIES.map((v) => `'${v}'`).join(", ")})`,
+      ),
+    ),
   ],
 );
 
@@ -66,6 +75,8 @@ export const planGrant = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.planId, table.userId] }),
+    // SQLite does not index a foreign key automatically either; without this,
+    // deleting an account scans this table. Same reason as the Postgres twin.
     index("plan_grant_userId_idx").on(table.userId),
   ],
 );

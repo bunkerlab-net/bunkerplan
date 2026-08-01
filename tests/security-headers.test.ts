@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   applySecurityHeaders,
   PLAN_CSP,
+  PLAN_DOCUMENT_HEADER,
 } from "../src/http/security-headers.ts";
 
 const get = (response: Response, name: string) => response.headers.get(name);
@@ -55,26 +56,32 @@ describe("applySecurityHeaders - app routes", () => {
 });
 
 describe("applySecurityHeaders - plan responses", () => {
+  const marked = (init: ResponseInit = {}) =>
+    harden("https://plan.example/p/abcd1234", {
+      ...init,
+      headers: { [PLAN_DOCUMENT_HEADER]: "1", ...init.headers },
+    });
+
   /**
-   * The regression that matters. A plan response that omits the policy must
-   * not reach a client without it, and must not inherit the app policy - which
-   * has no `sandbox` and so reads as permission to script the real origin.
-   * Both failures were reachable: the `304` branch used to send almost no
-   * headers, and a wrapper that merely skipped the backfill would have sent
-   * none at all.
+   * The regression that matters. A response `servePlan` marked as a plan
+   * document must not reach a client without the sandbox policy, and must not
+   * inherit the app policy - which has no `sandbox` and so reads as
+   * permission to script the real origin. Both failures were reachable: the
+   * `304` branch used to send almost no headers, and a wrapper that merely
+   * skipped the backfill would have sent none at all.
    */
   test.each([200, 304])(
-    "pins the plan policy onto a %i that omits it",
+    "pins the plan policy onto a marked %i that omits it",
     (status) => {
-      const response = harden("https://plan.example/p/abcd1234", { status });
+      const response = marked({ status });
       expect(get(response, "content-security-policy")).toBe(PLAN_CSP);
     },
   );
 
   test.each([200, 304])(
-    "overrides a wrong policy a %i already carries",
+    "overrides a wrong policy a marked %i already carries",
     (status) => {
-      const response = harden("https://plan.example/p/abcd1234", {
+      const response = marked({
         status,
         headers: { "content-security-policy": "default-src *" },
       });
@@ -82,11 +89,13 @@ describe("applySecurityHeaders - plan responses", () => {
     },
   );
 
+  test("strips the marker so it never leaves the process", () => {
+    const response = marked({ status: 200 });
+    expect(get(response, PLAN_DOCUMENT_HEADER)).toBeNull();
+  });
+
   test("the pinned policy sandboxes and blocks fetching", () => {
-    const csp = get(
-      harden("https://plan.example/p/abcd1234", { status: 200 }),
-      "content-security-policy",
-    );
+    const csp = get(marked({ status: 200 }), "content-security-policy");
     expect(csp).toContain("sandbox");
     expect(csp).not.toContain("allow-same-origin");
     expect(csp).toContain("default-src 'none'");
@@ -94,19 +103,18 @@ describe("applySecurityHeaders - plan responses", () => {
   });
 
   /**
-   * `/p/{unknown}` falls through to the app's own 404 page. That is trusted
-   * HTML and needs the app policy - sandboxing it would break hydration.
+   * The app's own pages on the plan path - the 404 for an unknown id, the
+   * gate at 401 - never set the marker, and sandboxing them would break
+   * hydration. The path and status say nothing; only the marker selects.
    */
-  test("leaves the app 404 under the app policy", () => {
-    const response = harden("https://plan.example/p/abcd1234", { status: 404 });
-    expect(get(response, "content-security-policy")).toContain(
-      "frame-ancestors 'none'",
-    );
-    expect(get(response, "content-security-policy")).not.toContain("sandbox");
-  });
-
-  test("does not sandbox a path that merely starts with p", () => {
-    const response = harden("https://plan.example/plans", { status: 200 });
-    expect(get(response, "content-security-policy")).not.toContain("sandbox");
-  });
+  test.each([200, 401, 404])(
+    "leaves an unmarked %i on the plan path under the app policy",
+    (status) => {
+      const response = harden("https://plan.example/p/abcd1234", { status });
+      expect(get(response, "content-security-policy")).toContain(
+        "frame-ancestors 'none'",
+      );
+      expect(get(response, "content-security-policy")).not.toContain("sandbox");
+    },
+  );
 });

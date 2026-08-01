@@ -15,11 +15,11 @@ import {
   CONFIG,
   html,
   memoryStorage,
-  OWNER,
-  PLAN_ID,
+  openRateLimits,
   PUBLIC_BASE_URL,
   upload,
 } from "./app-harness.ts";
+import { fakeAuth, OWNER, PLAN_ID, silentLogger } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /**
@@ -29,8 +29,6 @@ import { basePlanRepoStub } from "./plan-repo-stub.ts";
  * e2e stack, because every one requires a backend that is broken in a specific
  * way.
  */
-
-const logger = pino({ level: "silent" });
 
 describe("the dashboard route", () => {
   test("renders the dashboard document", async () => {
@@ -186,6 +184,20 @@ describe("replacing a plan whose row vanishes underneath", () => {
     return { storage, plans, objects, logged, sink };
   }
 
+  /**
+   * Everything `replacePlan` needs except the logger, which is the one thing
+   * these two cases differ on. The session resolves to the owner because the
+   * handler authenticates itself now - the router used to - and the upload
+   * allowance is open because its refusal has a suite of its own.
+   */
+  const replaceDeps = (storage: PlanStorage, plans: PlanRepo) => ({
+    auth: fakeAuth({ sessionUser: OWNER }).auth,
+    config: CONFIG,
+    plans,
+    uploadRateLimits: openRateLimits,
+    storage,
+  });
+
   const request = () =>
     new Request(`${PUBLIC_BASE_URL}/api/plans/${PLAN_ID}`, {
       method: "PUT",
@@ -197,13 +209,9 @@ describe("replacing a plan whose row vanishes underneath", () => {
     const { storage, plans, objects } = racing(false);
 
     const response = await replacePlan(
-      storage,
-      plans,
-      logger,
+      { ...replaceDeps(storage, plans), logger: silentLogger },
       request(),
       PLAN_ID,
-      OWNER,
-      CONFIG,
     );
 
     expect(response.status).toBe(404);
@@ -215,13 +223,9 @@ describe("replacing a plan whose row vanishes underneath", () => {
     const { storage, plans, logged, sink, objects } = racing(true);
 
     const response = await replacePlan(
-      storage,
-      plans,
-      sink,
+      { ...replaceDeps(storage, plans), logger: sink },
       request(),
       PLAN_ID,
-      OWNER,
-      CONFIG,
     );
 
     // The caller still gets the honest answer; the orphan is the operator's

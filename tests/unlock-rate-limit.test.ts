@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { unlockPlan } from "../src/client/api.ts";
+import { createUnlockRoute } from "../src/http/unlock.ts";
 import {
   refundUnlockAttempt,
   reserveUnlockAttempt,
+  type UnlockRateConfig,
 } from "../src/http/unlock-rate-limit.ts";
 import type { Logger } from "../src/log.ts";
 import type { RateLimitRepo } from "../src/services/types.ts";
+import { memoryPlans } from "./fakes.ts";
 
 const CONFIG = {
   clientIpHeader: "cf-connecting-ip",
@@ -15,14 +18,11 @@ const CONFIG = {
   unlockRateWindowSec: 60,
 };
 
-/**
- * A config no earlier call has seen.
- *
- * The missing-header warning is reported once per config object, so a test
- * that reaches that path and reuses `CONFIG` would read the silence a previous
- * test earned rather than its own.
- */
-const unreported = () => ({ ...CONFIG });
+/** The gate config plus what `unlockPlan`'s cookie mint needs, for the route. */
+const ROUTE_CONFIG = {
+  ...CONFIG,
+  publicBaseUrl: "https://plans.example.test",
+};
 
 const WINDOW_START = 1_700_000_000_000;
 
@@ -51,12 +51,16 @@ const post = (headers: Record<string, string> = {}) =>
     body: JSON.stringify({ code: "x" }),
   });
 
-/** What the gate logged, so the one case about that can read it. */
+/**
+ * What the route logged. The gate itself no longer takes a logger - it
+ * reports `reason` instead - so this belongs to the route describe below.
+ *
+ * `Pick<Logger, "warn">`, the parameter's own type, rather than a cast: a
+ * double that stops matching the signature should fail here at compile time
+ * instead of being asserted into place.
+ */
 const warnings: Array<{ fields: unknown; message: string }> = [];
 
-// `Pick<Logger, "warn">`, the parameter's own type, rather than a cast: a
-// double that stops matching the signature should fail here at compile time
-// instead of being asserted into place.
 const logger: Pick<Logger, "warn"> = {
   warn: (fields: unknown, message?: string) => {
     warnings.push({ fields, message: message ?? "" });
@@ -67,12 +71,8 @@ beforeEach(() => {
   warnings.length = 0;
 });
 
-/** The first three arguments; the helpers below supply the logger. */
-type GateArgs = [
-  Parameters<typeof reserveUnlockAttempt>[0],
-  Parameters<typeof reserveUnlockAttempt>[1],
-  Parameters<typeof reserveUnlockAttempt>[2],
-];
+/** The three arguments the gate now takes; the logger moved to the route. */
+type GateArgs = [RateLimitRepo, UnlockRateConfig, Request];
 
 /**
  * The reservation a passed gate handed back, or a failure naming what came
@@ -83,7 +83,7 @@ type GateArgs = [
 const reservationOf = async (
   ...args: GateArgs
 ): Promise<{ bucket: string; windowStart: number }> => {
-  const held = await reserveUnlockAttempt(...args, logger);
+  const held = await reserveUnlockAttempt(...args);
   if ("refused" in held) {
     throw new Error(`gate refused with ${held.refused.status}`);
   }
@@ -91,10 +91,15 @@ const reservationOf = async (
 };
 
 /** The refusal a closed gate produced, asserted as one. */
-const refusalOf = async (...args: GateArgs): Promise<Response> => {
-  const held = await reserveUnlockAttempt(...args, logger);
+const refusalOf = async (
+  ...args: GateArgs
+): Promise<{
+  refused: Response;
+  reason: "no-client-address" | "budget-spent";
+}> => {
+  const held = await reserveUnlockAttempt(...args);
   if (!("refused" in held)) throw new Error("gate allowed the request");
-  return held.refused;
+  return held;
 };
 
 describe("the unlock rate limit", () => {
@@ -210,7 +215,7 @@ describe("the unlock rate limit", () => {
 
   test("answers 429 with retry-after once the allowance is spent", async () => {
     const { limits } = fakeLimits(false, 17);
-    const refused = await refusalOf(
+    const { refused, reason } = await refusalOf(
       limits,
       CONFIG,
       post({ "cf-connecting-ip": "203.0.113.9" }),
@@ -218,6 +223,9 @@ describe("the unlock rate limit", () => {
 
     expect(refused.status).toBe(429);
     expect(refused.headers.get("retry-after")).toBe("17");
+    // The two refusals are the same status and the caller cannot tell them
+    // apart, which is deliberate - the reason is how the route can.
+    expect(reason).toBe("budget-spent");
   });
 
   test("reads the header the configuration names, not a fixed one", async () => {
@@ -250,13 +258,50 @@ describe("the unlock rate limit", () => {
     // a matter of type rather than of the handler remembering.
     const { limits, spent } = fakeLimits(true);
 
-    const refused = await refusalOf(limits, unreported(), post());
+    const { refused, reason } = await refusalOf(limits, CONFIG, post());
 
     expect(refused.status).toBe(429);
     // A minute, not the second a spent budget gets: nothing refills here, so a
     // client told to retry at once retries forever against a fixed answer.
     expect(refused.headers.get("retry-after")).toBe("60");
     expect(spent).toEqual([]);
+    // Named, because this is the one an operator has to be told about and the
+    // spent-budget refusal is not.
+    expect(reason).toBe("no-client-address");
+  });
+
+  test("refuses a blank header rather than reserving an empty bucket", async () => {
+    const { limits, spent } = fakeLimits(true);
+
+    const { refused, reason } = await refusalOf(
+      limits,
+      CONFIG,
+      post({ "cf-connecting-ip": "" }),
+    );
+
+    expect(refused.status).toBe(429);
+    expect(spent).toEqual([]);
+    expect(reason).toBe("no-client-address");
+  });
+});
+
+/**
+ * The operator's notice, which the route owns rather than the gate.
+ *
+ * Once per route instance, held in the factory's closure. It used to be keyed
+ * on the config object process-wide, which made "once" depend on whether two
+ * app instances happened to share a `Config` - so a second deployment in the
+ * same process could be silently misconfigured.
+ */
+describe("the missing-header warning", () => {
+  const route = () => ({
+    run: createUnlockRoute(),
+    deps: {
+      plans: memoryPlans(),
+      limits: fakeLimits(true).limits,
+      config: ROUTE_CONFIG,
+      logger,
+    },
   });
 
   test("says so in the log, because the symptom is otherwise silent", async () => {
@@ -264,42 +309,41 @@ describe("the unlock rate limit", () => {
     // why. Configuration refuses to load without naming a header, so reaching
     // here means the proxy in front is not sending the one it was told to
     // trust - which is an operator's problem and needs saying once.
-    const { limits } = fakeLimits(true);
-    const config = unreported();
+    const { run, deps } = route();
 
-    await refusalOf(limits, config, post());
+    expect((await run(deps, post(), "abc")).status).toBe(429);
 
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toContain("no trusted client address header");
     // Names the header it looked for, so the fix does not need a code read.
-    expect(warnings[0]?.fields).toEqual({ header: config.clientIpHeader });
+    expect(warnings[0]?.fields).toEqual({
+      header: ROUTE_CONFIG.clientIpHeader,
+    });
   });
 
   test("says it once, so a stranger cannot flood the log with refusals", async () => {
     // The route takes no credential, and every one of these answers 429 - so a
     // line per attempt is a log bill anyone can run up. The refusal itself is
     // still every time; only the operator's notice is deduplicated.
-    const { limits } = fakeLimits(true);
-    const config = unreported();
+    const { run, deps } = route();
 
-    await refusalOf(limits, config, post());
-    await refusalOf(limits, config, post());
-    await refusalOf(limits, config, post());
+    for (let i = 0; i < 3; i += 1) {
+      expect((await run(deps, post(), "abc")).status).toBe(429);
+    }
 
     expect(warnings).toHaveLength(1);
   });
 
-  test("refuses a blank header rather than reserving an empty bucket", async () => {
-    const { limits, spent } = fakeLimits(true);
+  test("a second route instance says it again, rather than inheriting silence", async () => {
+    // The bug the closure replaced: two apps in one process shared the flag
+    // whenever they shared a config object, so the second stayed quiet.
+    const first = route();
+    await first.run(first.deps, post(), "abc");
 
-    const refused = await refusalOf(
-      limits,
-      unreported(),
-      post({ "cf-connecting-ip": "" }),
-    );
+    const second = route();
+    await second.run(second.deps, post(), "abc");
 
-    expect(refused.status).toBe(429);
-    expect(spent).toEqual([]);
+    expect(warnings).toHaveLength(2);
   });
 });
 
