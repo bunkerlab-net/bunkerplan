@@ -30,6 +30,9 @@ export async function sweepOrphanedObject(
   try {
     await storage.delete(id);
   } catch (error) {
-    logger.error({ err: error, planId: id }, "orphaned plan object");
+    logger.error(
+      { err: error, planId: id },
+      "failed to delete an orphaned plan object; its bytes are still stored",
+    );
   }
 }

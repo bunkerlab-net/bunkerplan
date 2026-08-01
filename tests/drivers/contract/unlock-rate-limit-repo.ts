@@ -105,6 +105,7 @@ export function describeUnlockRateLimitRepo(
     test("removes at most one batch per redemption, and drains", async () => {
       const bounded = fixture.unlockRateLimitsOneAtATime;
       const closed = ["198.51.100.201", "198.51.100.202", "198.51.100.203"];
+      const fresh = ["198.51.100.210", "198.51.100.211", "198.51.100.212"];
       const stale = Date.now() - (WINDOW + 1) * 1_000;
       // Every row first, then aged. Interleaved, each `consume` would sweep
       // the one aged just before it and the backlog would never reach three.
@@ -115,23 +116,38 @@ export function describeUnlockRateLimitRepo(
         await fixture.backdateUnlockWindow(address, stale);
       }
 
-      const before = await fixture.countUnlockRows();
+      /**
+       * Only the rows this test seeded. `countUnlockRows()` with no key counts
+       * the whole table, which the suites above have already written to - so a
+       * total that happened to hold could hold for the wrong reason, and one
+       * that moved could move for someone else's.
+       */
+      const mine = async () => {
+        const counts = await Promise.all(
+          [...closed, ...fresh].map((address) =>
+            fixture.countUnlockRows(address),
+          ),
+        );
+        return counts.reduce((total, count) => total + count, 0);
+      };
+
+      const before = await mine();
 
       // Each redemption adds its own fresh row and takes exactly one closed
       // one, so the total holds. A sweep that took the lot would drop it to
       // `before - closed.length + 1` on the first call and leave it there.
-      await bounded.consume("198.51.100.210", MAX, WINDOW);
-      expect(await fixture.countUnlockRows()).toBe(before);
+      await bounded.consume(fresh[0] as string, MAX, WINDOW);
+      expect(await mine()).toBe(before);
 
-      await bounded.consume("198.51.100.211", MAX, WINDOW);
-      expect(await fixture.countUnlockRows()).toBe(before);
+      await bounded.consume(fresh[1] as string, MAX, WINDOW);
+      expect(await mine()).toBe(before);
 
       // And the backlog is gone rather than circled: three closed rows, three
       // sweeps that each took the oldest. The total holds here as well, which
       // is what says the third sweep took the last closed row rather than
       // finding nothing and letting its own row grow the table.
-      await bounded.consume("198.51.100.212", MAX, WINDOW);
-      expect(await fixture.countUnlockRows()).toBe(before);
+      await bounded.consume(fresh[2] as string, MAX, WINDOW);
+      expect(await mine()).toBe(before);
       for (const address of closed) {
         expect(await fixture.countUnlockRows(address)).toBe(0);
       }

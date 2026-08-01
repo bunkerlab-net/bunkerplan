@@ -37,6 +37,8 @@ function fakes(
     missing?: boolean;
     /** A row deleted between the ownership check and the size update. */
     rowVanishes?: boolean;
+    /** The account's deletion has begun, so the marker is already set. */
+    closing?: boolean;
     storageFails?: boolean;
   } = {},
 ): { deps: ReplacePlanDeps; written: Written } {
@@ -79,7 +81,10 @@ function fakes(
       config: CONFIG,
       plans,
       uploadRateLimits: openRateLimits,
-      accountClosing: openAccounts,
+      accountClosing:
+        options.closing === true
+          ? { open: async () => {}, isOpen: async () => true }
+          : openAccounts,
       storage,
       logger: silentLogger,
     },
@@ -155,5 +160,31 @@ describe("replacePlan", () => {
     // Nothing was written, so nothing has to be undone: the plan still serves
     // its previous document at its previous recorded size.
     expect(written).toEqual({ objects: [], sizes: [], removed: [] });
+  });
+
+  /**
+   * The marker read after the write, which is what stops a replacement
+   * outliving the account it belongs to.
+   *
+   * The sweep removes an object before the row naming it, so a replacement
+   * landing in that gap puts its bytes back and then loses the row - an object
+   * at `/p/{id}` with no owner. `resize` cannot see it, because the row is
+   * still there when it runs. tests/replace-delete-race.test.ts drives that
+   * interleaving against the real sweep; this is the plain case, where the
+   * marker is already set when the request arrives.
+   */
+  test("404s and withdraws its object once deletion has begun", async () => {
+    const { deps, written } = fakes({ closing: true });
+
+    const response = await replacePlan(deps, put(), ID);
+
+    expect(response.status).toBe(404);
+    // Written, then taken back out. The write is what makes the withdrawal
+    // necessary, so a test asserting only the 404 would pass against a handler
+    // that left the bytes behind.
+    expect(written.objects).toEqual([{ key: ID, size: HTML.length }]);
+    expect(written.removed).toEqual([ID]);
+    // And the row is left for the sweep, which is already removing it.
+    expect(written.sizes).toEqual([]);
   });
 });

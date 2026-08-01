@@ -145,14 +145,20 @@ function fixture(
     storage: {
       put: async () => {},
       get: async () => null,
+      probe: async () => {},
+      ...storageOverrides,
+      /*
+       * The recorder sits above the override, not below it, for the same
+       * reason it does on the repository: spread last, an override would
+       * replace the recording and `steps` would miss the very call the test
+       * cared enough about to substitute. A failing delete is still a delete
+       * the sweep made and still a subrequest it spent.
+       */
       delete: async (id) => {
         steps.push("delete");
         objects.push(id);
+        await storageOverrides.delete?.(id);
       },
-      probe: async () => {},
-      // Same seam as the repository's: supplied here rather than assigned onto
-      // the fixture afterwards, so nothing can be rewritten mid-test.
-      ...storageOverrides,
     },
     accountClosing: {
       open: async (userId) => {

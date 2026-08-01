@@ -88,7 +88,8 @@ on the first request.
 Workers it is refused above 400, because deleting an account removes its
 objects one at a time before the database cascades the rows. Every call the
 sweep makes is a subrequest - two per plan for the R2 and D1 deletes, one per
-page listed, one to mark the account - so 400 plans costs 803, which fits
+page listed plus the empty listing that ends the loop, and one to mark the
+account - so 400 plans costs 800 + 2 + 1 = 803, which fits
 inside the 1,000 subrequests to Cloudflare services a free Worker gets per
 invocation with room for the deletion itself. Paid Workers get 10,000 by
 default, so the cap costs them nothing. 400 is a conservative application

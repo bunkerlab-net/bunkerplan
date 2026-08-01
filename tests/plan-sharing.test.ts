@@ -73,6 +73,14 @@ function fakePlans(
    * against what was actually written rather than against a constant.
    * `owned: false` is simply the empty repository, which is what "no row
    * matched your id and your ownership" is.
+   *
+   * `calls.visibilities` and `calls.hashes` are the other half, and they
+   * record attempts rather than writes: the push happens before the delegate
+   * runs, so a value the repository refuses - a code minted against a public
+   * plan, a write to a row the caller does not own - is in the list all the
+   * same. That is what makes them useful, since "the handler tried to do this
+   * and was told no" is a case worth asserting. What was actually stored is
+   * read back off `memory` instead.
    */
   const memory = memoryPlans(
     owned ? [storedPlan({ id: PLAN, userId: OWNER })] : [],

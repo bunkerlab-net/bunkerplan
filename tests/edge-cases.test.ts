@@ -16,7 +16,6 @@ import {
 } from "../src/db/schema/rate-limit.sqlite.ts";
 import { healthz, PROBE_TIMEOUT_MS, type Probed } from "../src/http/healthz.ts";
 import { replacePlan } from "../src/http/replace-plan.ts";
-import type { Logger } from "../src/log.ts";
 import type {
   PlanObject,
   PlanRepo,
@@ -32,7 +31,14 @@ import {
   PUBLIC_BASE_URL,
   upload,
 } from "./app-harness.ts";
-import { fakeAuth, OWNER, PLAN_ID, silentLogger } from "./fakes.ts";
+import {
+  at,
+  fakeAuth,
+  OWNER,
+  PLAN_ID,
+  recordingLogger,
+  silentLogger,
+} from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /**
@@ -248,7 +254,9 @@ describe("replacing a plan whose row vanishes underneath", () => {
     // Located by message rather than by position: the log is not ordered by
     // this test, and `logged[0]` would silently start checking another line.
     const orphan = logged.find(
-      (line) => line["msg"] === "orphaned plan object",
+      (line) =>
+        line["msg"] ===
+        "failed to delete an orphaned plan object; its bytes are still stored",
     );
     // Named separately so a missing line reads as "no such log entry" rather
     // than as a shape mismatch against `undefined`.
@@ -608,12 +616,7 @@ describe("the unlock bucket's opportunistic prune", () => {
     );
 
   test("a prune that fails is logged, and the redemption still passes", async () => {
-    const warnings: Array<{ fields: { err?: unknown }; message: string }> = [];
-    const logger = {
-      warn: (fields: { err?: unknown }, message: string) => {
-        warnings.push({ fields, message });
-      },
-    } as unknown as Logger;
+    const { logger, lines } = recordingLogger();
     const failure = new Error("database is locked");
     const dispatched: Dispatched = { statements: [] };
     const repo = createUnlockRateLimitRepo(
@@ -635,21 +638,17 @@ describe("the unlock bucket's opportunistic prune", () => {
     // The cause travels, not just the fact. A line saying only that a sweep
     // failed leaves an operator with a table that stops shrinking and nothing
     // naming why - and this is the one place the reason is still in hand.
+    const warnings = at(lines, "warn");
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toBe("unlock rate-limit sweep failed");
-    expect(warnings[0]?.fields.err).toBe(failure);
+    expect(warnings[0]?.fields["err"]).toBe(failure);
   });
 
   test("and a prune that succeeds says nothing", async () => {
     // Captured, like its sibling above, rather than thrown from. A `warn` that
     // throws would be caught by the very `try` under test and reported as a
     // failed prune, so the test would pass whether the sweep warned or not.
-    const warnings: unknown[] = [];
-    const logger = {
-      warn: (...args: unknown[]) => {
-        warnings.push(args);
-      },
-    } as unknown as Logger;
+    const { logger, lines } = recordingLogger();
     const dispatched: Dispatched = { statements: [] };
     const repo = createUnlockRateLimitRepo(dialect(dispatched), logger, {
       shouldSweep: () => true,
@@ -657,7 +656,7 @@ describe("the unlock bucket's opportunistic prune", () => {
 
     expect((await repo.consume("addr", 3, 60)).allowed).toBe(true);
     expect(pruned(dispatched)).toHaveLength(1);
-    expect(warnings).toEqual([]);
+    expect(at(lines, "warn")).toEqual([]);
   });
 });
 

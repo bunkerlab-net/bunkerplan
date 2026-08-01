@@ -2,9 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { Config } from "../src/config.ts";
 import { DatabaseUnavailable } from "../src/db/unavailable.ts";
 import { type CreatePlanDeps, createPlan } from "../src/http/create-plan.ts";
-import type { Logger } from "../src/log.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
-import { fakeAuth, silentLogger } from "./fakes.ts";
+import { at, fakeAuth, recordingLogger, silentLogger } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /**
@@ -216,15 +215,8 @@ describe("createPlan when the claim does not answer", () => {
         throw new DatabaseUnavailable("claiming a plan id");
       },
     });
-    const warnings: Array<{
-      fields: Record<string, unknown>;
-      message: string;
-    }> = [];
-    d.logger = {
-      warn: (fields: Record<string, unknown>, message: string) => {
-        warnings.push({ fields, message });
-      },
-    } as unknown as Logger;
+    const { logger, lines } = recordingLogger();
+    d.logger = logger;
 
     const response = await createPlan(d, upload("visibility=private"));
 
@@ -235,6 +227,7 @@ describe("createPlan when the claim does not answer", () => {
     // A 503 is the deployment saying it is struggling, so it has to leave a
     // trace naming the account it happened to - a status code alone tells an
     // operator nothing about how often, or to whom.
+    const warnings = at(lines, "warn");
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toBe("plan claim timed out");
     expect(warnings[0]?.fields).toMatchObject({ userId: OWNER });

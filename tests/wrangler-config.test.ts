@@ -32,28 +32,63 @@ interface WranglerConfig {
 /** Bun's `.jsonc` loader; `Bun.file(...).json()` is strict JSON and rejects it. */
 const config = wrangler as WranglerConfig;
 
+/**
+ * Whether a hostname names this machine, in any of the spellings a URL keeps.
+ *
+ * A predicate rather than a list of literals, because the list was never
+ * finishable: the whole of `127.0.0.0/8` is loopback, so `127.0.0.2` is as
+ * local as `127.0.0.1`, and each has an IPv4-mapped IPv6 form that `new URL()`
+ * canonicalises to hex - `[::ffff:127.0.0.2]` becomes `[::ffff:7f00:2]`. The
+ * `7f` prefix after `::ffff:` is that first octet, so it covers the range.
+ *
+ * The trailing dot goes first: a fully qualified `localhost.` is the same host
+ * and `new URL()` keeps the dot, where it normalises the IPv4 forms for us -
+ * `0x7f000001` and `2130706433` both arrive as `127.0.0.1` already.
+ */
+function isLoopback(hostname: string): boolean {
+  const host = hostname.replace(/\.$/, "").replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "::1" ||
+    /^127\./.test(host) ||
+    /^::ffff:7f/i.test(host)
+  );
+}
+
 describe("the deployed wrangler configuration", () => {
   test("names a real origin, not the development one", () => {
     const base = String(config.vars["PUBLIC_BASE_URL"]);
-    expect(base).toStartWith("https://");
 
-    // Every spelling of "this machine", not just the word. `127.0.0.1`,
-    // `[::1]`, and the reserved `.localhost` suffix all resolve to the
-    // loopback, and any of them shipped would break WebAuthn exactly as
-    // `localhost` does - the relying-party origin has to match the browser's.
-    // The trailing dot is stripped first because a fully qualified
-    // `localhost.` is the same host and `new URL()` keeps the dot: only the
-    // IPv4 form is normalised for us, so the comparisons below would let
-    // `https://localhost./` through untouched.
-    const hostname = new URL(base).hostname.replace(/\.$/, "");
-    expect(hostname).not.toBe("localhost");
-    expect(hostname).not.toEndWith(".localhost");
-    expect(hostname).not.toBe("127.0.0.1");
-    expect(hostname).not.toBe("[::1]");
-    // `[::ffff:127.0.0.1]`, which `new URL()` canonicalises to this hex form -
-    // the same loopback wearing an IPv6 hat.
-    expect(hostname).not.toBe("[::ffff:7f00:1]");
+    expect(base).toStartWith("https://");
+    // Shipped with any of these, WebAuthn rejects every ceremony: the
+    // relying-party origin has to match the browser's exactly.
+    expect(isLoopback(new URL(base).hostname)).toBe(false);
   });
+
+  test.each([
+    "localhost",
+    "localhost.",
+    "sub.localhost",
+    "127.0.0.1",
+    "127.0.0.2",
+    "0x7f000001",
+    "2130706433",
+    "[::1]",
+    "[::ffff:127.0.0.1]",
+    "[::ffff:127.0.0.2]",
+  ])("%s is recognised as this machine", (host) => {
+    // The predicate above is only worth as much as its coverage, and several
+    // of these reach it already rewritten by `new URL()`.
+    expect(isLoopback(new URL(`https://${host}/`).hostname)).toBe(true);
+  });
+
+  test.each(["plan.bunkerlab.net", "plan.bunkerlab.net.", "127x0x0x1.example"])(
+    "%s is not",
+    (host) => {
+      expect(isLoopback(new URL(`https://${host}/`).hostname)).toBe(false);
+    },
+  );
 
   test("binds real D1 and KV ids, not the placeholder zeros", () => {
     const d1 = config.d1_databases.map((entry) => entry.database_id);

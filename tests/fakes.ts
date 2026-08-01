@@ -1,6 +1,7 @@
 import { pino } from "pino";
 import type { AppAuth } from "../src/auth/instance.ts";
 import type { PlanVisibility } from "../src/limits.ts";
+import type { Logger } from "../src/log.ts";
 import type {
   PlanAccessRow,
   PlanInsert,
@@ -34,6 +35,52 @@ export const PLAN_ID = "abcdefgh12345678";
 
 /** Silent: these suites assert on responses and side effects, not on output. */
 export const silentLogger = pino({ level: "silent" });
+
+/** One `logger` call, as a shape a test can compare against. */
+export interface LogLine {
+  level: "warn" | "info" | "error";
+  fields: Record<string, unknown>;
+  message: string;
+}
+
+/**
+ * A logger that keeps what it was told, for the suites that assert on it.
+ *
+ * Three of them were hand-rolling this, each with its own `as unknown as
+ * Logger` and its own idea of the argument shape. Pino's `LogFn` takes either
+ * an object and a message or a message alone, so both arrive here and are
+ * sorted out rather than assumed - a cast would let a message-only call record
+ * a bare string as `fields`, which every `toEqual` would then compare against
+ * happily.
+ *
+ * Only the levels something asserts on. A call to any other passes through to
+ * a silent pino, so a suite cannot accidentally depend on this being complete.
+ */
+export function recordingLogger(): { logger: Logger; lines: LogLine[] } {
+  const lines: LogLine[] = [];
+  const record =
+    (level: LogLine["level"]) => (first: unknown, second?: string) => {
+      const messageOnly = typeof first === "string";
+      lines.push({
+        level,
+        fields:
+          !messageOnly && typeof first === "object" && first !== null
+            ? { ...first }
+            : {},
+        message: (messageOnly ? first : second) ?? "",
+      });
+    };
+  const logger = Object.assign(Object.create(silentLogger) as Logger, {
+    warn: record("warn"),
+    info: record("info"),
+    error: record("error"),
+  });
+  return { logger, lines };
+}
+
+/** The lines one level wrote, which is what most assertions want. */
+export const at = (lines: LogLine[], level: LogLine["level"]): LogLine[] =>
+  lines.filter((line) => line.level === level);
 
 /**
  * A promise a test resolves by hand. It is how the race suites interleave two

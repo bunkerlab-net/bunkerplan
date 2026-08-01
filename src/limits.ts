@@ -38,8 +38,11 @@ export const PLAN_PAGE_SIZE = 500;
  * delete and the D1 delete for each plan, one `listByUser` per page plus the
  * empty one that ends the loop, and the `accountClosing.open` before them.
  *
- * So the sweep costs `2n + pages + 1`. At 400 that is 803, and an account this
- * size fits in one page because `PLAN_PAGE_SIZE` is 500. The sum is written
+ * So the sweep costs `2n + pages + 2`, where `pages` counts the pages that
+ * had rows in them: the `+2` is the marker plus the empty listing that ends
+ * the loop. At 400 that is 800 deletes, one page, one terminal listing and one
+ * mark - 803 - and an account this size fits in a single page because
+ * `PLAN_PAGE_SIZE` is 500. The sum is written
  * out so a change to this constant can be checked rather than guessed at, and
  * tests/account-sweep.test.ts both asserts it and measures what the sweep
  * actually issues.
