@@ -91,8 +91,11 @@ describe("the deployed wrangler configuration", () => {
   );
 
   test("binds real D1 and KV ids, not the placeholder zeros", () => {
-    const d1 = config.d1_databases.map((entry) => entry.database_id);
-    const kv = config.kv_namespaces.map((entry) => entry.id);
+    // `?? []` so a missing block fails on the emptiness assertion below, with
+    // its own message, rather than on a `TypeError` reading `.map` of
+    // undefined - which says nothing about what the file was supposed to hold.
+    const d1 = (config.d1_databases ?? []).map((entry) => entry.database_id);
+    const kv = (config.kv_namespaces ?? []).map((entry) => entry.id);
 
     // Non-empty first: a missing binding block would otherwise satisfy every
     // "is not the placeholder" assertion by having nothing to compare, and a

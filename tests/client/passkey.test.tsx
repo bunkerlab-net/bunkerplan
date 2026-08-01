@@ -251,6 +251,16 @@ describe("usePasskeyAction", () => {
 
     expect(attempts).toBe(1);
     expect(navigations).toEqual(["/dashboard"]);
+
+    // And a third press, after the render the success produced. The latch is
+    // deliberately never released on this path - the page is leaving - so this
+    // is the difference between a guard against one turn and a guard that
+    // holds until the document goes.
+    press();
+    await flush();
+
+    expect(attempts).toBe(1);
+    expect(navigations).toEqual(["/dashboard"]);
   });
 
   test("a refused ceremony can be pressed again in the next tick", async () => {

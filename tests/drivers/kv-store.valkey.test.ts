@@ -48,6 +48,10 @@ test.skipIf(skip)(
       // the value must outlive its asked-for deadline, matching Workers KV.
       await kv.set(key("floored"), "transient", 2);
       const floored = await client.ttl(key("floored"));
+      // Non-negative as well as near the floor: `-1` means "no deadline" and
+      // `-2` means "no such key", and both would satisfy a bound derived from
+      // MIN_TTL_SECONDS alone if that constant were ever lowered below 10.
+      expect(floored).toBeGreaterThan(0);
       expect(floored).toBeGreaterThan(MIN_TTL_SECONDS - 10);
       expect(floored).toBeLessThanOrEqual(MIN_TTL_SECONDS);
       expect(await kv.get(key("floored"))).toBe("transient");

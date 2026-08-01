@@ -56,11 +56,15 @@ describe("applySecurityHeaders - app routes", () => {
 });
 
 describe("applySecurityHeaders - plan responses", () => {
-  const marked = (init: ResponseInit = {}) =>
-    harden("https://plan.example/p/abcd1234", {
-      ...init,
-      headers: { [PLAN_DOCUMENT_HEADER]: "1", ...init.headers },
-    });
+  const marked = (init: ResponseInit = {}) => {
+    // Through `Headers`, not an object spread: `init.headers` may be a
+    // `Headers` or an array of pairs, and spreading either of those yields an
+    // object with none of the entries in it - the marker would survive and the
+    // caller's headers would vanish.
+    const headers = new Headers(init.headers);
+    headers.set(PLAN_DOCUMENT_HEADER, "1");
+    return harden("https://plan.example/p/abcd1234", { ...init, headers });
+  };
 
   /**
    * The regression that matters. A response `servePlan` marked as a plan

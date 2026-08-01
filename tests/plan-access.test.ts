@@ -34,11 +34,20 @@ const CONFIG = {
  * repository rather than a two-method stub, so a resolver that reached past
  * `findAccess`/`hasGrant` meets a repository that answers the way the SQL
  * does instead of throwing.
+ *
+ * Each grantee gets a handle mapping, because `memoryPlans` now throws for a
+ * grant naming an account nothing maps to - production joins the `user` table,
+ * so such a grant cannot come back from it. Nothing here reads the handles;
+ * they exist so the repository is internally consistent, and so a case that
+ * later calls `listGrantHandles` finds one rather than an error.
  */
 function fakePlans(
   row: PlanAccessRow | null,
   grantees: string[] = [],
 ): PlanRepo {
+  const handles = Object.fromEntries(
+    grantees.map((userId, index) => [`grantee-${index}`, userId]),
+  );
   return memoryPlans(
     row === null
       ? []
@@ -51,6 +60,7 @@ function fakePlans(
             grants: grantees,
           }),
         ],
+    handles,
   );
 }
 

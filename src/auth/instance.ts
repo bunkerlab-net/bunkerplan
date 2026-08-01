@@ -29,6 +29,25 @@ function stalled(userId: string, listed: number): Error {
 }
 
 /**
+ * The attempt allowance a sweep starts with: the caller's, or no bound.
+ *
+ * Refused rather than clamped when it makes no sense. A zero would throw on
+ * the first row having removed nothing, and a negative would never reach zero
+ * and so disable the budget entirely - the opposite of what a caller asking
+ * for one wants, and silent about it. Neither is a value any caller has, so
+ * either is a wiring mistake and says so.
+ */
+function attemptBudget(maxAttempts: number | undefined): number {
+  if (maxAttempts === undefined) return Number.POSITIVE_INFINITY;
+  if (maxAttempts < 1) {
+    throw new TypeError(
+      `sweepAccountObjects needs at least one attempt, got ${maxAttempts}`,
+    );
+  }
+  return maxAttempts;
+}
+
+/**
  * Removes every object an account owns, ahead of the row cascade that account
  * deletion performs.
  *
@@ -84,7 +103,7 @@ export async function sweepAccountObjects(input: {
   await accountClosing.open(userId);
 
   let removed = 0;
-  let allowance = input.maxAttempts ?? Number.POSITIVE_INFINITY;
+  let allowance = attemptBudget(input.maxAttempts);
   // Rows `deleteOwned` refused. Kept because the next listing is what makes
   // them mean something: still there, and the sweep cannot finish; gone, and
   // another writer removed the plan while this ran.

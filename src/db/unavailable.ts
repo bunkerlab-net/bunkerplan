@@ -1,16 +1,26 @@
 /**
- * A database call that was cut short by a deadline rather than answered.
+ * A database call that was refused by a deadline, and provably left nothing
+ * behind.
+ *
+ * Both halves are the contract. This is what earns a 503 and an invitation to
+ * repeat the request, so it may only be raised where the caller can show the
+ * work did not persist - a rollback that is known, not assumed. Anything less
+ * certain is an ordinary throw and a 500: worse to read, and the only honest
+ * answer when nobody can say whether the write landed.
+ *
+ * A cancellation seen at or around `COMMIT` is exactly that less-certain case
+ * and is deliberately excluded. `pgClaim` in src/db/pg-shared.ts catches the
+ * server's `57014` around the advisory-lock wait alone, where nothing has been
+ * written yet - never around `db.transaction`, from where the same code could
+ * have come from the commit and the outcome would be unknown. The two other
+ * sources are the lock timeout, which is the wait itself expiring, and the
+ * pool refusing to hand out a client, which happens before any statement is
+ * sent.
  *
  * A leaf module on purpose: it imports nothing, so the HTTP layer can name this
  * without reaching into a driver. Nothing reachable from
  * src/runtime/cloudflare.ts may import `pg`, and a handler that had to check a
  * Postgres error code would have to.
- *
- * Distinct from any other failure because the answer to it is different. A
- * statement that timed out says nothing about the request being wrong - the
- * work was refused for taking too long, the transaction rolled back, and
- * nothing was written. That is a 503 and a retry, where an unclassified throw
- * is a 500 and a bug report.
  */
 export class DatabaseUnavailable extends Error {
   constructor(operation: string, options?: { cause?: unknown }) {

@@ -36,24 +36,31 @@ describeSchema("Postgres", postgresDb, { skip });
  */
 describe.skipIf(skip)("the pg pool timeout this build recognises", () => {
   test("still says what isPoolTimeout looks for", async () => {
-    // One slot, so the second caller has nothing to be handed. The deadline is
-    // generous enough that a slow CI connect does not fail the *first*
-    // acquisition - it only has to be shorter than the test, since the second
-    // caller waits on a slot that is never released rather than on the server.
-    const pool = new pg.Pool({
+    /*
+     * Two pools. The first has no acquisition deadline at all and exists only
+     * to hold a client, so a slow connect on a loaded CI runner cannot fail
+     * the setup - which would look identical to the assertion failing. The
+     * second is the one under test: a single slot it can never fill, because
+     * the server's `max_connections` is not what is being exhausted here, and
+     * a deadline short enough to land inside the test.
+     */
+    const holder = new pg.Pool({ connectionString: DATABASE_URL, max: 1 });
+    const waiting = new pg.Pool({
       connectionString: DATABASE_URL,
       max: 1,
-      connectionTimeoutMillis: 1_000,
+      connectionTimeoutMillis: 250,
     });
     let held: pg.PoolClient | undefined;
+    let occupied: pg.PoolClient | undefined;
 
     try {
-      // Inside the `try`, so a first connect that itself fails still reaches
-      // `pool.end()` below rather than leaking the pool into the rest of the
-      // run.
-      held = await pool.connect();
+      held = await holder.connect();
+      // The one slot of the pool under test, taken without a deadline on the
+      // taking: `connect` on a fresh pool opens a connection rather than
+      // queueing, so this cannot be the call that times out.
+      occupied = await waiting.connect();
 
-      const refused = await pool.connect().then(
+      const refused = await waiting.connect().then(
         (client) => {
           client.release();
           return null;
@@ -64,8 +71,9 @@ describe.skipIf(skip)("the pg pool timeout this build recognises", () => {
       expect(refused).toBeInstanceOf(Error);
       expect(isPoolTimeout(refused)).toBe(true);
     } finally {
+      occupied?.release();
       held?.release();
-      await pool.end();
+      await Promise.all([waiting.end(), holder.end()]);
     }
   }, 10_000);
 });

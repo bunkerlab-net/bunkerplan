@@ -363,6 +363,21 @@ describe("integer settings", () => {
     );
   });
 
+  test("and the ceiling itself is accepted, not refused", () => {
+    // Inclusive, which the message above states as a range but does not
+    // prove: an off-by-one in `int`'s comparison would refuse exactly the
+    // quota `WORKERS_MAX_PLANS_PER_USER` is named for.
+    expect(
+      loadConfig(
+        {
+          ...REQUIRED,
+          MAX_PLANS_PER_USER: String(WORKERS_MAX_PLANS_PER_USER),
+        } as never,
+        { workers: true },
+      ).maxPlansPerUser,
+    ).toBe(WORKERS_MAX_PLANS_PER_USER);
+  });
+
   test("and uncapped off Workers, where nothing counts the calls", () => {
     const far = WORKERS_MAX_PLANS_PER_USER * 10;
 

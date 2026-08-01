@@ -33,6 +33,11 @@ export function createDialectRepos(
 ): DialectRepos {
   return {
     plans: createPlanRepo(dialect),
+    // The upload counter names its table because `createRateLimitRepo` serves
+    // both buckets and cannot know which it is building. The unlock one does
+    // not, because `createUnlockRateLimitRepo` *is* the unlock bucket - it
+    // owns `unlock_rate_limit` the way `createPlanRepo` owns `plan`, and a
+    // table argument there would be a parameter with one legal value.
     uploadRateLimits: createRateLimitRepo(
       dialect,
       dialect.tables.uploadRateLimit,
