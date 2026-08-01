@@ -600,9 +600,13 @@ describe("the unlock bucket's opportunistic prune", () => {
   });
 
   test("and a prune that succeeds says nothing", async () => {
+    // Captured, like its sibling above, rather than thrown from. A `warn` that
+    // throws would be caught by the very `try` under test and reported as a
+    // failed prune, so the test would pass whether the sweep warned or not.
+    const warnings: unknown[] = [];
     const logger = {
-      warn: () => {
-        throw new Error("nothing to warn about");
+      warn: (...args: unknown[]) => {
+        warnings.push(args);
       },
     } as unknown as Logger;
     const repo = createUnlockRateLimitRepo(
@@ -612,6 +616,7 @@ describe("the unlock bucket's opportunistic prune", () => {
     );
 
     expect((await repo.consume("addr", 3, 60)).allowed).toBe(true);
+    expect(warnings).toEqual([]);
   });
 });
 

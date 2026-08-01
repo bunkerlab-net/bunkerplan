@@ -318,9 +318,11 @@ export async function d1Db(): Promise<DbFixture> {
 // ---------------------------------------------------------------------------
 
 /**
- * The four repositories, which no longer differ by dialect: `Dialect` is the
- * seam, and every driver difference lives behind it. Named once so a fifth
- * repository is one edit rather than two.
+ * The repository set, which no longer differs by dialect: `Dialect` is the
+ * seam, and every driver difference lives behind it. Named once so another
+ * repository is one edit rather than two - which is how the bounded-sweep
+ * unlock bucket came to sit beside the ordinary one without a second copy of
+ * everything around it.
  */
 function repos(
   dialect: Dialect,

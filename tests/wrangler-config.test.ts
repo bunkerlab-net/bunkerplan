@@ -41,7 +41,12 @@ describe("the deployed wrangler configuration", () => {
     // `[::1]`, and the reserved `.localhost` suffix all resolve to the
     // loopback, and any of them shipped would break WebAuthn exactly as
     // `localhost` does - the relying-party origin has to match the browser's.
-    const { hostname } = new URL(base);
+    //
+    // The trailing dot is stripped first because a fully qualified
+    // `localhost.` is the same host and `new URL()` keeps the dot: only the
+    // IPv4 form is normalised for us, so the comparisons below would let
+    // `https://localhost./` through untouched.
+    const hostname = new URL(base).hostname.replace(/\.$/, "");
     expect(hostname).not.toBe("localhost");
     expect(hostname).not.toEndWith(".localhost");
     expect(hostname).not.toBe("127.0.0.1");

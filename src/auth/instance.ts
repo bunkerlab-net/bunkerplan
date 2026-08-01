@@ -111,9 +111,9 @@ export async function sweepAccountObjects(input: {
     if (allowance === 0) {
       throw new Error(
         `account ${userId} holds more plans than one invocation may sweep: ` +
-          `${removed} removed, ${rows.length} left rather than run past the ` +
-          "platform's subrequest budget. Retry the deletion to continue - " +
-          "nothing already removed comes back",
+          `${removed} removed, at least ${rows.length} left rather than run ` +
+          "past the platform's subrequest budget. Retry the deletion to " +
+          "continue - nothing already removed comes back",
       );
     }
     for (const row of rows) {

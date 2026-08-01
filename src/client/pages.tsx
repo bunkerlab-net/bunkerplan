@@ -4,7 +4,11 @@ import { SiteFrame } from "./Chrome.tsx";
 import { Dashboard } from "./Dashboard.tsx";
 import { Landing } from "./Landing.tsx";
 import { PlanGate } from "./PlanGate.tsx";
-import type { DashboardProps, LandingProps, PageProps } from "./page-props.ts";
+import type {
+  DashboardProps,
+  LandingPageProps,
+  PageProps,
+} from "./page-props.ts";
 import { usePasskeyAction } from "./passkey.ts";
 
 /**
@@ -13,7 +17,7 @@ import { usePasskeyAction } from "./passkey.ts";
  * the sign-in card gives way to a route through to it, because the ceremony
  * buttons would only add a second passkey to a live session.
  */
-export function LandingPage({ path, origin }: LandingProps) {
+export function LandingPage({ path, origin }: LandingPageProps) {
   const { data: session, isPending } = useSession();
   // One ceremony runner for the whole page: the nav's "Sign in" and the
   // landing card's two buttons share a single busy flag and error.

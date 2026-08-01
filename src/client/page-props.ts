@@ -20,7 +20,13 @@ interface BasePageProps {
   origin: string;
 }
 
-export interface LandingProps extends BasePageProps {
+/**
+ * What the server serialises for the landing route. Named for the page rather
+ * than the component, because `Landing.tsx` has its own `LandingProps` for
+ * what the card is handed - a different shape, and one name across both files
+ * would read as though the two had to agree.
+ */
+export interface LandingPageProps extends BasePageProps {
   name: "landing";
 }
 
@@ -48,4 +54,4 @@ export interface GateProps extends BasePageProps {
   relay: boolean;
 }
 
-export type PageProps = LandingProps | DashboardProps | GateProps;
+export type PageProps = LandingPageProps | DashboardProps | GateProps;

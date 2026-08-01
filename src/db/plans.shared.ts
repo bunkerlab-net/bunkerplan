@@ -4,26 +4,31 @@ import type { PlanVisibility } from "../limits.ts";
 import type { PlanInsert, PlanRepo } from "../services/types.ts";
 import type { Dialect, DialectTables } from "./dialect.ts";
 
-/**
- * The columns a write may set, and the column name each carries in SQL.
- *
- * Scalars only. Every update below sets a value the caller already holds, and
- * the one write that has to read the old rows - the claim's count - is its own
- * statement.
- */
-const WRITABLE = {
-  label: "label",
-  size: "size",
-  visibility: "visibility",
-  shareCodeHash: "share_code_hash",
-} as const;
-
 type PlanWrite = Partial<{
   label: string | null;
   size: number;
   visibility: PlanVisibility;
   shareCodeHash: string | null;
 }>;
+
+/**
+ * The columns a write may set, and the column name each carries in SQL.
+ *
+ * Scalars only. Every update below sets a value the caller already holds, and
+ * the one write that has to read the old rows - the claim's count - is its own
+ * statement.
+ *
+ * Keyed by `keyof PlanWrite` rather than inferred, so the two cannot drift: a
+ * field added to the write type without a column name here fails to compile,
+ * where an inferred map would only fail at run time, as an `undefined`
+ * identifier interpolated into SQL.
+ */
+const WRITABLE: Record<keyof PlanWrite, string> = {
+  label: "label",
+  size: "size",
+  visibility: "visibility",
+  shareCodeHash: "share_code_hash",
+};
 
 /** False means no row matched: unknown id, or one owned by somebody else. */
 async function updateOwned(
