@@ -192,7 +192,7 @@ function run(f: Fixture, maxAttempts?: number): Promise<void> {
  * A free Worker gets 1,000 subrequests to Cloudflare services per invocation -
  * D1 and R2 are Cloudflare services - where a paid one gets 10,000 by default.
  * Sizing against the free figure is what makes the ceiling safe on both.
- * https://developers.cloudflare.com/changelog/2026-02-11-subrequests-limit
+ * https://developers.cloudflare.com/changelog/post/2026-02-11-subrequests-limit
  */
 const WORKERS_SUBREQUEST_LIMIT = 1000;
 /** Left for the row deletion Better Auth performs around the hook. */
@@ -249,9 +249,13 @@ test("a full account's sweep issues no more calls than that", async () => {
 
   expect(f.rows.size).toBe(0);
   // Both the number of listings and the size each asked for, derived from the
-  // constants rather than written out. `steps` counts the calls but says
-  // nothing about the page size, so a sweep that paged by one would make 401
-  // listings and still satisfy a count that only checked the total.
+  // constants rather than written out.
+  //
+  // The count below would catch a page size small enough to multiply the
+  // listings - paging by one would make 401 of them and blow the budget. What
+  // it cannot see is a page size that is merely wrong: 400 or 499 still lists
+  // this account in two calls, so the total is identical and only the asked-for
+  // size says the sweep is paging the way `PLAN_PAGE_SIZE` says it does.
   expect(f.limits).toEqual(
     Array.from(
       { length: listingsFor(WORKERS_MAX_PLANS_PER_USER) },

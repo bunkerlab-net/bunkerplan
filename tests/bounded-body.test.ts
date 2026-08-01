@@ -89,9 +89,14 @@ describe("readBoundedBody", () => {
 function raw(bytes: Uint8Array): Request {
   return new Request("https://example.test/", {
     method: "PATCH",
-    // The backing buffer, because `BodyInit` takes an `ArrayBuffer` view only
-    // through the DOM lib's narrower alias and this file needs exact bytes.
-    body: bytes.buffer as ArrayBuffer,
+    // The view's own slice of its buffer, not the whole buffer: a `subarray`
+    // shares the original allocation, so `bytes.buffer` would send everything
+    // around it too. Identical for a freshly built array and wrong for
+    // anything derived from one.
+    body: bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer,
   });
 }
 

@@ -564,6 +564,14 @@ describe("the unlock bucket's opportunistic prune", () => {
   /** A window far enough back that the wait is the floored one second. */
   const WINDOW_START = 1_700_000_000_000;
 
+  /**
+   * The prune and nothing else. One predicate, used both to decide what the
+   * stub refuses and to assert what it was asked - two copies of the same
+   * `startsWith` would let the test refuse one statement and count another.
+   */
+  const isPrune = (statement: string) =>
+    statement.trimStart().toLowerCase().startsWith("delete");
+
   /** Every statement `run` was asked to execute, so the prune is identifiable. */
   interface Dispatched {
     statements: string[];
@@ -587,9 +595,7 @@ describe("the unlock bucket's opportunistic prune", () => {
     const run = async (query: SQL) => {
       const text = render.sqlToQuery(query).sql;
       dispatched.statements.push(text);
-      if (text.trimStart().toLowerCase().startsWith("delete")) {
-        await onDelete();
-      }
+      if (isPrune(text)) await onDelete();
     };
     return {
       rows: async <T extends Record<string, unknown>>() =>
@@ -611,9 +617,7 @@ describe("the unlock bucket's opportunistic prune", () => {
 
   /** The prune, as `run` sees it: the only `delete` the repo issues. */
   const pruned = (dispatched: Dispatched) =>
-    dispatched.statements.filter((text) =>
-      text.trimStart().toLowerCase().startsWith("delete"),
-    );
+    dispatched.statements.filter(isPrune);
 
   test("a prune that fails is logged, and the redemption still passes", async () => {
     const { logger, lines } = recordingLogger();

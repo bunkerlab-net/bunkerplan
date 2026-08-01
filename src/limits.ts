@@ -56,7 +56,7 @@ export const PLAN_PAGE_SIZE = 500;
  * hook. Paid has an order of magnitude more room, so this ceiling costs it
  * nothing it would otherwise use.
  *
- * https://developers.cloudflare.com/changelog/2026-02-11-subrequests-limit
+ * https://developers.cloudflare.com/changelog/post/2026-02-11-subrequests-limit
  *
  * Read twice, which is the point of one constant: `MAX_PLANS_PER_USER` is
  * refused above it on Workers, so an account cannot grow past what one

@@ -43,6 +43,36 @@ function pgExecutor(handle: Pick<PgDb, "execute">): SqlExecutor {
 }
 
 /**
+ * The advisory-lock key for an account, as a signed 64-bit integer.
+ *
+ * Derived here rather than by `hashtext()` on the server. Two reasons, and
+ * neither is the lock behaving differently: `hashtext` is an internal function
+ * Postgres documents nowhere and has changed its output across major versions
+ * before, and it is 32-bit, so two accounts collide roughly every 65,000 -
+ * which costs only serialisation, but costs it for no reason when the full
+ * width is free.
+ *
+ * The first eight bytes of a SHA-256, read big-endian and reinterpreted as
+ * signed, because that is what `bigint` is: `pg_advisory_xact_lock` takes one
+ * key of that type and `pg` sends a `bigint` as a decimal string, so the
+ * conversion has to happen before the value leaves here.
+ *
+ * Changing this derivation is safe to deploy, because the locks are
+ * transaction-scoped and hold nothing across a restart - but during a rolling
+ * deploy two nodes would key the same account differently and could each admit
+ * a claim at the ceiling. One plan over quota, once, for the length of a
+ * rollout.
+ */
+async function lockKey(userId: string): Promise<bigint> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(userId),
+  );
+  const unsigned = new DataView(digest).getBigUint64(0);
+  return BigInt.asIntN(64, unsigned);
+}
+
+/**
  * Count-and-claim as one critical section per account.
  *
  * Postgres reads the count from its snapshot, so unlike SQLite - which
@@ -114,7 +144,7 @@ function pgClaim(db: PgDb): Dialect["claim"] {
             // the connection goes back to the pool with the ordinary deadline.
             await tx.execute(sql`set local lock_timeout = '3s'`);
             await tx.execute(
-              sql`select pg_advisory_xact_lock(hashtext(${userId})::bigint)`,
+              sql`select pg_advisory_xact_lock(${await lockKey(userId)})`,
             );
           } catch (cause) {
             if (isLockUnavailable(cause) || isStatementCancelled(cause)) {
