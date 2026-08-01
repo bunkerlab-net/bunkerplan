@@ -402,11 +402,20 @@ const UNLOCK_RATE_LIMITED = {
       "how long. The bucket is the client address, so one address " +
       "cannot spend another address's allowance - but callers sharing " +
       "an address, behind one office NAT or mobile gateway, share the " +
-      "allowance too.",
+      "allowance too.\n\n" +
+      "One deployment fault answers with this status and does not " +
+      "refill: when the proxy in front is not sending the header the " +
+      "server was configured to trust, there is no address to bucket by " +
+      "and every redemption is refused. It is indistinguishable from " +
+      "the outside, so a client that keeps seeing 429 past its " +
+      "`retry-after` should report it rather than retry - the fix is to " +
+      "the deployment's proxy, not to the request.",
   ),
   headers: {
     "retry-after": {
-      description: "Seconds until the allowance refills.",
+      description:
+        "Seconds until the allowance refills. Always 60 for the " +
+        "misconfiguration above, where nothing refills.",
       schema: { type: "integer", minimum: 0 },
     },
   },

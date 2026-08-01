@@ -215,6 +215,26 @@ describe("sweepAccountObjects", () => {
     expect(f.rows.size).toBe(0);
   });
 
+  /**
+   * A storage failure has to reach Better Auth, which aborts the deletion on
+   * it. Swallowing one would leave the object behind and let the cascade take
+   * the row naming it - the exact end this whole function exists to avoid, and
+   * reached by the one path where being quiet looks like being tidy.
+   *
+   * The row stays too: the object is the thing that could not be removed, and
+   * the row is the only handle left on it.
+   */
+  test("propagates a storage failure rather than deleting the row", async () => {
+    const f = fixture();
+    seed(f, ["p1"]);
+    f.storage.delete = async () => {
+      throw new Error("bucket unreachable");
+    };
+
+    await expect(run(f)).rejects.toThrow("bucket unreachable");
+    expect(f.rows.size).toBe(1);
+  });
+
   test("leaves another account's plans alone", async () => {
     const f = fixture();
     seed(f, ["mine"]);

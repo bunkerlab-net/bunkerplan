@@ -24,8 +24,9 @@ import wrangler from "../wrangler.jsonc";
 
 interface WranglerConfig {
   vars: Record<string, string | number | boolean>;
-  d1_databases: Array<{ database_id: string }>;
-  kv_namespaces: Array<{ id: string }>;
+  d1_databases: Array<{ binding: string; database_id: string }>;
+  kv_namespaces: Array<{ binding: string; id: string }>;
+  r2_buckets: Array<{ binding: string }>;
 }
 
 /** Bun's `.jsonc` loader; `Bun.file(...).json()` is strict JSON and rejects it. */
@@ -62,6 +63,19 @@ describe("the deployed wrangler configuration", () => {
       expect(id).toMatch(/^[0-9a-f]{32}$/);
       expect(id).not.toBe("0".repeat(32));
     }
+  });
+
+  /**
+   * src/runtime/cloudflare.ts reaches these by name - `env.DB`, `env.KV`,
+   * `env.BUCKET` - so a renamed binding is a Worker that deploys clean and
+   * then fails on its first request with an undefined handle. The ids above
+   * say nothing about that: they can all be real and all be bound to names
+   * nothing looks for.
+   */
+  test("binds them under the names the runtime reaches for", () => {
+    expect(config.d1_databases.map((entry) => entry.binding)).toEqual(["DB"]);
+    expect(config.kv_namespaces.map((entry) => entry.binding)).toEqual(["KV"]);
+    expect(config.r2_buckets.map((entry) => entry.binding)).toEqual(["BUCKET"]);
   });
 
   /**

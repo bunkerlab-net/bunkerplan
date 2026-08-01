@@ -24,7 +24,12 @@ export async function sweepOrphanedObject(
   logger: Pick<Logger, "error">,
   id: string,
 ): Promise<void> {
-  await storage.delete(id).catch((error: unknown) => {
+  // `try`, not `.catch`: a `delete` that throws before returning its promise
+  // never gets a handler attached, and the rejection this exists to swallow
+  // would instead replace a response the route has already decided on.
+  try {
+    await storage.delete(id);
+  } catch (error) {
     logger.error({ err: error, planId: id }, "orphaned plan object");
-  });
+  }
 }
