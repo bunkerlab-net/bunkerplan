@@ -332,6 +332,28 @@ describe("the missing-header warning", () => {
     });
   });
 
+  /**
+   * Present and empty, which is a different branch from absent: a proxy that
+   * forwards the header but has nothing to put in it. `clientAddress` tests
+   * `=== ""` beside its null check for exactly this, and without a case here
+   * dropping that half would leave an empty string hashed into a bucket key -
+   * one shared bucket for every caller behind that proxy, which is the
+   * silent-throttle failure the null path exists to avoid.
+   */
+  test("treats a header sent empty as a header not sent", async () => {
+    const { run, deps, spent } = route();
+
+    const request = post({ [ROUTE_CONFIG.clientIpHeader]: "" });
+    expect((await run(deps, request, "abc")).status).toBe(429);
+
+    expect(spent).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("no trusted client address header");
+    expect(warnings[0]?.fields).toEqual({
+      header: ROUTE_CONFIG.clientIpHeader,
+    });
+  });
+
   test("says it once, so a stranger cannot flood the log with refusals", async () => {
     // The route takes no credential, and every one of these answers 429 - so a
     // line per attempt is a log bill anyone can run up. The refusal itself is

@@ -72,8 +72,22 @@ export const PLAN_PAGE_SIZE = 500;
 export const WORKERS_MAX_PLANS_PER_USER = 400;
 
 /**
- * Most refusal reasons one validation response carries. The HTML gate stops
- * collecting past this; the Error schema's `errors` array is capped to match.
+ * Most refusal reasons one validation response carries.
+ *
+ * A cap at all because the walk is over attacker-supplied bytes: a 2 MB
+ * document can name far more external references than anybody wants in an
+ * error body, and an uncapped collector would build that whole list before
+ * anyone could refuse it. Ten is past the point where a document has a
+ * systemic problem rather than a typo, and the count of what was dropped
+ * travels with the response so a caller cannot mistake the cap for the whole
+ * truth.
+ *
+ * Here rather than in the gate because two subsystems have to agree: the HTML
+ * gate stops collecting past this, and the Error schema's `errors` array is
+ * capped to match, which puts the number in the OpenAPI document. The gate
+ * counts over a keyed collection rather than an array - identical references
+ * written twice produce an identical refusal, and reporting it once is more
+ * useful than reporting it as often as it appears.
  */
 export const MAX_FINDINGS = 10;
 

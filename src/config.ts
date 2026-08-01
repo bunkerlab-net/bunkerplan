@@ -92,8 +92,14 @@ const MIN_SECRET_LENGTH = 32;
  * storage bill. The Workers KV `expirationTtl` minimum this used to cite is a
  * fact about a different subsystem; it lives at MIN_TTL_SECONDS in
  * src/kv/min-ttl.ts, where both KV drivers read it.
+ *
+ * Exported so the test asserting the refusal reads the floor instead of
+ * repeating it. Here and not in src/limits.ts: that module carries ceilings
+ * the wire can see - page sizes, quotas, the visibility enum - and this is a
+ * bound on one environment variable, meaningful only to the loader that
+ * enforces it.
  */
-const MIN_RATE_WINDOW_SEC = 60;
+export const MIN_RATE_WINDOW_SEC = 60;
 const DEFAULT_MAX_UPLOAD_BYTES = 2_097_152;
 const DEFAULT_PLAN_ID_LENGTH = 16;
 /**

@@ -81,16 +81,18 @@ export function sqliteDialect(db: SqliteDb): Dialect {
  * The `Db` fields `src/auth/instance.ts` hands to `drizzleAdapter`, narrowed to
  * the drizzle instance this dialect actually holds.
  *
- * A driver module returns `Db & SqliteAuthHandle`, and `createAuth` demands
+ * A driver module returns `Db` intersected with this, and `createAuth` demands
  * the handle union - which is what stops a handle being mistagged. On `Db`
  * alone (`adapter: unknown`) a wrong `provider` beside it would only surface
  * as Better Auth issuing statements in the wrong dialect at runtime.
  *
- * Declared once, here. The name appears in several other files - src/db/d1.ts
- * and src/db/bun-sqlite.ts import the type and name it in their return types,
- * src/auth/instance.ts unions it into `AuthDb`, and src/db/pg-shared.ts points
- * at it from a comment - but every one of those is a type-only import or a
- * mention, not a second declaration. `tsc --noEmit` is the arbiter and it is
- * clean; a genuine duplicate identifier would not compile.
+ * Declared once, on the line below, and deliberately named nowhere else in
+ * this file - three review rounds have read a second mention here as a second
+ * declaration, so there is now nothing to pair. src/db/d1.ts and
+ * src/db/bun-sqlite.ts import it as a type and name it in their return types,
+ * and src/auth/instance.ts unions it into `AuthDb`; those are type-only
+ * imports across module boundaries, which cannot collide with anything.
+ * `tsc --noEmit` is the arbiter and it is clean - a duplicate identifier is a
+ * compile error, not a style opinion.
  */
 export type SqliteAuthHandle = { adapter: SqliteDb; provider: "sqlite" };

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { healthz } from "../src/http/healthz.ts";
+import type { Logger } from "../src/log.ts";
 import type { Db, KvStore, PlanStorage } from "../src/services/types.ts";
 import { silentLogger } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
@@ -9,7 +10,11 @@ interface Fakes {
     storage: PlanStorage;
     db: Db;
     kv: KvStore;
-    logger: typeof silentLogger;
+    // The production contract, not `typeof silentLogger`. Naming the fake
+    // would make this fixture agree with whatever the fake happens to be, so
+    // a logger `healthz` needs and the fake lacks would typecheck here and
+    // fail where it is called.
+    logger: Logger;
   }>;
   probed: string[];
 }

@@ -97,13 +97,13 @@ async function lockKey(userId: string): Promise<bigint> {
  * like a tightening. `begin isolation level read committed` says what this
  * needs, on a statement nobody can configure out from under it.
  *
- * `hashtext` is 32-bit, so two accounts can land on one lock. That costs
- * serialisation and nothing else: the lock only decides who counts and claims
- * at a time, and `claimRow` still filters its count by `user_id`, so a
- * collided pair sees its own quota either way. Two accounts sharing a lock
+ * Two accounts can still land on one lock, since 64 bits is a key space and
+ * not a guarantee. That costs serialisation and nothing else: the lock only
+ * decides who counts and claims at a time, and `claimRow` still filters its
+ * count by `user_id`, so a collided pair sees its own quota either way. They
  * wait for each other's claim - a claim being one short statement - and at
- * 2^32 buckets that is rare enough to be cheaper than a lock table keyed by
- * the id itself.
+ * 2^64 that is rare enough to be cheaper than a lock table keyed by the id
+ * itself. See `lockKey` below for where the number comes from.
  *
  * Waiting for that lock is itself a statement, so `statement_timeout` bounds
  * it and a queue deep enough ends in a cancellation rather than a hang. That

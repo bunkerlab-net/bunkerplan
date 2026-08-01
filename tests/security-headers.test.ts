@@ -128,4 +128,25 @@ describe("applySecurityHeaders - plan responses", () => {
       expect(get(response, "content-security-policy")).not.toContain("sandbox");
     },
   );
+
+  /**
+   * The mirror of the case above, and the half that makes "only the marker
+   * selects" a claim rather than a coincidence. Every other case here puts
+   * the marker on a `/p/` URL, so a wrapper that checked the path *and* the
+   * marker would pass all of them.
+   *
+   * Not hypothetical: selection used to key on the path and the status, and
+   * the marker exists because that was wrong. A plan document is whatever
+   * `servePlan` says it is - if it were ever mounted elsewhere, the sandbox
+   * has to travel with the response and not with the URL.
+   */
+  test("pins the plan policy off the plan path, on the marker alone", () => {
+    const headers = new Headers();
+    headers.set(PLAN_DOCUMENT_HEADER, "1");
+    const response = harden("https://plan.example/somewhere/else", {
+      headers,
+    });
+
+    expect(get(response, "content-security-policy")).toBe(PLAN_CSP);
+  });
 });

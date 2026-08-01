@@ -104,14 +104,17 @@ function fixture(
    * fewer subrequests than the sweep made.
    */
   const overridden: PlanRepo = { ...base, ...planOverrides(base) };
-  const listByUser: PlanRepo["listByUser"] = async (userId, limit) => {
+  // Rest parameters, so a signature that grows an argument keeps forwarding
+  // it. Naming them here would silently drop the new one and leave the sweep
+  // being measured against a call it did not make.
+  const listByUser: PlanRepo["listByUser"] = async (...args) => {
     steps.push("list");
-    limits.push(limit);
-    return await overridden.listByUser(userId, limit);
+    limits.push(args[1]);
+    return await overridden.listByUser(...args);
   };
-  const deleteOwned: PlanRepo["deleteOwned"] = async (id, userId) => {
+  const deleteOwned: PlanRepo["deleteOwned"] = async (...args) => {
     steps.push("row");
-    return await overridden.deleteOwned(id, userId);
+    return await overridden.deleteOwned(...args);
   };
   /*
    * Pino's `LogFn` takes either an object and a message or a message alone, so
@@ -201,6 +204,13 @@ const AUTH_RESERVE = 100;
 /**
  * Listings a sweep of `plans` should make: one per page, plus the empty one
  * that ends the loop.
+ *
+ * That `+ 1` is the sweep's termination rule written as arithmetic. There is
+ * no cursor: every pass asks for the first `PLAN_PAGE_SIZE` rows again, and
+ * the loop ends only on a listing that comes back with none. A short page
+ * does not end it - the rows are processed and another listing follows. So
+ * an account whose plans divide exactly into pages still costs one listing
+ * more than it has pages, and an empty account costs one.
  */
 const listingsFor = (plans: number) => Math.ceil(plans / PLAN_PAGE_SIZE) + 1;
 
@@ -467,6 +477,34 @@ describe("sweepAccountObjects", () => {
 
       await expect(run(f)).resolves.toBeUndefined();
       expect(f.rows.size).toBe(0);
+    });
+
+    /**
+     * Every number the loop cannot count down to zero, refused at the door.
+     *
+     * Each of these would otherwise be accepted and then never satisfy
+     * `allowance === 0`, so the sweep would run unbounded while its caller
+     * believed it had asked for a bound - a budget that fails open, silently,
+     * which is worse than no budget at all because the caller stops watching.
+     *
+     * `1e20` is the one a sign test misses and `Number.isInteger` waves
+     * through: it is a whole number, and `1e20 - 1 === 1e20`.
+     */
+    test.each([
+      ["zero", 0],
+      ["negative", -1],
+      ["fractional", 2.5],
+      ["NaN", Number.NaN],
+      ["past exact arithmetic", 1e20],
+    ] as const)("refuses a %s budget rather than ignoring it", async (_, n) => {
+      const f = fixture();
+      seed(f, ["p1"]);
+
+      await expect(run(f, n)).rejects.toBeInstanceOf(TypeError);
+      // Refused before the marker, so a bad call leaves no half-closed
+      // account behind for the next one to trip over.
+      expect(f.closing.has(OWNER)).toBe(false);
+      expect(f.rows.size).toBe(1);
     });
   });
 });

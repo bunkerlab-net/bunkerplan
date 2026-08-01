@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadConfig } from "../src/config.ts";
+import { loadConfig, MIN_RATE_WINDOW_SEC } from "../src/config.ts";
 import { WORKERS_MAX_PLANS_PER_USER } from "../src/limits.ts";
 import {
   CLIENT_IP_HEADER,
@@ -338,8 +338,13 @@ describe("integer settings", () => {
     // A one-second window is a legal number that would make the limiter
     // useless. Refusing says so at boot; clamping left the deployment running
     // a limit the operator did not configure and could not see.
+    //
+    // The floor comes off the constant so moving it cannot leave this
+    // asserting a bound the loader no longer enforces - the message would
+    // still match its own shape, which is exactly how that drift hides.
     expect(refusal({ ...SELF_HOSTED, UPLOAD_RATE_WINDOW_SEC: "1" })).toContain(
-      'UPLOAD_RATE_WINDOW_SEC must be an integer >= 60, got "1"',
+      `UPLOAD_RATE_WINDOW_SEC must be an integer >= ${MIN_RATE_WINDOW_SEC}, ` +
+        'got "1"',
     );
   });
 

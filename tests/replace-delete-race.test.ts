@@ -25,16 +25,21 @@ const CONFIG = {
 const HTML = "<!doctype html><html><body><p>replacement</p></body></html>";
 
 /**
- * Both stores, in memory, with a hold on the first object delete so the two
- * requests can be interleaved by hand rather than by luck.
+ * Both stores, in memory.
+ *
+ * `holdFirstDelete` pauses the first object delete so two requests can be
+ * interleaved by hand rather than by luck. Off by default, because the other
+ * suite here pauses somewhere else entirely: armed unconditionally, that test
+ * had to reach in and release a hold it never wanted, and a reader could not
+ * tell whether doing so was setup or part of the race being tested.
  */
-function stores() {
+function stores({ holdFirstDelete = false } = {}) {
   const objects = new Map<string, number>();
   objects.set(ID, 10);
 
   const entered = deferred();
   const released = deferred();
-  let deletes = 0;
+  let paused = false;
   /*
    * Every write and delete in order. The end state says an object is gone; it
    * does not say who removed it, and "the replacement cleaned up after itself"
@@ -51,8 +56,8 @@ function stores() {
     delete: async (key) => {
       log.push(`delete ${key}`);
       objects.delete(key);
-      deletes += 1;
-      if (deletes === 1) {
+      if (holdFirstDelete && !paused) {
+        paused = true;
         entered.resolve();
         await released.promise;
       }
@@ -83,7 +88,9 @@ function put(): Request {
 
 describe("a replacement racing a delete", () => {
   test("leaves no object behind when the replacement lands mid-delete", async () => {
-    const { objects, rows, storage, plans, auth, hold } = stores();
+    const { objects, rows, storage, plans, auth, hold } = stores({
+      holdFirstDelete: true,
+    });
 
     // The worst interleaving there is: the delete has already removed the
     // object, so the replacement's ownership check and its own row update both
@@ -133,11 +140,9 @@ describe("a replacement racing an account deletion", () => {
    * is why `replacePlan` reads it after its own write.
    */
   test("leaves no object behind when it lands between object and row", async () => {
-    const { objects, log, rows, storage, plans, auth, hold } = stores();
-    // `stores()` pauses the first object delete for the test above. This one
-    // pauses somewhere else, so that hold is let go before it can deadlock the
-    // sweep short of the row delete it is waiting on.
-    hold.released.resolve();
+    // No hold from `stores()`: this test does its own pausing, inside
+    // `deleteOwned` below.
+    const { objects, log, rows, storage, plans, auth } = stores();
     const closing = new Set<string>();
     const accountClosing = {
       open: async (userId: string) => {

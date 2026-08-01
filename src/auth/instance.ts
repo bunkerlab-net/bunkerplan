@@ -31,17 +31,29 @@ function stalled(userId: string, listed: number): Error {
 /**
  * The attempt allowance a sweep starts with: the caller's, or no bound.
  *
- * Refused rather than clamped when it makes no sense. A zero would throw on
- * the first row having removed nothing, and a negative would never reach zero
- * and so disable the budget entirely - the opposite of what a caller asking
- * for one wants, and silent about it. Neither is a value any caller has, so
- * either is a wiring mistake and says so.
+ * A whole number the loop can actually spend, because it spends by ones and
+ * stops at exactly zero. Three shapes of number walk straight past that and
+ * leave the sweep unbounded while its caller believed it had asked for a
+ * bound - the precise failure the budget exists to prevent, arrived at in
+ * silence:
+ *
+ * - `NaN`, which compares equal to nothing, itself included;
+ * - a fraction, where `2.5` steps to `0.5` and then `-0.5`;
+ * - an integer too large to be exact, where `1e20 - 1 === 1e20` and the
+ *   allowance simply never falls. `Number.isInteger` says yes to that one,
+ *   which is why the test here is `isSafeInteger`: the question is not
+ *   whether the value is whole but whether subtracting one from it moves it.
+ *
+ * Refused rather than clamped. Zero and below are no more a value a real
+ * caller holds than a fraction is, and rounding any of these into a working
+ * budget would hide the wiring mistake that produced it.
  */
 function attemptBudget(maxAttempts: number | undefined): number {
   if (maxAttempts === undefined) return Number.POSITIVE_INFINITY;
-  if (maxAttempts < 1) {
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {
     throw new TypeError(
-      `sweepAccountObjects needs at least one attempt, got ${maxAttempts}`,
+      "sweepAccountObjects needs a whole number of attempts it can count " +
+        `down, at least one; got ${maxAttempts}`,
     );
   }
   return maxAttempts;
@@ -87,6 +99,11 @@ function attemptBudget(maxAttempts: number | undefined): number {
  * end for an account whose objects could not all be removed - the alternative
  * deletes the rows naming them.
  *
+ * Which is also why the attempt budget is validated before `open` rather than
+ * after: `open` shuts uploads out of the account, and a throw past it aborts
+ * the deletion while leaving that standing. A budget the loop cannot spend is
+ * a caller bug, and a caller bug must not cost an account its writes.
+ *
  * Exported to be callable on its own: this is the irreversible half of account
  * deletion, and reaching it through `betterAuth` would mean standing up an
  * auth instance to test paging, refusals, and the budget.
@@ -100,10 +117,11 @@ export async function sweepAccountObjects(input: {
   maxAttempts?: number;
 }): Promise<void> {
   const { plans, accountClosing, storage, logger, userId } = input;
+  // Validated before the marker - see the note on ordering above.
+  let allowance = attemptBudget(input.maxAttempts);
   await accountClosing.open(userId);
 
   let removed = 0;
-  let allowance = attemptBudget(input.maxAttempts);
   // Rows `deleteOwned` refused. Kept because the next listing is what makes
   // them mean something: still there, and the sweep cannot finish; gone, and
   // another writer removed the plan while this ran.
