@@ -35,7 +35,7 @@ export const PLAN_PAGE_SIZE = 500;
  * A subrequest figure, not a storage one. Deleting an account sweeps its
  * objects before the row cascade (`sweepAccountObjects` in
  * src/auth/instance.ts) and each plan costs two subrequests - the R2 delete
- * and the D1 delete - of the 1000 an invocation may make.
+ * and the D1 delete - of the 1000 an invocation gets on Workers Paid.
  *
  * The whole sweep is therefore `2n + 2 + 1`: two calls per plan, one
  * `listByUser` per page plus the empty one that ends the loop, and the
@@ -44,6 +44,15 @@ export const PLAN_PAGE_SIZE = 500;
  * ~190 is what Better Auth spends deleting the rows around the hook. Raising
  * this constant spends that margin - the sum is written out so a change to it
  * can be checked rather than guessed at.
+ *
+ * Sized for Paid, and deliberately not for Free, whose 50 subrequests would
+ * put the ceiling near twenty plans - a quota too small to be worth shipping
+ * as the default for everyone. On Free this constant is simply never reached:
+ * workerd ends the invocation on its own limit first, so the sweep gets no
+ * chance to stop at its allowance and say why. The ending is still a safe one,
+ * because it is an abort - Better Auth does not delete the rows, and every
+ * object and row already removed stays removed, so deleting the account again
+ * resumes. What is lost is the message explaining that, not the account.
  *
  * Read twice, which is the point of one constant: `MAX_PLANS_PER_USER` is
  * refused above it on Workers, so an account cannot grow past what one

@@ -93,6 +93,11 @@ async function claimRow(
 ): Promise<PlanInsert> {
   const { plan } = dialect.tables;
   return await dialect.claim(row.userId, async (executor) => {
+    // `insert ... select ... where` rather than `insert ... values`: the quota
+    // has to be part of the writing statement, and only the `select` form
+    // takes a `where`. It is also what makes `on conflict` legal here - SQLite
+    // cannot parse `on conflict` after a bare `values` in an upsert-shaped
+    // insert without the clause disambiguating where the conflict target ends.
     const claimed = await executor.rows<{ id: string }>(sql`
       insert into ${plan} (id, user_id, label, size, visibility, share_code_hash)
       select ${row.id}, ${row.userId}, ${row.label}, ${row.size},
@@ -110,6 +115,12 @@ async function claimRow(
     // executor, so on Postgres it is the claim's own transaction that reads it.
     // `count(*)` comes back as a string there and a number on SQLite, hence the
     // conversion rather than a bare comparison.
+    //
+    // Both at once - a full account and an id that happens to collide - is
+    // reported as `quota`, deliberately. The caller retries a duplicate with a
+    // fresh id and stops on a quota, and an account at its ceiling has no room
+    // for any id, so calling it a duplicate would send it round the retry loop
+    // to be refused the same way three times over.
     const counted = await executor.rows<{ total: number | string }>(
       sql`select count(*) as total from ${plan} where user_id = ${row.userId}`,
     );
@@ -214,6 +225,12 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
        * by result name, and an unaliased `p.created_at` leaves that name to
        * the driver - `findOwner` a few lines down already relies on aliasing
        * for exactly this reason.
+       *
+       * `p.id` breaks the tie on `created_at`. Two plans claimed inside one
+       * millisecond are ordered by nothing otherwise, so the dashboard could
+       * show them one way and the sweep page them another - and neither
+       * engine promises to be consistent with itself between calls. The id is
+       * unique, so this makes the order total.
        */
       const rows = await dialect.rows<{
         id: string;
@@ -232,7 +249,7 @@ export function createPlanRepo(dialect: Dialect): PlanRepo {
                ) as has_grants
         from ${plan} p
         where p.user_id = ${userId}
-        order by p.created_at desc
+        order by p.created_at desc, p.id desc
         limit ${limit}
       `);
       return rows.map((row) => ({

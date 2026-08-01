@@ -76,7 +76,7 @@ export async function sweepAccountObjects(input: {
   plans: PlanRepo;
   accountClosing: AccountClosingRepo;
   storage: PlanStorage;
-  logger: Logger;
+  logger: Pick<Logger, "warn" | "info">;
   userId: string;
   maxAttempts?: number;
 }): Promise<void> {
@@ -92,6 +92,20 @@ export async function sweepAccountObjects(input: {
   for (;;) {
     const rows = await plans.listByUser(userId, PLAN_PAGE_SIZE);
     if (rows.length === 0) break;
+    /*
+     * Any refused row still listed, not only a page made entirely of them.
+     * The two differ when a page mixes refusals with fresh rows, and stopping
+     * there is the deliberate choice: `listByUser` orders the same way every
+     * call, so a refused row keeps its place at the front and every later
+     * attempt walks into it again. The sweep cannot finish while it is there,
+     * whatever else the page holds.
+     *
+     * Carrying on would delete the fresh rows' objects first and then fail
+     * anyway - the same ending, reached after destroying more. Better Auth
+     * aborts on the throw either way, so those rows survive with their objects
+     * gone, listing plans that 404. Stopping at the first one keeps that
+     * wreckage to the row that caused it.
+     */
     const stuck = rows.filter((row) => refused.has(row.id));
     if (stuck.length > 0) throw stalled(userId, stuck.length);
     if (allowance === 0) {
@@ -108,6 +122,12 @@ export async function sweepAccountObjects(input: {
       // account worth retrying and one that will refuse forever.
       if (allowance === 0) break;
       allowance -= 1;
+      // Object first, then the row - not the other way round. Reversed, a
+      // `deleteOwned` that succeeded followed by a `storage.delete` that threw
+      // would leave an object with no row naming it, which nothing can find
+      // again and nothing can remove. This way round the failure leaves a row
+      // whose object is gone: the plan lists and 404s, and the next attempt
+      // deletes it properly. One of those is recoverable and the other is not.
       await storage.delete(row.id);
       // The boolean is the only evidence a row went. Counting the attempt
       // instead would report a refusal as a removal, and a refusal is exactly

@@ -118,6 +118,31 @@ export function describePlanRepo(
       });
 
       /**
+       * Both refusals at once, and which one wins matters to the caller.
+       * `createPlan` retries a `duplicate` with a fresh id and stops on a
+       * `quota`, so an account at its ceiling reported as a duplicate would
+       * be sent round the retry loop to be refused the same way each time -
+       * and would end on "no free plan id was found", which is a lie about a
+       * full account.
+       */
+      test("a full account reports quota even when the id also collides", async () => {
+        const userId = await fixture.seedUser();
+        const taken = row(userId);
+        expect(await plans.insert(taken, 1)).toBe("created");
+
+        // The same id, against an account with no room for any id.
+        expect(await plans.insert(taken, 1)).toBe("quota");
+      });
+
+      test("and reports duplicate when only the id collides", async () => {
+        const userId = await fixture.seedUser();
+        const taken = row(userId);
+        expect(await plans.insert(taken, 10)).toBe("created");
+
+        expect(await plans.insert(taken, 10)).toBe("duplicate");
+      });
+
+      /**
        * The regression the whole design of `insert` exists for. Every claim
        * that read the count first would see the same number and all pass.
        */

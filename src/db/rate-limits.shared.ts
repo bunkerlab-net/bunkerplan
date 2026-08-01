@@ -183,6 +183,13 @@ export function createUnlockRateLimitRepo(
           // `order by window_start` takes the oldest first, so a backlog
           // drains in the order it accumulated rather than the sweep circling
           // whatever the planner happened to return.
+          //
+          // The cutoff comes from the caller's `windowSeconds` on purpose,
+          // rather than a copy taken when this repo was built. There is one
+          // caller and it passes `config.unlockRateWindowSec` every time, so
+          // the two are the same number - and if they ever were not, the live
+          // one is the policy in force. A constructor copy would be the stale
+          // one, sweeping to a boundary the limiter no longer uses.
           await dialect.run(sql`
             delete from ${unlock}
             where "key" in (

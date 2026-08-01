@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Config } from "../src/config.ts";
+import { DatabaseUnavailable } from "../src/db/unavailable.ts";
 import { type CreatePlanDeps, createPlan } from "../src/http/create-plan.ts";
+import type { Logger } from "../src/log.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
 import { fakeAuth, silentLogger } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
@@ -197,5 +199,59 @@ describe("createPlan when the upload budget is spent", () => {
     // row written for a refused upload would be a plan with no document.
     expect(inserted).toEqual([]);
     expect(request.bodyUsed).toBe(false);
+  });
+});
+
+describe("createPlan when the claim does not answer", () => {
+  /**
+   * Claiming an id serialises per account on Postgres, and waiting for that
+   * advisory lock is a statement with a deadline. Reaching it rolls the
+   * transaction back, so nothing was claimed and nothing was written - the
+   * deployment was busy, the request was fine, and the caller can simply ask
+   * again. A 500 would say the opposite and invite a bug report.
+   */
+  test("answers 503 with a retry, having stored nothing", async () => {
+    const { deps: d, stored } = deps({
+      insert: async () => {
+        throw new DatabaseUnavailable("claiming a plan id");
+      },
+    });
+    const warnings: Array<{
+      fields: Record<string, unknown>;
+      message: string;
+    }> = [];
+    d.logger = {
+      warn: (fields: Record<string, unknown>, message: string) => {
+        warnings.push({ fields, message });
+      },
+    } as unknown as Logger;
+
+    const response = await createPlan(d, upload("visibility=private"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("1");
+    expect(stored).toEqual([]);
+
+    // A 503 is the deployment saying it is struggling, so it has to leave a
+    // trace naming the account it happened to - a status code alone tells an
+    // operator nothing about how often, or to whom.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe("plan claim timed out");
+    expect(warnings[0]?.fields).toMatchObject({ userId: OWNER });
+  });
+
+  test("any other failure is still a failure", async () => {
+    const { deps: d } = deps({
+      insert: async () => {
+        throw new Error('relation "plan" does not exist');
+      },
+    });
+
+    // Only the deadline is an answer. A schema that is wrong, a column that
+    // is missing - those are faults, and turning them into a 503 would tell
+    // every caller to retry a request that can never work.
+    await expect(createPlan(d, upload(""))).rejects.toThrow(
+      /relation "plan" does not exist/,
+    );
   });
 });

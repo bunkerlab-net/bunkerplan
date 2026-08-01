@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { type SQL, sql } from "drizzle-orm";
 import { PgDialect, type PgTransactionConfig } from "drizzle-orm/pg-core";
 import { type PgDb, pgDialect } from "../src/db/pg-shared.ts";
+import { DatabaseUnavailable } from "../src/db/unavailable.ts";
 
 /**
  * The wiring `tests/drivers/db.postgres.test.ts` cannot see.
@@ -98,6 +99,61 @@ describe("the Postgres claim", () => {
     ]);
     expect(recorded.statements.filter((s) => s.startsWith("POOL:"))).toEqual(
       [],
+    );
+  });
+});
+
+/**
+ * The one Postgres failure the layers above are allowed to know about.
+ *
+ * Waiting for the claim's advisory lock is a statement, so a deep enough queue
+ * ends at `statement_timeout` rather than in a hang. Nothing was claimed and
+ * the transaction rolled back, so the caller should be told to come back -
+ * which the HTTP layer can only do if it is told which failure this was, and
+ * it cannot read a SQLSTATE without `pg` in the Workers bundle.
+ */
+describe("a claim that runs out of time", () => {
+  function failingDb(cause: unknown): PgDb {
+    return {
+      execute: async () => ({ rows: [] }),
+      transaction: async () => {
+        throw cause;
+      },
+    } as unknown as PgDb;
+  }
+
+  const claim = (cause: unknown) =>
+    pgDialect(failingDb(cause)).claim("user-a", async () => null);
+
+  test("translates the server cancelling its own statement", async () => {
+    // SQLSTATE 57014, `query_canceled`, which is what `statement_timeout`
+    // raises.
+    const cancelled = Object.assign(
+      new Error("canceling statement due to statement timeout"),
+      { code: "57014" },
+    );
+
+    await expect(claim(cancelled)).rejects.toBeInstanceOf(DatabaseUnavailable);
+  });
+
+  test("translates the client giving up before the server answered", async () => {
+    // `query_timeout` never reaches the server, so it carries no SQLSTATE and
+    // the message is all there is to go on.
+    await expect(claim(new Error("Query read timeout"))).rejects.toBeInstanceOf(
+      DatabaseUnavailable,
+    );
+  });
+
+  test("leaves every other failure alone", async () => {
+    // A constraint violation is an answer about this request, not about the
+    // deployment. Dressed as a 503 it would invite a retry that cannot work.
+    const violation = Object.assign(new Error("duplicate key value"), {
+      code: "23505",
+    });
+
+    await expect(claim(violation)).rejects.toThrow("duplicate key value");
+    await expect(claim(violation)).rejects.not.toBeInstanceOf(
+      DatabaseUnavailable,
     );
   });
 });

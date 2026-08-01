@@ -27,6 +27,12 @@ import { resolveUserId } from "./require-user.ts";
  * `MAX_PLAN_LABEL_LENGTH` characters, so the document carrying one has no
  * business being large, and without the bound this endpoint would parse
  * whatever it is sent before the cap was ever consulted.
+ *
+ * Two dependencies, so they arrive positionally - the same shape `listPlans`,
+ * `getPlanSharing`, and `servePlan` have. The named-object convention next
+ * door in `replacePlan` and `deletePlan` starts where the list gets long
+ * enough to misread at a call site; adopting it here alone would make this
+ * the odd one out among the handlers it actually resembles.
  */
 export async function relabelPlan(
   auth: AppAuth,

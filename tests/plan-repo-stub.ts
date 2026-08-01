@@ -3,11 +3,11 @@ import type { PlanRepo } from "../src/services/types.ts";
 /**
  * The sharing half of `PlanRepo`, refusing everything.
  *
- * Four unit suites exercise a handler that has nothing to do with sharing -
- * create, relabel, the health probe, and the edge cases around replace - but
- * `PlanRepo` is one interface, so each of them still has to name all seven
- * methods to satisfy the type. Spreading this is what keeps a new sharing
- * method from being four identical edits, and it keeps each fake's own body
+ * Several unit suites exercise handlers that have nothing to do with sharing -
+ * create, relabel, the health probe, the edge cases around replace - but
+ * `PlanRepo` is one interface, so each of them still has to name every method
+ * to satisfy the type. Spreading this is what keeps a new sharing method from
+ * being an identical edit in each of them, and it keeps each fake's own body
  * down to the methods that suite actually cares about.
  *
  * Every answer here is the negative one, so a handler that unexpectedly
@@ -16,7 +16,7 @@ import type { PlanRepo } from "../src/services/types.ts";
  * exercise one of these overrides it after the spread.
  *
  * A suite that wants a repository which actually behaves - ownership, the
- * quota, the "a public plan never carries a code" invariant - wants
+ * quota, the rule that a new share code needs a private plan - wants
  * `memoryPlans` in tests/fakes.ts instead. This is for the fakes that are
  * deliberately inert.
  */

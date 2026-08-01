@@ -21,6 +21,21 @@ import { createDialectRepos } from "./repos.ts";
  * server well enough to enforce it; one that accepts a connection and then
  * stops answering is bounded only from this end. Set to the same value, so the
  * two agree on how long a query may take rather than racing each other.
+ *
+ * Both bounds are what keeps the plan claim from eating the pool. Concurrent
+ * uploads by one account queue on the advisory lock `pgDialect.claim` takes,
+ * and a waiter holds its connection for as long as it waits - so `POOL_MAX`
+ * claims for the same account is the whole pool, blocked. `statement_timeout`
+ * is the ceiling on how long that can last: the lock wait is a statement, so a
+ * queue that deep ends in an error rather than a hang, and the connection goes
+ * back. Uploads are already rate limited per account, which is what makes the
+ * depth a bounded worry rather than an open one.
+ *
+ * Such a timeout leaves the transaction rolled back and nothing claimed, so
+ * the upload fails whole rather than partly. `pgClaim` names it as
+ * `DatabaseUnavailable` and src/http/create-plan.ts answers 503 with a
+ * `retry-after`: the request was fine and the deployment was busy, which is a
+ * different thing to tell a caller than "something broke".
  */
 const POOL_MAX = 10;
 const CONNECTION_TIMEOUT_MS = 5_000;

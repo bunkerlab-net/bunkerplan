@@ -1,6 +1,7 @@
 import type { PlanCreated } from "../api/schemas.ts";
 import type { AppAuth } from "../auth/instance.ts";
 import type { Config } from "../config.ts";
+import { DatabaseUnavailable } from "../db/unavailable.ts";
 import { newPlanId, newShareCode } from "../ids.ts";
 import type { PlanVisibility } from "../limits.ts";
 import type { Logger } from "../log.ts";
@@ -255,11 +256,60 @@ async function store(
   return null;
 }
 
+/**
+ * The id, or the response that says why there is not one.
+ *
+ * Three endings rather than `claimId`'s two, because the claim can also fail
+ * to happen at all. On Postgres it serialises per account behind an advisory
+ * lock, and waiting for that lock has a deadline: hitting it means nothing was
+ * claimed and the transaction rolled back, so the deployment is busy rather
+ * than the request being wrong. That is a 503 the caller may repeat, not a
+ * 500 nobody can act on. Every other throw is still a fault and still travels.
+ */
+async function claimOrRefuse(
+  deps: CreatePlanDeps,
+  row: {
+    userId: string;
+    label: string | null;
+    size: number;
+    visibility: PlanVisibility;
+    shareCodeHash: string | null;
+  },
+): Promise<string | Response> {
+  const { config, logger, plans } = deps;
+  let claimed: string | "quota" | null;
+  try {
+    claimed = await claimId(
+      plans,
+      row.userId,
+      row.label,
+      row.size,
+      row.visibility,
+      row.shareCodeHash,
+      config,
+    );
+  } catch (cause) {
+    if (!(cause instanceof DatabaseUnavailable)) throw cause;
+    logger.warn({ err: cause, userId: row.userId }, "plan claim timed out");
+    return problem(503, "database busy, retry shortly", {
+      "retry-after": "1",
+    });
+  }
+  if (claimed === "quota") {
+    return problem(
+      409,
+      `plan limit reached (${config.maxPlansPerUser}); delete one first`,
+    );
+  }
+  if (claimed === null) return problem(500, "could not allocate a plan id");
+  return claimed;
+}
+
 export async function createPlan(
   deps: CreatePlanDeps,
   request: Request,
 ): Promise<Response> {
-  const { config, plans } = deps;
+  const { config } = deps;
 
   const admitted = await admit(deps, request);
   if (admitted instanceof Response) return admitted;
@@ -278,18 +328,14 @@ export async function createPlan(
   // Row first, object second. An object with no row would be served with no
   // owner and no way to delete it. A row with no object is merely a 404 its
   // owner can clean up.
-  const id = await claimId(
-    plans,
+  const id = await claimOrRefuse(deps, {
     userId,
     label,
-    body.byteLength,
+    size: body.byteLength,
     visibility,
-    code === null ? null : await hashShareCode(code),
-    config,
-  );
-  const full = `plan limit reached (${config.maxPlansPerUser}); delete one first`;
-  if (id === "quota") return problem(409, full);
-  if (id === null) return problem(500, "could not allocate a plan id");
+    shareCodeHash: code === null ? null : await hashShareCode(code),
+  });
+  if (id instanceof Response) return id;
 
   const stored = await store(deps, id, userId, body);
   if (stored !== null) return stored;

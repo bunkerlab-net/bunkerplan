@@ -593,8 +593,14 @@ function pgFixture(db: PgDb, close: () => Promise<void>): DbFixture {
     {
       // Reserved word, so the identifier has to be quoted.
       user: sql.raw('"user"'),
-      // A `timestamp` column, so the milliseconds have to be converted.
-      instant: (epochMs) => sql`to_timestamp(${epochMs}::bigint / 1000.0)`,
+      // A `timestamp` column, so the milliseconds have to be converted - and
+      // pinned to UTC. `to_timestamp` yields a `timestamptz`, and storing that
+      // into a column without a zone converts it through the session's
+      // `TimeZone`, so the same epoch would land differently on a server whose
+      // default is not UTC. `dialect.createdAt` reads the column back as UTC,
+      // so this is the half that has to agree with it.
+      instant: (epochMs) =>
+        sql`(to_timestamp(${epochMs}::bigint / 1000.0) at time zone 'UTC')`,
       now: () => sql`now()`,
       no: sql`false`,
     },

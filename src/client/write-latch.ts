@@ -10,7 +10,22 @@ interface Settled<T> {
   error?: { message?: string } | null;
 }
 
-/** What `useWriteLatch` hands a panel: one latch, two calling contracts. */
+/**
+ * What `useWriteLatch` hands a panel: one latch, two calling contracts.
+ *
+ * Both answer with a boolean, and both spend `false` on two different things:
+ * the latch refused because a write was already in flight, and the work ran
+ * and failed. That is deliberate. Every caller here asks the same question -
+ * did this change anything - and acts the same way for either answer, which
+ * is to leave the screen as it was. The difference is already visible where it
+ * matters: a failure writes the error line and a refusal does not, so the
+ * reader is told what happened without the caller having to choose.
+ *
+ * A discriminated result would be the right shape the moment some caller has
+ * to tell them apart - re-queueing a refused write, say, or counting
+ * contention. None does, and a union nobody reads is a shape every call site
+ * has to unwrap for nothing.
+ */
 export interface WriteLatch {
   busy: boolean;
   /**

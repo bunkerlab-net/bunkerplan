@@ -174,6 +174,25 @@ describe("the published document", () => {
   });
 
   /**
+   * The upload's 503, which a client has to be told apart from a 500 to know
+   * that repeating the request is both safe and worth doing. Nothing was
+   * stored when it is returned, so an undocumented one reads as a fault and
+   * gets reported rather than retried.
+   */
+  test("publishes the retryable upload failure, with its wait", () => {
+    const upload = doc.paths["/api/plans"]?.["put"] as {
+      responses: Record<
+        string,
+        { description: string; headers?: Record<string, unknown> }
+      >;
+    };
+
+    const busy = upload.responses["503"];
+    expect(busy?.description).toContain("Nothing was stored");
+    expect(busy?.headers).toHaveProperty("retry-after");
+  });
+
+  /**
    * `describeShareCode` writes this at build time because a Zod component is
    * a module-level singleton and cannot hold a per-deployment value. Nothing
    * else would notice if that write silently stopped landing.

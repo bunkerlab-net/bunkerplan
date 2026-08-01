@@ -62,7 +62,7 @@ These names are the API. They are not renamed across releases.
 | `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
 | `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | minimum 60; a shorter window multiplies the sustained rate               |
 | `UNLOCK_RATE_MAX`        | no              | `30`                          | share-code redemptions per window per client address                     |
-| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | no minimum; a redemption stores nothing the floor would guard            |
+| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | minimum 1; no 60s floor, because a redemption stores nothing to guard    |
 | `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                 |
 | `SHARE_CODE_LENGTH`      | no              | `16`                          | characters in a share code; mixed-case alphanumeric, 16 to 64            |
 | `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                    |
@@ -85,12 +85,22 @@ A misconfigured deployment fails at boot with every problem listed at once, not
 on the first request.
 
 `MAX_PLANS_PER_USER` is the one limit whose ceiling depends on the runtime. On
-Workers it is refused above 400: deleting an account removes its objects one at
-a time before the database cascades the rows, and each plan spends two of the
-1000 subrequests an invocation may make. An account that grew past that under
-an older setting is still deletable - the sweep stops at the budget and asks to
-be retried, and every plan it removed stays removed - but it takes one attempt
-per 400 plans. Self-hosted there is no per-request budget and no ceiling.
+Workers it is refused above 400, because deleting an account removes its
+objects one at a time before the database cascades the rows and each plan
+spends two subrequests. 400 is sized against the 1,000 an invocation gets on
+Workers Paid, leaving room for the listing queries and for the deletion Better
+Auth performs around them. It is not a universal figure: Workers Free allows
+50 subrequests per invocation, where an account of more than about twenty
+plans cannot be deleted in one attempt whatever this is set to.
+
+That is survivable rather than fatal. An account too large for one invocation -
+because the plan is Free, or because the account grew under an older, higher
+setting - is still deletable. Retry the deletion: whichever limit stops it, our
+own or the platform's, the deletion is aborted rather than half-applied, and
+every plan the attempt removed stays removed. On Paid the refusal says so; on
+Free the platform ends the invocation first and the error is its own, so the
+symptom is a delete that fails and then succeeds after enough attempts.
+Self-hosted there is no per-request budget and no ceiling.
 
 ## Swap matrices
 

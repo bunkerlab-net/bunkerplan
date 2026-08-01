@@ -38,6 +38,9 @@ interface LogLine {
   message: string;
 }
 
+/** The two levels `sweepAccountObjects` uses, and nothing else. */
+type SweepLogger = Pick<Logger, "warn" | "info">;
+
 interface Fixture {
   /** Every id `storage.delete` was called with, in order, duplicates kept. */
   objects: string[];
@@ -55,7 +58,13 @@ interface Fixture {
    * rather than decoration.
    */
   logs: LogLine[];
-  logger: Logger;
+  /**
+   * Exactly what the sweep asks for. Narrowed rather than cast to `Logger`:
+   * a cast would keep compiling if the sweep started calling `error`, and the
+   * fixture would answer `undefined is not a function` at run time instead of
+   * failing to typecheck.
+   */
+  logger: SweepLogger;
   /** The unwrapped repository, for an override that delegates to it. */
   base: MemoryPlans;
   plans: PlanRepo;
@@ -73,17 +82,23 @@ function fixture(planOverrides: Partial<PlanRepo> = {}): Fixture {
     steps.push("list");
     return await base.listByUser(userId, limit);
   };
+  // Pino's `LogFn` may be called with the message alone, so `message` is
+  // optional here or this does not satisfy it. The sweep always passes both;
+  // the fallback is what makes the signature honest rather than a cast.
   const record =
-    (level: LogLine["level"]) =>
-    (fields: Record<string, unknown>, message: string) => {
-      logs.push({ level, fields, message });
+    (level: LogLine["level"]) => (fields: unknown, message?: string) => {
+      logs.push({
+        level,
+        fields: (fields ?? {}) as Record<string, unknown>,
+        message: message ?? "",
+      });
     };
 
   return {
     objects,
     steps,
     logs,
-    logger: { warn: record("warn"), info: record("info") } as unknown as Logger,
+    logger: { warn: record("warn"), info: record("info") },
     closing,
     rows: base.rows,
     base,

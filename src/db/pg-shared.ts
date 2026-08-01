@@ -5,6 +5,7 @@ import * as accountClosingSchema from "./schema/account-closing.pg.ts";
 import * as authSchema from "./schema/auth.pg.ts";
 import * as planSchema from "./schema/plan.pg.ts";
 import * as rateLimitSchema from "./schema/rate-limit.pg.ts";
+import { DatabaseUnavailable, isTimeout } from "./unavailable.ts";
 
 export const pgSchema = {
   ...authSchema,
@@ -37,6 +38,68 @@ function pgExecutor(handle: Pick<PgDb, "execute">): SqlExecutor {
 }
 
 /**
+ * Count-and-claim as one critical section per account.
+ *
+ * Postgres reads the count from its snapshot, so unlike SQLite - which
+ * serialises writers for us - two concurrent claims at `maxPlans - 1` would
+ * both see room and both write. The advisory lock is what makes that one
+ * section, and it is released with the transaction whichever way it ends. The
+ * body reads and writes through the transaction, which is the only reason the
+ * executor is handed to it.
+ *
+ * The lock is only half of it. The count must also see what the previous
+ * holder committed, and only read committed does: it takes a fresh snapshot
+ * per statement, so the count issued after the lock is granted sees the row
+ * the last holder wrote. Repeatable read and serializable read the whole
+ * transaction from one snapshot taken before the wait, so the second claimant
+ * counts the account as it stood before the first one wrote, and the ceiling
+ * admits one plan too many per waiter.
+ *
+ * Stated on the transaction rather than left to the server, because the
+ * server's answer is `default_transaction_isolation` - a `postgresql.conf`
+ * line or an `options=` parameter on `DATABASE_URL`, neither of which this
+ * deployment controls, and both of which would loosen the quota while reading
+ * like a tightening. `begin isolation level read committed` says what this
+ * needs, on a statement nobody can configure out from under it.
+ *
+ * `hashtext` is 32-bit, so two accounts can land on one lock. That costs
+ * serialisation and nothing else: the lock only decides who counts and claims
+ * at a time, and `claimRow` still filters its count by `user_id`, so a
+ * collided pair sees its own quota either way. Two accounts sharing a lock
+ * wait for each other's claim - a claim being one short statement - and at
+ * 2^32 buckets that is rare enough to be cheaper than a lock table keyed by
+ * the id itself.
+ *
+ * Waiting for that lock is itself a statement, so `statement_timeout` bounds
+ * it and a queue deep enough ends in a cancellation rather than a hang. That
+ * is the one failure worth naming: the transaction rolled back, nothing was
+ * claimed and nothing was written, so the caller should be told to come back
+ * rather than told something broke. Translated here because this is the last
+ * place that knows it is Postgres - `pg` must not be reachable from the
+ * handler that answers.
+ */
+function pgClaim(db: PgDb): Dialect["claim"] {
+  return async (userId, body) => {
+    try {
+      return await db.transaction(
+        async (tx) => {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtext(${userId})::bigint)`,
+          );
+          return await body(pgExecutor(tx));
+        },
+        { isolationLevel: "read committed" },
+      );
+    } catch (cause) {
+      if (isTimeout(cause)) {
+        throw new DatabaseUnavailable("claiming a plan id", { cause });
+      }
+      throw cause;
+    }
+  };
+}
+
+/**
  * The Postgres half of the repository seam - see src/db/dialect.ts for what
  * each member is for.
  */
@@ -53,37 +116,7 @@ export function pgDialect(db: PgDb): Dialect {
       unlockRateLimit: rateLimitSchema.unlockRateLimit,
     },
 
-    // Postgres reads the count from its snapshot, so unlike SQLite - which
-    // serialises writers for us - two concurrent claims at `maxPlans - 1` would
-    // both see room and both write. The advisory lock makes count-and-claim one
-    // critical section per account, and it is released with the transaction
-    // whichever way it ends. The body reads and writes through the transaction,
-    // which is the only reason the executor is handed to it.
-    //
-    // The lock is only half of it. The count must also see what the previous
-    // holder committed, and only read committed does: it takes a fresh
-    // snapshot per statement, so the count issued after the lock is granted
-    // sees the row the last holder wrote. Repeatable read and serializable
-    // read the whole transaction from one snapshot taken before the wait, so
-    // the second claimant counts the account as it stood before the first one
-    // wrote, and the ceiling admits one plan too many per waiter.
-    //
-    // Stated on the transaction rather than left to the server, because the
-    // server's answer is `default_transaction_isolation` - a `postgresql.conf`
-    // line or an `options=` parameter on `DATABASE_URL`, neither of which this
-    // deployment controls, and both of which would loosen the quota while
-    // reading like a tightening. `begin isolation level read committed` says
-    // what this needs, on a statement nobody can configure out from under it.
-    claim: (userId, body) =>
-      db.transaction(
-        async (tx) => {
-          await tx.execute(
-            sql`select pg_advisory_xact_lock(hashtext(${userId})::bigint)`,
-          );
-          return await body(pgExecutor(tx));
-        },
-        { isolationLevel: "read committed" },
-      ),
+    claim: pgClaim(db),
 
     // Drizzle asks node-postgres to leave timestamps as the strings Postgres
     // sent, so the column's own mapper is what reads one - which is also what

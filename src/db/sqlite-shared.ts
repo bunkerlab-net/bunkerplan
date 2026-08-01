@@ -52,9 +52,18 @@ export function sqliteDialect(db: SqliteDb): Dialect {
       unlockRateLimit: rateLimitSchema.unlockRateLimit,
     },
 
-    // No critical section: the claim is one statement, and SQLite serialises
-    // writers, so count-and-claim cannot be interleaved. Postgres counts
-    // against a snapshot and needs the lock its own dialect takes.
+    // No critical section, and no transaction either. The quota is decided
+    // inside the claiming `insert ... select ... where` in
+    // src/db/plans.shared.ts, so count-and-claim is one statement - and SQLite
+    // takes a write lock for the whole of a statement, on D1 as well as
+    // bun:sqlite, so there is nothing for a second writer to interleave with.
+    // Wrapping it in a transaction would add a lock it already holds.
+    //
+    // The claim contract in tests/drivers/contract/plan-repo.ts is what says
+    // so rather than this comment: it races 40 concurrent claims at a ceiling
+    // of five and requires exactly five, against both SQLite drivers and
+    // Postgres. Postgres needs its advisory lock to pass that because it
+    // counts against a snapshot; these two do not.
     claim: (_userId, body) => body(executor),
 
     // `created_at` is `integer(..., { mode: "timestamp_ms" })`, so the driver

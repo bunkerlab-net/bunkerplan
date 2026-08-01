@@ -224,6 +224,27 @@ const LOCATION_HEADER = {
   },
 };
 
+/**
+ * The upload 503, its own constant for the same reason `UNLOCK_RATE_LIMITED`
+ * is: the operation is one literal, and the function-size lint counts it.
+ */
+const CLAIM_UNAVAILABLE = {
+  ...json(
+    ErrorBody,
+    "The database did not answer in time. Claiming an id serialises per " +
+      "account and the wait for that has a deadline, so this is the " +
+      "deployment being busy rather than the request being wrong. Nothing " +
+      "was stored - no row was claimed and no object was written - so " +
+      "repeating the request is safe.",
+  ),
+  headers: {
+    "retry-after": {
+      description: "Seconds to wait before repeating the request.",
+      schema: { type: "integer", minimum: 0 },
+    },
+  },
+};
+
 /** `tooLarge` and the code format differ per deployment. */
 function createPlanOperation(
   tooLarge: string,
@@ -275,6 +296,7 @@ function createPlanOperation(
         502: STORAGE_DOWN,
       }),
       "429": RATE_LIMITED,
+      "503": CLAIM_UNAVAILABLE,
     },
   };
 }

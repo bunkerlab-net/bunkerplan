@@ -124,6 +124,12 @@ function SharingEditor({ plan, busy, guard }: SharingEditorProps) {
    * `VisibilityChoice` stays on `guard`: it is not missing a refresh, it takes
    * the new state straight out of the response it already has, and routing it
    * through here would spend a second request to learn what it was just told.
+   *
+   * Not wrapped in `useCallback`. It goes into `shared`, an object literal
+   * rebuilt on every render, and reaches no memoised child - so a stable
+   * identity would be handed straight to a new object and change nothing
+   * downstream. The one callback here that is memoised, further down, is
+   * memoised because it is a prop on its own.
    */
   const mutate = (work: () => Promise<unknown>) =>
     guard(async () => {
