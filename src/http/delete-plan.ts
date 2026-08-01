@@ -5,6 +5,14 @@ import { sweepOrphanedObject } from "./orphan-sweep.ts";
 import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";
 
+/** Four things, so they arrive named - as `ReplacePlanDeps` does next door. */
+export interface DeletePlanDeps {
+  auth: AppAuth;
+  storage: PlanStorage;
+  plans: PlanRepo;
+  logger: Logger;
+}
+
 /**
  * Object first, row second - the mirror of the upload path.
  *
@@ -21,12 +29,7 @@ import { resolveUserId } from "./require-user.ts";
  * and replace only, and this writes no object.
  */
 export async function deletePlan(
-  deps: {
-    auth: AppAuth;
-    storage: PlanStorage;
-    plans: PlanRepo;
-    logger: Logger;
-  },
+  deps: DeletePlanDeps,
   request: Request,
   id: string,
 ): Promise<Response> {

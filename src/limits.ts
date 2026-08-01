@@ -32,32 +32,36 @@ export const PLAN_PAGE_SIZE = 500;
 /**
  * Most plans one Cloudflare Workers invocation may remove.
  *
- * A subrequest figure, not a storage one. Deleting an account sweeps its
- * objects before the row cascade (`sweepAccountObjects` in
- * src/auth/instance.ts) and each plan costs two subrequests - the R2 delete
- * and the D1 delete - of the 1000 an invocation gets on Workers Paid.
+ * A conservative application cap rather than a platform figure. Deleting an
+ * account sweeps its objects before the row cascade (`sweepAccountObjects` in
+ * src/auth/instance.ts), and every call it makes is a subrequest: the R2
+ * delete and the D1 delete for each plan, one `listByUser` per page plus the
+ * empty one that ends the loop, and the `accountClosing.open` before them.
  *
- * The whole sweep is therefore `2n + 2 + 1`: two calls per plan, one
- * `listByUser` per page plus the empty one that ends the loop, and the
- * `accountClosing.open` that precedes them. At 400 that is 803, and an account
- * this size fits in one page because `PLAN_PAGE_SIZE` is 500. The remaining
- * ~190 is what Better Auth spends deleting the rows around the hook. Raising
- * this constant spends that margin - the sum is written out so a change to it
- * can be checked rather than guessed at.
+ * So the sweep costs `2n + pages + 1`. At 400 that is 803, and an account this
+ * size fits in one page because `PLAN_PAGE_SIZE` is 500. The sum is written
+ * out so a change to this constant can be checked rather than guessed at, and
+ * tests/account-sweep.test.ts both asserts it and measures what the sweep
+ * actually issues.
  *
- * Sized for Paid, and deliberately not for Free, whose 50 subrequests would
- * put the ceiling near twenty plans - a quota too small to be worth shipping
- * as the default for everyone. On Free this constant is simply never reached:
- * workerd ends the invocation on its own limit first, so the sweep gets no
- * chance to stop at its allowance and say why. The ending is still a safe one,
- * because it is an abort - Better Auth does not delete the rows, and every
- * object and row already removed stays removed, so deleting the account again
- * resumes. What is lost is the message explaining that, not the account.
+ * What 803 has to fit inside is the tighter of two platform numbers, and
+ * neither is the one this comment used to cite. Since February 2026 a paid
+ * Worker gets 10,000 subrequests per invocation by default, raisable through
+ * `limits.subrequests`; a free one gets 1,000 to Cloudflare services, which is
+ * what D1 and R2 are. The free budget is therefore the binding one, and 803
+ * leaves it about 200 for the row deletion Better Auth performs around the
+ * hook. Paid has an order of magnitude more room, so this ceiling costs it
+ * nothing it would otherwise use.
+ *
+ * https://developers.cloudflare.com/changelog/2026-02-11-subrequests-limit
  *
  * Read twice, which is the point of one constant: `MAX_PLANS_PER_USER` is
  * refused above it on Workers, so an account cannot grow past what one
- * deletion can finish, and the sweep stops at it and asks to be retried, so
- * an account that grew under an older, higher quota is still deletable.
+ * deletion can finish, and the sweep stops at it and asks to be retried, so an
+ * account that grew under an older, higher quota is still deletable. An
+ * account that somehow exceeds the platform's own limit instead is stopped by
+ * workerd rather than by us - still safely, because that aborts the deletion
+ * and Better Auth removes no rows, but without the message explaining it.
  *
  * Self-hosted there is no per-request budget and neither rule applies: Node
  * and Bun make ordinary calls in a process nothing is counting.

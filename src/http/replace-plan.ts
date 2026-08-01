@@ -44,6 +44,14 @@ export interface ReplacePlanDeps {
  * `createPlan` admits its own callers. Replacing draws on the upload allowance
  * because it writes an object of the same size; charging only the first upload
  * would leave the limit open to a loop that replaces one plan forever.
+ *
+ * No `DatabaseUnavailable` branch, unlike `createPlan`. That error is minted
+ * in one place - `pgClaim` in src/db/pg-shared.ts - and `Dialect.claim` has
+ * exactly one caller, the `insert` this handler never makes. `findOwner`,
+ * `resize`, and the rate-limit counters all go through `dialect.rows` and
+ * `dialect.run`, which translate nothing, so a database failure here arrives
+ * as itself and is a fault. Catching a case that cannot occur would read as
+ * though it could.
  */
 export async function replacePlan(
   deps: ReplacePlanDeps,

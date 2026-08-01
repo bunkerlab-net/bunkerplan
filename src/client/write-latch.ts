@@ -5,7 +5,7 @@ import { messageOf } from "./errors.ts";
  * A settled call in the shape Better Auth's client returns one: the fault is
  * in `error` rather than thrown, so nothing rejects on a refusal.
  */
-interface Settled<T> {
+export interface Settled<T> {
   data?: T | null;
   error?: { message?: string } | null;
 }

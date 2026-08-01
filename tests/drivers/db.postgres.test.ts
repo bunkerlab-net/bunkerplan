@@ -36,17 +36,23 @@ describeSchema("Postgres", postgresDb, { skip });
  */
 describe.skipIf(skip)("the pg pool timeout this build recognises", () => {
   test("still says what isPoolTimeout looks for", async () => {
-    // One client, and a deadline short enough that the second caller cannot
-    // wait it out. Nothing is queued behind a real query - the first `connect`
-    // simply holds the only slot.
+    // One slot, so the second caller has nothing to be handed. The deadline is
+    // generous enough that a slow CI connect does not fail the *first*
+    // acquisition - it only has to be shorter than the test, since the second
+    // caller waits on a slot that is never released rather than on the server.
     const pool = new pg.Pool({
       connectionString: DATABASE_URL,
       max: 1,
-      connectionTimeoutMillis: 50,
+      connectionTimeoutMillis: 1_000,
     });
-    const held = await pool.connect();
+    let held: pg.PoolClient | undefined;
 
     try {
+      // Inside the `try`, so a first connect that itself fails still reaches
+      // `pool.end()` below rather than leaking the pool into the rest of the
+      // run.
+      held = await pool.connect();
+
       const refused = await pool.connect().then(
         (client) => {
           client.release();
@@ -58,8 +64,8 @@ describe.skipIf(skip)("the pg pool timeout this build recognises", () => {
       expect(refused).toBeInstanceOf(Error);
       expect(isPoolTimeout(refused)).toBe(true);
     } finally {
-      held.release();
+      held?.release();
       await pool.end();
     }
-  });
+  }, 10_000);
 });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { pino } from "pino";
 import { z } from "zod";
 import { ref } from "../src/api/schemas.ts";
@@ -555,26 +556,56 @@ describe("the unlock bucket's opportunistic prune", () => {
   /** A window far enough back that the wait is the floored one second. */
   const WINDOW_START = 1_700_000_000_000;
 
+  /** Every statement `run` was asked to execute, so the prune is identifiable. */
+  interface Dispatched {
+    statements: string[];
+  }
+
   /**
    * The counter's allowed answer, whatever it is asked: `consumeOne` reads one
    * row back from its upsert, so a stub that always returns one is a bucket
    * that always has room. It is the prune above it that is under test.
+   *
+   * `run` records what it was given and refuses only what `onDelete` picks
+   * out, so a test can fail the prune without failing anything else - and can
+   * then assert the prune was attempted at all, which a `run` that threw
+   * unconditionally could never distinguish from one that never ran.
    */
-  const dialect = (run: () => Promise<void>): Dialect => ({
-    rows: async () => [{ windowStart: WINDOW_START }] as never,
-    run,
-    tables: {
-      plan,
-      planGrant,
-      user,
-      accountClosing,
-      uploadRateLimit,
-      unlockRateLimit,
-    },
-    claim: async (_userId, body) => await body({ rows: async () => [], run }),
-    createdAt: (value) => new Date(Number(value)),
-    floor: (expr) => sql`max(${expr}, 0)`,
-  });
+  const dialect = (
+    dispatched: Dispatched,
+    onDelete: () => Promise<void> = async () => {},
+  ): Dialect => {
+    const render = new PgDialect();
+    const run = async (query: SQL) => {
+      const text = render.sqlToQuery(query).sql;
+      dispatched.statements.push(text);
+      if (text.trimStart().toLowerCase().startsWith("delete")) {
+        await onDelete();
+      }
+    };
+    return {
+      rows: async <T extends Record<string, unknown>>() =>
+        [{ windowStart: WINDOW_START }] as unknown as T[],
+      run,
+      tables: {
+        plan,
+        planGrant,
+        user,
+        accountClosing,
+        uploadRateLimit,
+        unlockRateLimit,
+      },
+      claim: async (_userId, body) => await body({ rows: async () => [], run }),
+      createdAt: (value) => new Date(Number(value)),
+      floor: (expr) => sql`max(${expr}, 0)`,
+    };
+  };
+
+  /** The prune, as `run` sees it: the only `delete` the repo issues. */
+  const pruned = (dispatched: Dispatched) =>
+    dispatched.statements.filter((text) =>
+      text.trimStart().toLowerCase().startsWith("delete"),
+    );
 
   test("a prune that fails is logged, and the redemption still passes", async () => {
     const warnings: Array<{ fields: { err?: unknown }; message: string }> = [];
@@ -584,8 +615,9 @@ describe("the unlock bucket's opportunistic prune", () => {
       },
     } as unknown as Logger;
     const failure = new Error("database is locked");
+    const dispatched: Dispatched = { statements: [] };
     const repo = createUnlockRateLimitRepo(
-      dialect(async () => {
+      dialect(dispatched, async () => {
         throw failure;
       }),
       logger,
@@ -597,6 +629,9 @@ describe("the unlock bucket's opportunistic prune", () => {
       retryAfter: 1,
       windowStart: WINDOW_START,
     });
+    // Attempted, and it was the prune that failed rather than the sweep being
+    // skipped - which every other assertion here would read the same way.
+    expect(pruned(dispatched)).toHaveLength(1);
     // The cause travels, not just the fact. A line saying only that a sweep
     // failed leaves an operator with a table that stops shrinking and nothing
     // naming why - and this is the one place the reason is still in hand.
@@ -615,13 +650,13 @@ describe("the unlock bucket's opportunistic prune", () => {
         warnings.push(args);
       },
     } as unknown as Logger;
-    const repo = createUnlockRateLimitRepo(
-      dialect(async () => {}),
-      logger,
-      { shouldSweep: () => true },
-    );
+    const dispatched: Dispatched = { statements: [] };
+    const repo = createUnlockRateLimitRepo(dialect(dispatched), logger, {
+      shouldSweep: () => true,
+    });
 
     expect((await repo.consume("addr", 3, 60)).allowed).toBe(true);
+    expect(pruned(dispatched)).toHaveLength(1);
     expect(warnings).toEqual([]);
   });
 });

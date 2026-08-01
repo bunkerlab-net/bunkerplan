@@ -53,12 +53,22 @@ export interface Dialect extends SqlExecutor {
    * Runs a count-and-claim in whatever critical section the engine needs, and
    * hands the body the executor it must use for both halves.
    *
-   * SQLite needs none: the claim is one statement, and SQLite serialises
-   * writers, so count-and-claim cannot be interleaved. Postgres counts against
-   * its snapshot instead, so two concurrent claims at `maxPlans - 1` would both
-   * see room and both write; there the body runs in a transaction holding an
-   * advisory lock on the account, released with the transaction whichever way
-   * it ends.
+   * SQLite needs none, and gets none - not even a transaction. The body's
+   * claim is a single `insert ... select ... where`, and SQLite holds a write
+   * lock for the whole of one statement on D1 as well as bun:sqlite, so there
+   * is nothing for a concurrent writer to interleave with. Wrapping it in
+   * `BEGIN IMMEDIATE` would take a lock it already holds.
+   *
+   * Postgres counts against its snapshot instead, so two concurrent claims at
+   * `maxPlans - 1` would both see room and both write; there the body runs in
+   * a transaction holding an advisory lock on the account, released with the
+   * transaction whichever way it ends.
+   *
+   * That both are correct is measured rather than argued:
+   * tests/drivers/contract/plan-repo.ts races 40 concurrent claims at a
+   * ceiling of five and requires exactly five, against D1, bun:sqlite, and
+   * Postgres alike. Postgres fails it without its lock; the other two pass
+   * without one.
    *
    * Either way the guarantee is statement-level, not per caller: two calls to
    * the claim are two units and nothing here makes them one.

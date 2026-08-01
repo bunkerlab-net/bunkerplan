@@ -17,14 +17,26 @@
  *   otherwise be a second complaint in every message it asserts on.
  */
 
-/** The two settings no deployment can omit, on any runtime. */
-export const REQUIRED = {
+/**
+ * The two settings no deployment can omit, on any runtime.
+ *
+ * Frozen: every suite here spreads these into a local object, and one that
+ * wrote onto the shared one instead would change what "the minimum" means for
+ * every file after it, in whatever order they happened to run.
+ */
+export const REQUIRED = Object.freeze({
   BETTER_AUTH_SECRET: "x".repeat(32),
+  /*
+   * The hostname matters, not just the shape. tests/config.test.ts derives the
+   * default `RP_ID` from it and checks that `notexample.com` is refused as a
+   * suffix match against `example.com`, so a value without a registrable
+   * parent domain would make those cases assert nothing.
+   */
   PUBLIC_BASE_URL: "https://plans.example.com",
-};
+});
 
 /** The driver set a self-hosted deployment must supply on top of those. */
-export const SELF_HOSTED = {
+export const SELF_HOSTED = Object.freeze({
   ...REQUIRED,
   STORAGE_DRIVER: "s3",
   S3_BUCKET: "plans",
@@ -32,7 +44,7 @@ export const SELF_HOSTED = {
   DATABASE_URL: "postgres://localhost/plans",
   KV_DRIVER: "valkey",
   VALKEY_URL: "redis://localhost:6379",
-};
+});
 
 /**
  * A header off Workers, where the loader refuses to guess one. Deliberately

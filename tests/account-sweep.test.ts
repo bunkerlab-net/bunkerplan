@@ -100,6 +100,14 @@ function fixture(
     limits.push(limit);
     return await base.listByUser(userId, limit);
   };
+  // Recorded like the listings, so `steps` is every subrequest the sweep makes
+  // rather than most of them. The budget test derives its total from this, and
+  // adding the row deletes back in by arithmetic would be assuming the number
+  // the measurement exists to check.
+  const deleteOwned: PlanRepo["deleteOwned"] = async (id, userId) => {
+    steps.push("row");
+    return await base.deleteOwned(id, userId);
+  };
   /*
    * Pino's `LogFn` takes either an object and a message or a message alone, so
    * both arrive here and the shape has to be worked out rather than asserted.
@@ -128,7 +136,7 @@ function fixture(
     closing,
     rows: base.rows,
     base,
-    plans: { ...base, listByUser, ...planOverrides(base) },
+    plans: { ...base, listByUser, deleteOwned, ...planOverrides(base) },
     storage: {
       put: async () => {},
       get: async () => null,
@@ -164,7 +172,14 @@ function run(f: Fixture, maxAttempts?: number): Promise<void> {
   });
 }
 
-/** What one Cloudflare Workers invocation may make, on the paid plan. */
+/**
+ * The tighter of the two Workers budgets, which is the one that binds.
+ *
+ * A free Worker gets 1,000 subrequests to Cloudflare services per invocation -
+ * D1 and R2 are Cloudflare services - where a paid one gets 10,000 by default.
+ * Sizing against the free figure is what makes the ceiling safe on both.
+ * https://developers.cloudflare.com/changelog/2026-02-11-subrequests-limit
+ */
 const WORKERS_SUBREQUEST_LIMIT = 1000;
 /** Left for the row deletion Better Auth performs around the hook. */
 const AUTH_RESERVE = 100;
@@ -213,9 +228,10 @@ test("a full account's sweep issues no more calls than that", async () => {
 
   await run(f, WORKERS_MAX_PLANS_PER_USER);
 
-  // `steps` records the marker, every listing, and every object delete; the
-  // row deletes are the removals, one per plan.
-  const subrequests = f.steps.length + WORKERS_MAX_PLANS_PER_USER;
+  // Every call the sweep made: the marker, each listing, each object delete,
+  // and each row delete. Counted rather than reconstructed, so a sweep that
+  // grew a call none of the arithmetic knows about is caught here.
+  const subrequests = f.steps.length;
 
   expect(f.rows.size).toBe(0);
   // Both the number of listings and the size each asked for, derived from the

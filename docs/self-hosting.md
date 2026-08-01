@@ -86,23 +86,21 @@ on the first request.
 
 `MAX_PLANS_PER_USER` is the one limit whose ceiling depends on the runtime. On
 Workers it is refused above 400, because deleting an account removes its
-objects one at a time before the database cascades the rows and each plan
-spends two subrequests. 400 is sized against the 1,000 an invocation gets on
-Workers Paid, leaving room for the listing queries and for the deletion Better
-Auth performs around them. It is not a universal figure: Workers Free allows
-50 subrequests per invocation, where an account of more than about twenty
-plans cannot be deleted in one attempt whatever this is set to.
+objects one at a time before the database cascades the rows. Every call the
+sweep makes is a subrequest - two per plan for the R2 and D1 deletes, one per
+page listed, one to mark the account - so 400 plans costs 803, which fits
+inside the 1,000 subrequests to Cloudflare services a free Worker gets per
+invocation with room for the deletion itself. Paid Workers get 10,000 by
+default, so the cap costs them nothing. 400 is a conservative application
+ceiling, not the platform's number.
 
-That is survivable rather than fatal, though not atomic. An account too large
-for one invocation - because the plan is Free, or because the account grew
-under an older, higher setting - is still deletable by repeating the delete.
-What each attempt does is remove as many plans as it can and then fail: those
-plans are gone for good, objects and rows both, and the account itself is
-untouched because the failure aborts the deletion before Better Auth removes
-anything. So a retry has less to do than the attempt before it, and enough
-retries finish. On Paid the refusal says so; on Free the platform ends the
-invocation first and the error is its own, so the symptom is a delete that
-fails and then succeeds after enough attempts. Self-hosted there is no
+That is survivable rather than fatal, and not atomic. An account too large for
+one invocation - because it grew under an older, higher setting - is still
+deletable by repeating the delete. Each attempt removes as many plans as it
+can and then fails: those plans are gone for good, objects and rows both, and
+the account itself is untouched because the failure aborts the deletion before
+Better Auth removes anything. A retry therefore has less to do than the
+attempt before it, and enough retries finish. Self-hosted there is no
 per-request budget and no ceiling.
 
 ## Swap matrices

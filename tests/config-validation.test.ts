@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config.ts";
+import { WORKERS_MAX_PLANS_PER_USER } from "../src/limits.ts";
 import {
   CLIENT_IP_HEADER,
   SELF_HOSTED as DRIVERS,
@@ -350,16 +351,27 @@ describe("integer settings", () => {
    * cannot be deleted. Self-hosted there is no budget and no ceiling.
    */
   test("the plan quota is capped on Workers", () => {
-    expect(refusal({ ...REQUIRED, MAX_PLANS_PER_USER: "401" }, true)).toContain(
-      'MAX_PLANS_PER_USER must be an integer between 1 and 400, got "401"',
+    // Off the constant, not the number. Hardcoding 400 here would let the
+    // ceiling move in src/limits.ts while this went on asserting the old one -
+    // and it would still pass, because the message it looks for would simply
+    // stop appearing and `refusal` would throw about something else.
+    const over = String(WORKERS_MAX_PLANS_PER_USER + 1);
+
+    expect(refusal({ ...REQUIRED, MAX_PLANS_PER_USER: over }, true)).toContain(
+      `MAX_PLANS_PER_USER must be an integer between 1 and ` +
+        `${WORKERS_MAX_PLANS_PER_USER}, got "${over}"`,
     );
   });
 
   test("and uncapped off Workers, where nothing counts the calls", () => {
+    const far = WORKERS_MAX_PLANS_PER_USER * 10;
+
     expect(
-      loadConfig({ ...SELF_HOSTED, MAX_PLANS_PER_USER: "5000" } as never, {})
-        .maxPlansPerUser,
-    ).toBe(5000);
+      loadConfig(
+        { ...SELF_HOSTED, MAX_PLANS_PER_USER: String(far) } as never,
+        {},
+      ).maxPlansPerUser,
+    ).toBe(far);
   });
 
   test("the unlock window has no such floor", () => {
