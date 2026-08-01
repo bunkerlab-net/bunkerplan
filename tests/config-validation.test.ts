@@ -139,10 +139,41 @@ describe("the drivers and their companions", () => {
     },
   );
 
+  /**
+   * The mirror image, and the reason it belongs here rather than in
+   * src/runtime/node.ts: that file reaches the drivers one at a time and
+   * throws on the first it cannot dispatch to, so an operator who named all
+   * three platform bindings would fix one, restart, and meet the next. This
+   * file exists to hand back every problem at once.
+   */
+  test("off Workers all three platform bindings are refused together", () => {
+    const message = refusal({
+      ...REQUIRED,
+      DB_DRIVER: "d1",
+      KV_DRIVER: "kv",
+      STORAGE_DRIVER: "r2",
+    });
+
+    expect(message).toContain(
+      "STORAGE_DRIVER=r2 is only available on Cloudflare Workers; use s3 " +
+        "when self-hosting",
+    );
+    expect(message).toContain(
+      "DB_DRIVER=d1 is only available on Cloudflare Workers; use sqlite or " +
+        "postgres when self-hosting",
+    );
+    expect(message).toContain(
+      "KV_DRIVER=kv is only available on Cloudflare Workers; use valkey " +
+        "when self-hosting",
+    );
+  });
+
   test("an unknown driver is refused and lists what is allowed", () => {
     const message = refusal({ ...SELF_HOSTED, STORAGE_DRIVER: "gcs" });
 
-    expect(message).toContain("STORAGE_DRIVER must be one of: r2, s3");
+    // `r2` is deliberately absent: off Workers it is not a choice, and
+    // offering it here would send an operator to a driver that refuses next.
+    expect(message).toContain("STORAGE_DRIVER must be one of: s3");
     expect(message).toContain('got "gcs"');
   });
 
@@ -158,9 +189,11 @@ describe("the drivers and their companions", () => {
   });
 
   test("a bucket is not required for r2, which names its own binding", () => {
-    const { S3_BUCKET, ...rest } = SELF_HOSTED;
-    const config = loadConfig({ ...rest, STORAGE_DRIVER: "r2" } as never, {});
+    // On Workers, because that is the only runtime `r2` is accepted on now -
+    // off it the driver itself is refused before a bucket could be missed.
+    const config = loadConfig(REQUIRED as never, { workers: true });
 
+    expect(config.storageDriver).toBe("r2");
     expect(config.s3Bucket).toBeUndefined();
   });
 

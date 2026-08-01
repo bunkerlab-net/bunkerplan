@@ -2,13 +2,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import type { Logger } from "../log.ts";
 import type { Db } from "../services/types.ts";
-import { createAccountClosingRepo } from "./account-closing.shared.ts";
 import { type PgAuthHandle, pgDialect, pgSchema } from "./pg-shared.ts";
-import { createPlanRepo } from "./plans.shared.ts";
-import {
-  createRateLimitRepo,
-  createUnlockRateLimitRepo,
-} from "./rate-limits.shared.ts";
+import { createDialectRepos } from "./repos.ts";
 
 /**
  * Postgres always enforces foreign keys, so the ON DELETE CASCADE constraints
@@ -153,13 +148,7 @@ export function createPostgresDb(
   return {
     adapter: db,
     provider: "pg",
-    plans: createPlanRepo(dialect),
-    uploadRateLimits: createRateLimitRepo(
-      dialect,
-      dialect.tables.uploadRateLimit,
-    ),
-    unlockRateLimits: createUnlockRateLimitRepo(dialect, logger),
-    accountClosing: createAccountClosingRepo(dialect),
+    ...createDialectRepos(dialect, logger),
     probe: (signal) => probeOnce(pool, signal),
   };
 }

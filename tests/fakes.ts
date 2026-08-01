@@ -154,8 +154,24 @@ export function memoryPlans(
     const row = rows.get(id);
     return row?.userId === userId ? row : undefined;
   };
-  const handleOf = (userId: string): string =>
-    Object.entries(handles).find(([, id]) => id === userId)?.[0] ?? userId;
+  /**
+   * The handle naming an account, for `listGrantHandles`.
+   *
+   * Throws rather than falling back to the id. Production joins the `user`
+   * table, so a grant naming an account with no row cannot come back from it;
+   * a fixture that seeds one is modelling a state the repository cannot reach,
+   * and answering with a plausible-looking handle would let that pass.
+   */
+  const handleOf = (userId: string): string => {
+    const handle = Object.entries(handles).find(([, id]) => id === userId)?.[0];
+    if (handle === undefined) {
+      throw new Error(
+        `memoryPlans: nothing in \`handles\` maps to ${userId}, so this grant ` +
+          "names an account the fixture never created",
+      );
+    }
+    return handle;
+  };
   /**
    * The account a handle names, or `undefined`.
    *

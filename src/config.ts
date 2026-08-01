@@ -202,15 +202,21 @@ function oneOf<T extends string>(
 /**
  * A driver setting, which means something different on each runtime.
  *
- * Self-hosted it is a genuine choice, and required, since no default is right
- * for every deployment. On Workers it is not dispatchable at all:
- * src/runtime/cloudflare.ts wires the D1, KV, and R2 bindings by name and
- * nothing reachable from it may import `pg`, `ioredis`, or `bun:sqlite` - the
- * bundle would fail to resolve them. So there the binding is the only accepted
- * value: defaulted for an operator who sets nothing, refused with an
- * explanation for one who sets something else. Accepting and ignoring is the
- * outcome this closes - `DB_DRIVER=postgres` with a `DATABASE_URL` used to
- * boot clean on Workers and write every row to D1 regardless.
+ * On Workers it is not dispatchable at all: src/runtime/cloudflare.ts wires the
+ * D1, KV, and R2 bindings by name and nothing reachable from it may import
+ * `pg`, `ioredis`, or `bun:sqlite` - the bundle would fail to resolve them. So
+ * there the binding is the only accepted value: defaulted for an operator who
+ * sets nothing, refused with an explanation for one who sets something else.
+ * Accepting and ignoring is the outcome that closes - `DB_DRIVER=postgres` with
+ * a `DATABASE_URL` used to boot clean on Workers and write every row to D1
+ * regardless.
+ *
+ * Self-hosted it is a genuine choice and required, since no default is right
+ * for every deployment - but the binding is refused there too, and by name.
+ * src/runtime/node.ts cannot dispatch to it either and says so, one driver at
+ * a time as it reaches each; refusing here instead is what makes an operator
+ * who set all three see all three, which is the whole reason this file
+ * collects problems rather than throwing on the first.
  */
 function driver<T extends string>(
   env: Env,
@@ -220,15 +226,30 @@ function driver<T extends string>(
   workers: boolean,
   problems: string[],
 ): T {
-  if (!workers) return oneOf(env, key, allowed, undefined, problems);
   const raw = str(env, key);
-  if (raw === undefined || raw === binding) return binding;
-  problems.push(
-    `${key} must be "${binding}" on Cloudflare Workers, got "${raw}": ` +
-      "drivers there are bindings, not implementations this build can " +
-      "dispatch to",
-  );
-  return binding;
+  if (workers) {
+    if (raw === undefined || raw === binding) return binding;
+    problems.push(
+      `${key} must be "${binding}" on Cloudflare Workers, got "${raw}": ` +
+        "drivers there are bindings, not implementations this build can " +
+        "dispatch to",
+    );
+    return binding;
+  }
+
+  // Named rather than left to `oneOf`, which would either list a value nothing
+  // off Workers can dispatch to or omit it and leave an operator guessing why
+  // a documented driver is rejected. Returned early so one wrong value is one
+  // problem.
+  const selfHosted = allowed.filter((value) => value !== binding);
+  if (raw === binding) {
+    problems.push(
+      `${key}=${binding} is only available on Cloudflare Workers; use ` +
+        `${selfHosted.join(" or ")} when self-hosting`,
+    );
+    return binding;
+  }
+  return oneOf(env, key, selfHosted, undefined, problems);
 }
 
 interface Drivers {

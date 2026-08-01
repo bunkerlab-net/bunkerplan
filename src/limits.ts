@@ -35,9 +35,15 @@ export const PLAN_PAGE_SIZE = 500;
  * A subrequest figure, not a storage one. Deleting an account sweeps its
  * objects before the row cascade (`sweepAccountObjects` in
  * src/auth/instance.ts) and each plan costs two subrequests - the R2 delete
- * and the D1 delete - of the 1000 an invocation may make. The remainder is
- * left for the listing queries and for the deletion Better Auth performs
- * around the hook.
+ * and the D1 delete - of the 1000 an invocation may make.
+ *
+ * The whole sweep is therefore `2n + 2 + 1`: two calls per plan, one
+ * `listByUser` per page plus the empty one that ends the loop, and the
+ * `accountClosing.open` that precedes them. At 400 that is 803, and an account
+ * this size fits in one page because `PLAN_PAGE_SIZE` is 500. The remaining
+ * ~190 is what Better Auth spends deleting the rows around the hook. Raising
+ * this constant spends that margin - the sum is written out so a change to it
+ * can be checked rather than guessed at.
  *
  * Read twice, which is the point of one constant: `MAX_PLANS_PER_USER` is
  * refused above it on Workers, so an account cannot grow past what one

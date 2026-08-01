@@ -39,6 +39,9 @@ async function initialise(): Promise<Services> {
     const { createBunSqliteDb } = await import("../db/bun-sqlite.ts");
     db = createBunSqliteDb(config.sqlitePath, logger);
   } else {
+    // Unreachable: `loadConfig` refuses a binding driver off Workers, by name
+    // and alongside every other problem. Kept because `DbDriver` is a union of
+    // three and nothing in the type says which two this file can build.
     throw new Error(
       `DB_DRIVER=${config.dbDriver} is only available on Cloudflare Workers; ` +
         "use postgres or sqlite when self-hosting",
@@ -51,6 +54,7 @@ async function initialise(): Promise<Services> {
     // loadConfig already rejects a missing VALKEY_URL for this driver.
     kv = createValkeyKv(config.valkeyUrl ?? "");
   } else {
+    // Unreachable, as above.
     throw new Error(
       "KV_DRIVER=kv is only available on Cloudflare Workers; use valkey when self-hosting",
     );
@@ -61,6 +65,7 @@ async function initialise(): Promise<Services> {
     const { createS3Storage } = await import("../storage/s3.ts");
     storage = createS3Storage(config);
   } else {
+    // Unreachable, as above.
     throw new Error(
       "STORAGE_DRIVER=r2 is only available on Cloudflare Workers; use s3 when self-hosting",
     );

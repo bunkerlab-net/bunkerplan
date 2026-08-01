@@ -13,11 +13,14 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    # Native service containers rather than the Docker Compose stack. Compose
-    # is how a developer brings these up locally (docker-compose.test.yml); on
-    # a runner the same images attach directly, so nothing has to shell out to
-    # a second orchestrator, and the health gates below are what the job waits
-    # on instead of a script polling ports.
+    # Service containers rather than the Docker Compose stack. Compose is how a
+    # developer brings these up locally (docker-compose.test.yml); on a runner
+    # the same images attach directly, so nothing has to shell out to a second
+    # orchestrator and the health gates below are what the job waits on.
+    #
+    # MinIO is the exception and is started as a step further down, because a
+    # service container cannot supply a command and only a four-year-old MinIO
+    # image carries one - see the note there.
     #
     # Every one of these is what makes a suite run rather than skip. Without
     # them tests/drivers/* reports success having exercised only the Cloudflare
@@ -54,23 +57,6 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-      # `edge-cicd` rather than the ordinary MinIO tag for exactly that reason:
-      # it carries `CMD ["minio","server","/data"]`, so it needs no argument.
-      # The bucket is not created here - tests/drivers/backends.ts makes its own
-      # per run and drops it, so nothing has to survive between jobs.
-      minio:
-        image: docker.io/minio/minio:edge-cicd
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -fsS http://localhost:9000/minio/health/live"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -90,6 +76,35 @@ jobs:
           path: ~/.bun/cache
           key: ${{ runner.os }}-${{ runner.arch }}-bun-${{ hashFiles('**/bun.lock') }}
       - run: bun install --frozen-lockfile
+
+      # MinIO as a step, not a service container, and the same dated release
+      # docker-compose.yml pins. A service container cannot supply a command,
+      # so it could only run `edge-cicd` - the one MinIO image carrying
+      # `CMD ["minio","server","/data"]`, and one built in July 2021, which
+      # pointed the S3 conformance suite at a server four years behind the one
+      # a self-hoster gets. Started here the argument is just an argument, and
+      # local and CI exercise the same MinIO.
+      #
+      # Credentials are inherited by name rather than written into the command,
+      # where they would reach the run log. The bucket is not created:
+      # tests/drivers/backends.ts makes its own per run and drops it.
+      - name: Start MinIO
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
+            docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MinIO did not become healthy"
+          docker logs minio
+          exit 1
 
       # `hk` is the same gate the pre-commit hook runs, so CI cannot disagree
       # with a clean local commit. It covers Biome, Pkl, package.json ordering,

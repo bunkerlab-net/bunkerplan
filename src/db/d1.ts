@@ -4,12 +4,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Logger } from "../log.ts";
 import type { Db } from "../services/types.ts";
-import { createAccountClosingRepo } from "./account-closing.shared.ts";
-import { createPlanRepo } from "./plans.shared.ts";
-import {
-  createRateLimitRepo,
-  createUnlockRateLimitRepo,
-} from "./rate-limits.shared.ts";
+import { createDialectRepos } from "./repos.ts";
 import {
   type SqliteAuthHandle,
   sqliteDialect,
@@ -30,13 +25,7 @@ export function createD1Db(
   return {
     adapter: db,
     provider: "sqlite",
-    plans: createPlanRepo(dialect),
-    uploadRateLimits: createRateLimitRepo(
-      dialect,
-      dialect.tables.uploadRateLimit,
-    ),
-    unlockRateLimits: createUnlockRateLimitRepo(dialect, logger),
-    accountClosing: createAccountClosingRepo(dialect),
+    ...createDialectRepos(dialect, logger),
     async probe() {
       await db.run(sql`select 1`);
     },

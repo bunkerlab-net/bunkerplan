@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { sweepAccountObjects } from "../src/auth/instance.ts";
+import { PLAN_PAGE_SIZE, WORKERS_MAX_PLANS_PER_USER } from "../src/limits.ts";
 import type {
   AccountClosingRepo,
   PlanRepo,
@@ -99,6 +100,31 @@ function run(f: Fixture, maxAttempts?: number): Promise<void> {
     maxAttempts,
   });
 }
+
+/** What one Cloudflare Workers invocation may make, on the paid plan. */
+const WORKERS_SUBREQUEST_LIMIT = 1000;
+/** Left for the row deletion Better Auth performs around the hook. */
+const AUTH_RESERVE = 100;
+
+/**
+ * The arithmetic behind `WORKERS_MAX_PLANS_PER_USER`, enforced rather than
+ * described.
+ *
+ * That constant is a subrequest figure dressed as a plan count, so it stops
+ * being correct the moment either it or `PLAN_PAGE_SIZE` moves - and nothing
+ * about a sweep that overruns the budget looks like a ceiling being wrong. It
+ * looks like workerd ending the request. This is what fails first instead.
+ */
+test("the sweep ceiling fits one Workers invocation", () => {
+  // A listing per page, plus the empty one that ends the loop, plus the
+  // marker; then the pair of deletes each plan costs.
+  const listings = Math.ceil(WORKERS_MAX_PLANS_PER_USER / PLAN_PAGE_SIZE) + 1;
+  const subrequests = 2 * WORKERS_MAX_PLANS_PER_USER + listings + 1;
+
+  expect(subrequests).toBeLessThanOrEqual(
+    WORKERS_SUBREQUEST_LIMIT - AUTH_RESERVE,
+  );
+});
 
 describe("sweepAccountObjects", () => {
   /**

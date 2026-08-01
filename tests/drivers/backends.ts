@@ -39,14 +39,10 @@ import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import { Miniflare } from "miniflare";
 import pg from "pg";
 import { loadConfig } from "../../src/config.ts";
-import { createAccountClosingRepo } from "../../src/db/account-closing.shared.ts";
 import type { Dialect } from "../../src/db/dialect.ts";
 import { type PgDb, pgDialect, pgSchema } from "../../src/db/pg-shared.ts";
-import { createPlanRepo } from "../../src/db/plans.shared.ts";
-import {
-  createRateLimitRepo,
-  createUnlockRateLimitRepo,
-} from "../../src/db/rate-limits.shared.ts";
+import { createUnlockRateLimitRepo } from "../../src/db/rate-limits.shared.ts";
+import { createDialectRepos } from "../../src/db/repos.ts";
 import {
   type SqliteDb,
   sqliteDialect,
@@ -326,17 +322,21 @@ function repos(
   DbFixture,
   "plans" | "rateLimits" | "unlockRateLimits" | "accountClosing"
 > {
+  // The production wiring, so the contract suites exercise the repositories a
+  // deployment gets rather than a second set assembled here. `rateLimits` is
+  // the fixture's name for the upload bucket, and the unlock one is rebuilt to
+  // sweep every time: the pruning contract asserts a closed window is gone,
+  // and the default fires on a fraction of attempts.
+  const wired = createDialectRepos(dialect, silentLogger);
   return {
-    plans: createPlanRepo(dialect),
-    rateLimits: createRateLimitRepo(dialect, dialect.tables.uploadRateLimit),
-    // Always sweeps: the pruning contract asserts a closed window is gone,
-    // and the default only sweeps on a fraction of attempts.
+    plans: wired.plans,
+    rateLimits: wired.uploadRateLimits,
     unlockRateLimits: createUnlockRateLimitRepo(
       dialect,
       silentLogger,
       () => true,
     ),
-    accountClosing: createAccountClosingRepo(dialect),
+    accountClosing: wired.accountClosing,
   };
 }
 
