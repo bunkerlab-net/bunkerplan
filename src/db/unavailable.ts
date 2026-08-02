@@ -59,6 +59,29 @@ export function isPoolTimeout(cause: unknown): boolean {
 }
 
 /**
+ * The SQLSTATE an error carries, looked for through whatever wrapped it.
+ *
+ * Drizzle does not re-throw what the driver threw. Every failing statement
+ * arrives as its own `Error` - "Failed query: ..." - with the `pg` error, and
+ * the only copy of the code, hanging off `cause`. Reading `code` from the top
+ * object alone finds it on a bare driver error and never on a real one, which
+ * is the shape every caller here actually meets.
+ *
+ * The chain is walked rather than probed one deep, and bounded so a cause that
+ * points at itself cannot spin. Nothing in this codebase nests two wrappers
+ * today; the bound costs nothing and removes the question.
+ */
+function sqlState(cause: unknown): string | undefined {
+  for (let step = 0, at = cause; step < 5; step += 1) {
+    if (typeof at !== "object" || at === null) return undefined;
+    if ("code" in at && typeof at.code === "string") return at.code;
+    if (!("cause" in at)) return undefined;
+    at = at.cause;
+  }
+  return undefined;
+}
+
+/**
  * The server having cancelled a statement - SQLSTATE `57014`, which is what
  * `statement_timeout` raises.
  *
@@ -79,12 +102,7 @@ export function isPoolTimeout(cause: unknown): boolean {
  * past the server's so the defined one wins the race.
  */
 export function isStatementCancelled(cause: unknown): boolean {
-  return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "code" in cause &&
-    cause.code === "57014"
-  );
+  return sqlState(cause) === "57014";
 }
 
 /**
@@ -97,10 +115,5 @@ export function isStatementCancelled(cause: unknown): boolean {
  * transaction around it is aborted regardless.
  */
 export function isLockUnavailable(cause: unknown): boolean {
-  return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "code" in cause &&
-    cause.code === "55P03"
-  );
+  return sqlState(cause) === "55P03";
 }

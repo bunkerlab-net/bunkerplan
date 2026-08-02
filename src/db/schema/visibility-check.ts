@@ -20,6 +20,20 @@ import { PLAN_VISIBILITIES } from "../../limits.ts";
  * Changing `PLAN_VISIBILITIES` changes this string, which is a migration:
  * run `bun run db:generate` and commit both dialects' output. CI fails on a
  * `drizzle/` that command would rewrite.
+ *
+ * Declaration order, deliberately not sorted. Sorting would make the text
+ * independent of how the tuple happens to be written, which sounds free and is
+ * not: `["public", "private"]` sorts to `('private', 'public')`, a different
+ * string, and `bun run db:generate` answers with two migrations - a
+ * `DROP CONSTRAINT`/`ADD CONSTRAINT` pair on Postgres and an eighteen-line
+ * rebuild of `plan` on SQLite, the table every user's rows live in. That is a
+ * real rebuild of real data to reorder two literals inside an `IN` list which
+ * means precisely the same thing either way.
+ *
+ * The drift sorting would guard against is already loud: reordering the tuple
+ * changes this string, `db:generate` writes a migration, and CI fails on a
+ * `drizzle/` that command would rewrite. A reviewer sees it as a diff rather
+ * than as nothing at all, which is the better of the two failures.
  */
 export const PLAN_VISIBILITY_CHECK = `"visibility" in (${PLAN_VISIBILITIES.map(
   (value) => `'${value}'`,

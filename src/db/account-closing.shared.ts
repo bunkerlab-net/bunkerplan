@@ -15,6 +15,20 @@ export function createAccountClosingRepo(dialect: Dialect): AccountClosingRepo {
        * distinct rows and both succeed, which is the point - `isOpen` asks
        * whether any of them is present, so two overlapping deletions protect
        * the account together and neither can end the other's protection.
+       *
+       * `started_at` is written and nothing here reads it. That is deliberate:
+       * it is for the operator, not for this module. A mark can outlive its
+       * attempt in one case - Better Auth's own row delete failing after the
+       * sweep succeeded, which it offers no hook for - and the age is what
+       * distinguishes that leftover from a deletion running right now. The
+       * query is in docs/self-hosting.md.
+       *
+       * No threshold and no alerting here. A repository method is the wrong
+       * place to decide how long is too long: a sweep is bounded by the
+       * subrequest budget on Workers and unbounded off it, so the only honest
+       * threshold is deployment-specific. Nothing in this project collects
+       * metrics, and inventing a channel for one counter would be a second
+       * observability convention beside the logger.
        */
       const attemptId = crypto.randomUUID();
       await dialect.run(sql`

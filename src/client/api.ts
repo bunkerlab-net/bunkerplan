@@ -1,3 +1,8 @@
+// Imported, not re-exported. Every consumer takes `PlanVisibility` from
+// src/limits.ts directly - src/client/PlansPanel.tsx included - and that is
+// the point of the module: one declaration of the enum, reached one way. A
+// re-export here would add a second path to the same type and invite half the
+// client to use it, which is the drift src/limits.ts was created to end.
 import type { PlanVisibility } from "../limits.ts";
 
 export interface PlanSummary {

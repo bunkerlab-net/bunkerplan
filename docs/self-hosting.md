@@ -122,6 +122,36 @@ successful deletion cascades every mark away; failing that, remove its rows:
 delete from account_closing where user_id = '<user id>';
 ```
 
+`started_at` is epoch milliseconds, written when the mark was placed and read
+by nothing in the application - it is there for exactly this. A sweep is
+bounded by the subrequest budget on Workers and takes as long as it takes off
+it, so there is no threshold worth hard-coding; pick one your deployment can
+justify and list what is older:
+
+The column is the same on both engines - it is written by the application, not
+defaulted by the database - but the way each spells "an hour ago" is not.
+Postgres:
+
+```sql
+select user_id, attempt_id, started_at
+from account_closing
+where started_at < (extract(epoch from now()) * 1000) - 3600000
+order by started_at;
+```
+
+SQLite and D1:
+
+```sql
+select user_id, attempt_id, started_at
+from account_closing
+where started_at < (strftime('%s', 'now') * 1000) - 3600000
+order by started_at;
+```
+
+Anything that query returns is either a deletion still running or a mark whose
+attempt is gone. Nothing here decides which for you, and nothing alerts on it:
+this project logs and does not collect metrics.
+
 ## Swap matrices
 
 | Role                   | Cloudflare                                | Self-hosted                                      |

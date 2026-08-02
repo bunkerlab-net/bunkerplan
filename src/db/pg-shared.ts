@@ -173,7 +173,37 @@ function pgClaim(db: PgDb): Dialect["claim"] {
             }
             throw cause;
           }
-          return await body(pgExecutor(tx));
+          try {
+            return await body(pgExecutor(tx));
+          } catch (cause) {
+            /*
+             * `set local lock_timeout` is transaction-local, so it is still in
+             * force here: the count and the insert can wait on a row lock and
+             * end in `55P03` exactly as the advisory-lock statement can. A
+             * plan id already held by an uncommitted insert does it, and so
+             * does the foreign-key check when somebody holds the `user` row.
+             * Untranslated, that answered 500 for a busy moment in which
+             * nothing was written.
+             *
+             * `55P03` only. A `57014` here is the statement timeout rather
+             * than contention - a different event that happens to be a
+             * cancellation - and naming it lock contention would be a guess;
+             * it stays a fault, as the note above says.
+             *
+             * Safe on the same grounds as the lock wait: the throw leaves the
+             * callback, drizzle rolls the transaction back, and nothing this
+             * body did survives.
+             */
+            if (isLockUnavailable(cause)) {
+              throw new DatabaseUnavailable(
+                "waiting on a row to claim a plan",
+                {
+                  cause,
+                },
+              );
+            }
+            throw cause;
+          }
         },
         { isolationLevel: "read committed" },
       );

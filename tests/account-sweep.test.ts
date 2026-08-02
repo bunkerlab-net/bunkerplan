@@ -541,8 +541,11 @@ describe("sweepAccountObjects", () => {
         "a stall",
         () => fixture(() => ({ deleteOwned: async () => false })),
         /not making progress/,
+        // No budget: this throws on its own terms, and one here would only
+        // obscure which ending the case is about.
+        undefined,
       ],
-      ["an exhausted budget", () => fixture(), /Retry the deletion/],
+      ["an exhausted budget", () => fixture(), /Retry the deletion/, 2],
       [
         "a storage failure",
         () =>
@@ -552,19 +555,20 @@ describe("sweepAccountObjects", () => {
             },
           }),
         /bucket unreachable/,
+        undefined,
       ],
-    ] as const)("is lifted after %s", async (label, build, message) => {
-      const f = build();
-      seed(f, ["p1", "p2", "p3"]);
+    ] as const)(
+      "is lifted after %s",
+      async (_label, build, message, budget) => {
+        const f = build();
+        seed(f, ["p1", "p2", "p3"]);
 
-      // The budget case is the only one that needs one; the others throw on
-      // their own terms and a budget would only mask which.
-      const budget = label === "an exhausted budget" ? 2 : undefined;
-      await expect(run(f, budget)).rejects.toThrow(message);
+        await expect(run(f, budget)).rejects.toThrow(message);
 
-      expect(f.closing.has(OWNER)).toBe(false);
-      expect(f.closing.marks.size).toBe(0);
-    });
+        expect(f.closing.has(OWNER)).toBe(false);
+        expect(f.closing.marks.size).toBe(0);
+      },
+    );
 
     /**
      * The reason marks are keyed by attempt. Two deletions of one account

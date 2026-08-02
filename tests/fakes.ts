@@ -325,9 +325,9 @@ export function memoryPlans(
        * every assertion would agree - while the real insert wrote whatever
        * the column defaults to, or refused the statement.
        *
-       * `grants` is cloned rather than aliased: a row keeping the caller's
-       * array would let a later `grantByHandle` write into an object the test
-       * still holds, which is a fake editing its own input.
+       * `grants` is new and empty rather than carried: `PlanInsert` has no
+       * grants field, and a freshly inserted plan is shared with nobody. It
+       * is the second thing the database supplies, alongside `createdAt`.
        */
       rows.set(row.id, { ...row, createdAt: new Date(), grants: [] });
       return "created";
