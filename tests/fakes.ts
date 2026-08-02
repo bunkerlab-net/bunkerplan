@@ -72,8 +72,9 @@ export function recordingLogger(): { logger: Logger; lines: LogLine[] } {
     if (first instanceof Error) {
       // Both halves are needed and neither covers the other: the spread takes
       // the enumerable extras a thrower attached - `err.code` on a driver
-      // error is the one worth having - and the three named below are own but
-      // not enumerable, so only naming them brings them across.
+      // error is the one worth having - and none of the three named below
+      // survive a spread, `message` and `stack` being own but not enumerable
+      // and `name` usually coming off the prototype.
       return {
         ...first,
         name: first.name,

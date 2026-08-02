@@ -112,6 +112,20 @@ export async function replacePlan(
    * is gone by then and the row is too. Same pair, same reasons, as
    * `storeAndConfirm` - which is not reused here only because its compensation
    * for a failed write is to drop the row.
+   *
+   * What this costs, now that a failed sweep lifts its own mark: the sweep
+   * this deferred to may then fail, leaving the account alive and this plan's
+   * row with it - pointing at an object this handler just withdrew. The owner
+   * sees a plan that 404s.
+   *
+   * That is the recoverable direction, and it is chosen rather than tolerated.
+   * The alternative is to keep the bytes and let the sweep collect them, which
+   * loses the case this check exists for: a sweep that already passed this row
+   * has deleted the object and the row, so bytes left behind are owned by
+   * nothing, served at `/p/{id}`, and removable by no one. A row without an
+   * object is a plan its owner can delete and a later sweep will clear - the
+   * same trade the sweep itself makes when `storage.delete` succeeds and
+   * `deleteOwned` then fails.
    */
   if (await accountClosing.isOpen(userId)) {
     await sweepOrphanedObject(storage, logger, id);

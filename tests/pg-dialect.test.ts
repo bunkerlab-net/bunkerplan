@@ -122,16 +122,28 @@ describe("a claim that runs out of time", () => {
     { code: "57014" },
   );
 
-  /** Throws from the lock statement, which is the first `tx.execute`. */
+  /**
+   * Throws from the advisory-lock wait, which is the *second* `tx.execute`.
+   *
+   * The first is `set local lock_timeout`, and failing that instead would
+   * exercise the same catch while proving nothing about the wait this suite
+   * is named for - a claim that could not even set its deadline is a
+   * different fault. Counting the calls is what keeps the double honest as
+   * the statements before the lock change.
+   */
   function lockFails(cause: unknown): PgDb {
     return {
       execute: async () => ({ rows: [] }),
-      transaction: async (body: (tx: unknown) => Promise<unknown>) =>
-        await body({
+      transaction: async (body: (tx: unknown) => Promise<unknown>) => {
+        let executed = 0;
+        return await body({
           execute: async () => {
+            executed += 1;
+            if (executed === 1) return { rows: [] };
             throw cause;
           },
-        }),
+        });
+      },
     } as unknown as PgDb;
   }
 

@@ -50,4 +50,6 @@ export const SELF_HOSTED = Object.freeze({
  * A header off Workers, where the loader refuses to guess one. Deliberately
  * not folded into the two above: tests/config.test.ts asserts that refusal.
  */
-export const CLIENT_IP_HEADER = { CLIENT_IP_HEADER: "x-forwarded-for" };
+export const CLIENT_IP_HEADER = Object.freeze({
+  CLIENT_IP_HEADER: "x-forwarded-for",
+});

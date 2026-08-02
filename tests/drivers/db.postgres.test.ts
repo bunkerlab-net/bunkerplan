@@ -119,6 +119,12 @@ describe.skipIf(skip)("a claim that loses a race for a lock", () => {
     await holder.connect();
 
     try {
+      // A deadline on the holder itself, before it takes anything. If this
+      // test is killed between `begin` and its cleanup - a timeout, a
+      // cancelled run - the session would otherwise sit idle in a transaction
+      // holding an advisory lock, and the next run of this same test blocks on
+      // it until somebody notices. The server ends it instead.
+      await holder.query("set idle_in_transaction_session_timeout = '30s'");
       await holder.query("begin");
       await holder.query(
         `select pg_advisory_xact_lock(${await lockKey("user-a")})`,
@@ -158,6 +164,10 @@ describe.skipIf(skip)("a claim whose body waits on a row", () => {
 
     await holder.connect();
     try {
+      // Same deadline, same reason as the advisory-lock test above: a run cut
+      // short between `begin` and cleanup would leave this session holding a
+      // row lock, and the leftover table with it.
+      await holder.query("set idle_in_transaction_session_timeout = '30s'");
       await holder.query(`create table ${table} (id int primary key)`);
       await holder.query(`insert into ${table} values (1)`);
       await holder.query("begin");
@@ -186,13 +196,22 @@ describe.skipIf(skip)("a claim whose body waits on a row", () => {
        * would run inside it and `end()` would take the whole transaction down
        * with the drop in it - leaving the table behind under a name nothing
        * will ever look for again. Ending the transaction first is what makes
-       * the drop stick. Both are swallowed: the test has already decided, and
-       * a cleanup error must not become the failure a reader sees.
+       * the drop stick.
+       *
+       * The rollback is swallowed because it is allowed to be redundant: on
+       * the passing path the transaction is already closed. The drop is not.
+       * A drop that fails means a table left in a shared database under a
+       * random name, and swallowing that trades a loud failure for rubbish
+       * nobody will ever attribute - so it throws, and the nested `finally`
+       * is what still closes both connections when it does.
        */
       await holder.query("rollback").catch(() => {});
-      await holder.query(`drop table if exists ${table}`).catch(() => {});
-      await holder.end();
-      await pool.end();
+      try {
+        await holder.query(`drop table if exists ${table}`);
+      } finally {
+        await holder.end();
+        await pool.end();
+      }
     }
   }, 15_000);
 });

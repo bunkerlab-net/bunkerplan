@@ -114,6 +114,25 @@ describe("relabelPlan", () => {
     expect(stored.label).toBeNull();
   });
 
+  /**
+   * 401, not 404. The distinction is the point: "your session is not valid"
+   * and "no such plan of yours" are different answers, and the handler
+   * resolves the caller itself rather than trusting a router to have done it.
+   * Every other case here arrives already signed in, so nothing else would
+   * notice an auth check that stopped running.
+   */
+  test("401s an unauthenticated caller without writing", async () => {
+    const { plans, stored } = fakes();
+    const response = await relabelPlan(
+      fakeAuth({ sessionUser: null }).auth,
+      plans,
+      patch({ label: "mine" }),
+      ID,
+    );
+    expect(response.status).toBe(401);
+    expect(stored.label).toBeNull();
+  });
+
   test("rejects a body that is not JSON", async () => {
     const { plans } = fakes();
     const response = await relabelPlan(as(OWNER), plans, patch("not json"), ID);

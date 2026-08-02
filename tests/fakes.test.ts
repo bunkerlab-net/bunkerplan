@@ -38,8 +38,9 @@ describe("recordingLogger", () => {
 
   /**
    * The regression. `logger.error(err, "...")` is a shape pino accepts, and
-   * the fake used to spread it - which yields `{}`, because an Error's `name`,
-   * `message`, and `stack` are own properties but not enumerable. A suite
+   * the fake used to spread it - which yields `{}`, because none of an
+   * Error's standard fields survive a spread: `message` and `stack` are own
+   * but not enumerable, and `name` usually comes off the prototype. A suite
    * asserting `fields` on such a line saw nothing and was satisfied, while
    * production logged the error in full.
    */

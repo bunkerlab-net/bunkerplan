@@ -203,6 +203,10 @@ describe("replacePlan", () => {
     // that left the bytes behind.
     expect(written.objects).toEqual([{ key: ID, size: HTML.length }]);
     expect(written.removed).toEqual([ID]);
+    // In that order. "Written, then taken back out" is the claim, and the two
+    // arrays above hold either order equally well - a handler that deleted
+    // first and wrote after would satisfy both and leave the bytes behind.
+    expect(written.log).toEqual([`put:${ID}`, `delete:${ID}`]);
     // And the row is left for the sweep, which is already removing it.
     expect(written.sizes).toEqual([]);
   });
