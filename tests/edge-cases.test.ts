@@ -140,7 +140,11 @@ describe("uploading to an account being deleted", () => {
     const storage = memoryStorage();
     const app = buildApp({
       sessionUser: OWNER,
-      accountClosing: { open: async () => {}, isOpen: async () => true },
+      accountClosing: {
+        open: async () => "attempt",
+        close: async () => {},
+        isOpen: async () => true,
+      },
       storage: {
         ...storage,
         put: async (id, body) => {

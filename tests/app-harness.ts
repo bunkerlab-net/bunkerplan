@@ -157,7 +157,8 @@ export const closedRateLimits: RateLimitRepo = {
  * wanting the closing branch passes `isOpen: async () => true`.
  */
 export const openAccounts: AccountClosingRepo = {
-  open: async () => {},
+  open: async () => "attempt",
+  close: async () => {},
   isOpen: async () => false,
 };
 

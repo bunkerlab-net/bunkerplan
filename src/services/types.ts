@@ -251,10 +251,41 @@ export interface PlanRepo {
  * sweeps them and then lets the foreign key take the rows. Marking the account
  * first is what stops an upload slipping between the sweep and the cascade and
  * leaving an object nothing owns.
+ *
+ * Two ways off, and they are not symmetric. A deletion that succeeds keeps the
+ * mark past the sweep on purpose - it has to cover Better Auth's own row
+ * delete, which is the second half of the window - and the `user` row taking
+ * it by cascade is what ends it. A deletion that fails lifts its own mark,
+ * because an account whose deletion did not happen still exists and its owner
+ * is still entitled to write to it.
+ *
+ * Marks are per attempt, so those two rules cannot collide: overlapping
+ * deletions each place one, and the one that fails lifts only what it placed.
+ *
+ * One gap remains, in the hook surface rather than here. Better Auth runs
+ * `beforeDelete`, then its own delete, then `afterDelete`, and offers nothing
+ * that fires when the middle step throws. A sweep that succeeded and a
+ * `deleteUser` that then failed leaves a mark nothing will lift. It blocks
+ * that account's writes but not another deletion: the retry places its own
+ * mark, and success cascades every row away, stale ones included.
  */
 export interface AccountClosingRepo {
-  /** Idempotent: re-running a failed deletion must not fail on the marker. */
-  open(userId: string): Promise<void>;
+  /**
+   * Marks the account and returns the id of this attempt's mark.
+   *
+   * Never merges with a mark already there: the mark is this attempt's own,
+   * and its id is what `close` needs to lift it and no other. It is a database
+   * write and can reject, so no mark is placed until it returns.
+   */
+  open(userId: string): Promise<string>;
+  /**
+   * Lifts one attempt's mark, by the id `open` returned.
+   *
+   * For the deletion that failed. Success needs no call: deleting the `user`
+   * row cascades every mark the account has.
+   */
+  close(attemptId: string): Promise<void>;
+  /** Whether any attempt is currently marking this account. */
   isOpen(userId: string): Promise<boolean>;
 }
 

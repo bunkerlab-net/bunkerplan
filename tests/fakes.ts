@@ -3,6 +3,7 @@ import type { AppAuth } from "../src/auth/instance.ts";
 import type { PlanVisibility } from "../src/limits.ts";
 import type { Logger } from "../src/log.ts";
 import type {
+  AccountClosingRepo,
   PlanAccessRow,
   PlanInsert,
   PlanRepo,
@@ -92,6 +93,60 @@ export function deferred(): { promise: Promise<void>; resolve: () => void } {
     resolve = settle;
   });
   return { promise, resolve };
+}
+
+/** An `AccountClosingRepo` over a Map, plus what a suite needs to inspect it. */
+export interface MemoryAccountClosing extends AccountClosingRepo {
+  /** Every mark standing, by attempt id. */
+  marks: Map<string, string>;
+  /** Whether any attempt marks this account, synchronously. */
+  has(userId: string): boolean;
+  /** Marks an account from outside a sweep, as an earlier attempt would have. */
+  mark(userId: string): string;
+  /** What deleting the `user` row does: every mark for it goes at once. */
+  cascade(userId: string): void;
+}
+
+/**
+ * The closing marker, keyed the way the real table is: a row per attempt, not
+ * per account.
+ *
+ * A fake keyed by account would answer every assertion in these suites
+ * identically right up to the one that matters - one attempt lifting its mark
+ * while another's still stands - and would report the account unmarked, which
+ * is the bug the real schema exists to prevent.
+ *
+ * Ids come off a counter that only ever climbs. Deriving one from the map's
+ * size hands out an id that is already live as soon as a mark other than the
+ * last one is lifted, which is exactly the overlap being modelled.
+ */
+export function memoryAccountClosing(): MemoryAccountClosing {
+  const marks = new Map<string, string>();
+  let issued = 0;
+  const has = (userId: string) => [...marks.values()].includes(userId);
+  const mark = (userId: string): string => {
+    issued += 1;
+    const attemptId = `attempt-${issued}`;
+    marks.set(attemptId, userId);
+    return attemptId;
+  };
+  return {
+    marks,
+    has,
+    mark,
+    cascade(userId) {
+      for (const [attemptId, owner] of marks) {
+        if (owner === userId) marks.delete(attemptId);
+      }
+    },
+    // The same call the repository makes, so a suite seeding a mark and a
+    // sweep placing one cannot drift apart.
+    open: async (userId) => mark(userId),
+    close: async (attemptId) => {
+      marks.delete(attemptId);
+    },
+    isOpen: async (userId) => has(userId),
+  };
 }
 
 export interface AuthCalls {

@@ -104,6 +104,24 @@ Better Auth removes anything. A retry therefore has less to do than the
 attempt before it, and enough retries finish. Self-hosted there is no
 per-request budget and no ceiling.
 
+A failed deletion leaves the account able to write again. The sweep marks the
+account before it starts - that mark is what refuses uploads while objects are
+being removed, so nothing can slip in behind it and outlive its row - and lifts
+it again on the way out if the sweep did not finish. Marks are per attempt, so
+two deletions of one account cannot interfere: each places its own, and the one
+that fails removes only what it placed.
+
+One case needs an operator, and only one. Better Auth runs the sweep, then
+deletes the user row, and offers no hook that fires if that second step fails -
+so a sweep that succeeded followed by a delete that did not leaves a mark with
+nothing to lift it. The symptom is an account whose uploads answer `409 account
+is being deleted` indefinitely. Deleting the account again clears it, because a
+successful deletion cascades every mark away; failing that, remove its rows:
+
+```sql
+delete from account_closing where user_id = '<user id>';
+```
+
 ## Swap matrices
 
 | Role                   | Cloudflare                                | Self-hosted                                      |

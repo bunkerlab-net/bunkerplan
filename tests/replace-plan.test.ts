@@ -27,6 +27,13 @@ interface Written {
   objects: { key: string; size: number }[];
   sizes: number[];
   removed: string[];
+  /**
+   * Every object call in the order it happened. The three arrays above say
+   * what was written and what was removed but not which came first, and for
+   * the withdrawal path that is the whole property: a delete that ran before
+   * the put would leave the bytes behind and read identically here.
+   */
+  log: string[];
 }
 
 function fakes(
@@ -42,15 +49,17 @@ function fakes(
     storageFails?: boolean;
   } = {},
 ): { deps: ReplacePlanDeps; written: Written } {
-  const written: Written = { objects: [], sizes: [], removed: [] };
+  const written: Written = { objects: [], sizes: [], removed: [], log: [] };
 
   const storage: PlanStorage = {
     put: async (key, body) => {
       if (options.storageFails === true) throw new Error("bucket unreachable");
+      written.log.push(`put:${key}`);
       written.objects.push({ key, size: body.byteLength });
     },
     get: async () => null,
     delete: async (key) => {
+      written.log.push(`delete:${key}`);
       written.removed.push(key);
     },
     probe: async () => {},
@@ -83,7 +92,11 @@ function fakes(
       uploadRateLimits: openRateLimits,
       accountClosing:
         options.closing === true
-          ? { open: async () => {}, isOpen: async () => true }
+          ? {
+              open: async () => "attempt",
+              close: async () => {},
+              isOpen: async () => true,
+            }
           : openAccounts,
       storage,
       logger: silentLogger,
@@ -119,7 +132,7 @@ describe("replacePlan", () => {
     const response = await replacePlan(deps, put(), ID);
 
     expect(response.status).toBe(404);
-    expect(written).toEqual({ objects: [], sizes: [], removed: [] });
+    expect(written).toEqual({ objects: [], sizes: [], removed: [], log: [] });
   });
 
   test("404s for an unknown id", async () => {
@@ -127,7 +140,9 @@ describe("replacePlan", () => {
     const response = await replacePlan(deps, put(), ID);
 
     expect(response.status).toBe(404);
-    expect(written.objects).toEqual([]);
+    // The whole record, like its siblings: asserting `objects` alone would let
+    // a stray delete on the not-found path through unnoticed.
+    expect(written).toEqual({ objects: [], sizes: [], removed: [], log: [] });
   });
 
   test("takes the object back out when the row goes away underneath it", async () => {
@@ -140,6 +155,10 @@ describe("replacePlan", () => {
     // object that no row owns. The write happened, so it has to be undone.
     expect(written.objects).toEqual([{ key: ID, size: HTML.length }]);
     expect(written.removed).toEqual([ID]);
+    // In that order, which is the part that matters and the part the two
+    // arrays above cannot show. A delete before the put would satisfy both
+    // and still leave the object sitting there.
+    expect(written.log).toEqual([`put:${ID}`, `delete:${ID}`]);
   });
 
   test("422s a document that is not standalone, leaving the plan alone", async () => {
@@ -149,7 +168,7 @@ describe("replacePlan", () => {
     const response = await replacePlan(deps, put(html), ID);
 
     expect(response.status).toBe(422);
-    expect(written).toEqual({ objects: [], sizes: [], removed: [] });
+    expect(written).toEqual({ objects: [], sizes: [], removed: [], log: [] });
   });
 
   test("502s when the object write fails, leaving the row untouched", async () => {
@@ -159,7 +178,7 @@ describe("replacePlan", () => {
     expect(response.status).toBe(502);
     // Nothing was written, so nothing has to be undone: the plan still serves
     // its previous document at its previous recorded size.
-    expect(written).toEqual({ objects: [], sizes: [], removed: [] });
+    expect(written).toEqual({ objects: [], sizes: [], removed: [], log: [] });
   });
 
   /**

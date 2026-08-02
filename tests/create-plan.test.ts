@@ -57,7 +57,11 @@ function deps(over: Partial<PlanRepo> = {}): {
       auth: fakeAuth({ keyUser: OWNER }).auth,
       config: CONFIG,
       plans,
-      accountClosing: { open: async () => {}, isOpen: async () => false },
+      accountClosing: {
+        open: async () => "attempt",
+        close: async () => {},
+        isOpen: async () => false,
+      },
       uploadRateLimits: {
         consume: async () => ({
           allowed: true,

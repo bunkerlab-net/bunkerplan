@@ -7,6 +7,7 @@ import { openAccounts, openRateLimits } from "./app-harness.ts";
 import {
   deferred,
   fakeAuth,
+  memoryAccountClosing,
   memoryPlans,
   silentLogger,
   storedPlan,
@@ -143,13 +144,7 @@ describe("a replacement racing an account deletion", () => {
     // No hold from `stores()`: this test does its own pausing, inside
     // `deleteOwned` below.
     const { objects, log, rows, storage, plans, auth } = stores();
-    const closing = new Set<string>();
-    const accountClosing = {
-      open: async (userId: string) => {
-        closing.add(userId);
-      },
-      isOpen: async (userId: string) => closing.has(userId),
-    };
+    const accountClosing = memoryAccountClosing();
 
     // Held inside `deleteOwned`, so the sweep is paused with the object gone
     // and the row still there - exactly the window.

@@ -116,11 +116,71 @@ export async function sweepAccountObjects(input: {
   userId: string;
   maxAttempts?: number;
 }): Promise<void> {
-  const { plans, accountClosing, storage, logger, userId } = input;
-  // Validated before the marker - see the note on ordering above.
-  let allowance = attemptBudget(input.maxAttempts);
-  await accountClosing.open(userId);
+  const { accountClosing, logger, userId } = input;
+  // Validated before the mark - see the note on ordering above.
+  const allowance = attemptBudget(input.maxAttempts);
 
+  const attemptId = await accountClosing.open(userId);
+  try {
+    await sweepMarkedAccount(input, allowance);
+  } catch (cause) {
+    await unmark(accountClosing, logger, attemptId, userId);
+    throw cause;
+  }
+  // No lift on the way out. The window this mark closes runs past the sweep
+  // and through Better Auth's own row delete; the cascade on `user` is what
+  // ends it.
+}
+
+/**
+ * Lifts the mark a failed sweep placed, without ever replacing its error.
+ *
+ * Best effort by construction. This runs on a path that is already failing,
+ * usually because the database or the bucket is unwell, so the lift is exactly
+ * the kind of call that fails too. Throwing here would swap a diagnosis the
+ * operator can act on for one about cleanup, and Better Auth aborts the
+ * deletion either way - so the second failure is logged and the first is what
+ * propagates.
+ *
+ * Losing this race costs the account its writes until the row is removed by
+ * hand, or until a later deletion of the same account succeeds and cascades it
+ * away.
+ */
+async function unmark(
+  accountClosing: AccountClosingRepo,
+  logger: Pick<Logger, "warn">,
+  attemptId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    await accountClosing.close(attemptId);
+  } catch (err) {
+    logger.warn(
+      { userId, attemptId, err },
+      "could not lift the account-closing mark after a failed sweep; this " +
+        "account cannot be written to until the row is removed or a later " +
+        "deletion of it succeeds",
+    );
+  }
+}
+
+/**
+ * The sweep proper, with the mark held and the budget already checked.
+ *
+ * Split out so the mark has one acquisition and one release around a body that
+ * throws from four places, rather than a release repeated at each of them.
+ */
+async function sweepMarkedAccount(
+  input: {
+    plans: PlanRepo;
+    storage: PlanStorage;
+    logger: Pick<Logger, "warn" | "info">;
+    userId: string;
+  },
+  budget: number,
+): Promise<void> {
+  const { plans, storage, logger, userId } = input;
+  let allowance = budget;
   let removed = 0;
   // Rows `deleteOwned` refused. Kept because the next listing is what makes
   // them mean something: still there, and the sweep cannot finish; gone, and

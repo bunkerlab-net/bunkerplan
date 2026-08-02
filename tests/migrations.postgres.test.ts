@@ -131,3 +131,55 @@ describe.skipIf(skip)("0011 against rows already stored", () => {
     expect(Number(rows[0]?.v)).toBe(0);
   });
 });
+
+describe.skipIf(skip)("0013 against markers left by an older sweep", () => {
+  /**
+   * The generated migration was `ADD COLUMN "attempt_id" text PRIMARY KEY NOT
+   * NULL` next to a commented-out placeholder for dropping the old key, which
+   * fails on a populated table twice over - a NOT NULL column with no default,
+   * and a second primary key beside the first. It was rewritten by hand as
+   * nullable, backfill, constrain, and this is the test that says the rewrite
+   * works against the data the old shape allowed.
+   */
+  test("carries an existing marker across and re-keys the table", async () => {
+    const pool = await migrate(13, async (run) => {
+      await run(
+        `insert into "user" (id, name, email, email_verified, created_at, updated_at)
+         values ('owner', 'owner', 'owner@x', false, now(), now())`,
+      );
+      await run(
+        `insert into account_closing (user_id, started_at) values ('owner', 1234)`,
+      );
+    });
+
+    const { rows } = await pool.query<{
+      attempt_id: string;
+      user_id: string;
+      started_at: string;
+    }>(`select attempt_id, user_id, started_at from account_closing`);
+    expect(rows).toEqual([
+      { attempt_id: "legacy:owner", user_id: "owner", started_at: "1234" },
+    ]);
+
+    // A second attempt can be placed beside the carried one - the whole reason
+    // the key moved - and the old key is genuinely gone rather than still
+    // enforcing one row per account.
+    await pool.query(
+      `insert into account_closing (attempt_id, user_id, started_at)
+       values ('retry', 'owner', 5678)`,
+    );
+    const { rows: both } = await pool.query<{ v: string }>(
+      `select count(*) as v from account_closing where user_id = 'owner'`,
+    );
+    expect(Number(both[0]?.v)).toBe(2);
+
+    // And both still cascade, which is what collects a mark no failure lifted.
+    await pool.query(`delete from "user" where id = 'owner'`);
+    const { rows: left } = await pool.query<{ v: string }>(
+      `select count(*) as v from account_closing`,
+    );
+    await pool.end();
+
+    expect(Number(left[0]?.v)).toBe(0);
+  });
+});

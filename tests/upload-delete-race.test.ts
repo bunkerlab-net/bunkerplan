@@ -8,6 +8,8 @@ import type {
 } from "../src/services/types.ts";
 import {
   deferred,
+  type MemoryAccountClosing,
+  memoryAccountClosing,
   memoryPlans,
   type StoredPlan,
   silentLogger,
@@ -31,7 +33,6 @@ const ID = "plan-1";
 
 function stores(holdPut = false) {
   const objects = new Map<string, number>();
-  const closing = new Set<string>();
 
   const entered = deferred();
   const released = deferred();
@@ -54,14 +55,14 @@ function stores(holdPut = false) {
   const plans = memoryPlans();
   const rows = plans.rows;
 
-  const accountClosing: AccountClosingRepo = {
-    open: async (userId) => {
-      closing.add(userId);
-    },
-    isOpen: async (userId) => closing.has(userId),
-  };
+  const closing = memoryAccountClosing();
 
-  const deps = { storage, plans, accountClosing, logger: silentLogger };
+  const deps = {
+    storage,
+    plans,
+    accountClosing: closing,
+    logger: silentLogger,
+  };
   return { objects, rows, closing, deps, plans, storage, entered, released };
 }
 
@@ -87,11 +88,11 @@ const sweep = (
  */
 function cascade(
   rows: Map<string, StoredPlan>,
-  closing: Set<string>,
+  closing: MemoryAccountClosing,
   userId: string,
 ): void {
   for (const [id, row] of rows) if (row.userId === userId) rows.delete(id);
-  closing.delete(userId);
+  closing.cascade(userId);
 }
 
 type SeedRow = Parameters<PlanRepo["insert"]>[0];
@@ -199,7 +200,7 @@ describe("upload racing account deletion", () => {
   test("keeps the row when withdrawing cannot remove the object", async () => {
     const { rows, deps, plans, closing } = stores();
     await claim(plans, ID);
-    closing.add(OWNER);
+    closing.mark(OWNER);
     deps.storage.delete = async () => {
       throw new Error("bucket unreachable");
     };

@@ -61,7 +61,8 @@ function fakes(fails: string[] = []): Fakes {
       refund: async () => {},
     },
     accountClosing: {
-      open: async () => {},
+      open: async () => "attempt",
+      close: async () => {},
       isOpen: async () => false,
     },
     probe: probe("db"),

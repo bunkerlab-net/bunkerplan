@@ -482,3 +482,28 @@ describe("the plan table", () => {
     },
   );
 });
+
+describe("the account-closing table", () => {
+  test.each([
+    ["pg", pgAccountClosing.accountClosing],
+    ["sqlite", sqliteAccountClosing.accountClosing],
+  ] as const)(
+    "%s keys a mark by the attempt, not the account",
+    (dialect, table) => {
+      const shape = shapeOf(dialect, table);
+      /*
+       * The whole point of the table's shape. Keyed by `user_id`, a second
+       * deletion of one account could not place a mark of its own, and the
+       * first of the two to fail would lift the only one there - ending the
+       * other's protection while it was still sweeping.
+       */
+      expect(shape.primaryKey).toEqual(["attempt_id"]);
+      // And the account is what every read asks about, so it is indexed
+      // rather than scanned: `isOpen` runs on the upload path.
+      expect(shape.indexes).toContainEqual({
+        unique: false,
+        columns: ["user_id"],
+      });
+    },
+  );
+});

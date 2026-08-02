@@ -8,7 +8,9 @@ import type {
   PlanStorage,
 } from "../src/services/types.ts";
 import {
+  type MemoryAccountClosing,
   type MemoryPlans,
+  memoryAccountClosing,
   memoryPlans,
   type StoredPlan,
   storedPlan,
@@ -44,7 +46,7 @@ type SweepLogger = Pick<Logger, "warn" | "info">;
 interface Fixture {
   /** Every id `storage.delete` was called with, in order, duplicates kept. */
   objects: string[];
-  closing: Set<string>;
+  closing: MemoryAccountClosing;
   rows: Map<string, StoredPlan>;
   /**
    * Every marker, listing, and object delete, in the order they happened. The
@@ -94,7 +96,7 @@ function fixture(
   const steps: string[] = [];
   const logs: LogLine[] = [];
   const limits: number[] = [];
-  const closing = new Set<string>();
+  const closing = memoryAccountClosing();
   const base = memoryPlans();
   /*
    * Overrides first, recorders around them. Wrapping the base repository and
@@ -163,12 +165,19 @@ function fixture(
         await storageOverrides.delete?.(id);
       },
     },
+    // The shared fake, wrapped only to record the calls. `close` counts too:
+    // it is a subrequest the sweep spends on the failing path, and the budget
+    // assertions measure what was actually issued.
     accountClosing: {
+      ...closing,
       open: async (userId) => {
         steps.push("open");
-        closing.add(userId);
+        return await closing.open(userId);
       },
-      isOpen: async (userId) => closing.has(userId),
+      close: async (attemptId) => {
+        steps.push("unmark");
+        await closing.close(attemptId);
+      },
     },
   };
 }
@@ -306,6 +315,15 @@ describe("sweepAccountObjects", () => {
         message: "deleted plan objects before account deletion",
       },
     ]);
+
+    /*
+     * And the mark is still standing. It has to outlive the sweep: Better
+     * Auth deletes the `user` row after this returns, and an upload landing
+     * in that gap would claim a row the cascade is about to remove. The
+     * cascade takes the mark too, which is why nothing lifts it here.
+     */
+    expect(f.closing.has(OWNER)).toBe(true);
+    expect(f.steps).not.toContain("unmark");
   });
 
   /**
@@ -505,6 +523,86 @@ describe("sweepAccountObjects", () => {
       // account behind for the next one to trip over.
       expect(f.closing.has(OWNER)).toBe(false);
       expect(f.rows.size).toBe(1);
+    });
+  });
+
+  /**
+   * What a failed deletion owes the account it did not delete.
+   *
+   * Better Auth aborts on the throw, so the account survives - and an account
+   * that still exists must still be writable. Leaving the mark standing was
+   * the old behaviour and it meant any transient bucket or database failure
+   * during a sweep silently 409'd that account's uploads for good, with no
+   * path back that did not involve editing the database by hand.
+   */
+  describe("the mark a failed sweep leaves", () => {
+    test.each([
+      [
+        "a stall",
+        () => fixture(() => ({ deleteOwned: async () => false })),
+        /not making progress/,
+      ],
+      ["an exhausted budget", () => fixture(), /Retry the deletion/],
+      [
+        "a storage failure",
+        () =>
+          fixture(() => ({}), {
+            delete: async () => {
+              throw new Error("bucket unreachable");
+            },
+          }),
+        /bucket unreachable/,
+      ],
+    ] as const)("is lifted after %s", async (label, build, message) => {
+      const f = build();
+      seed(f, ["p1", "p2", "p3"]);
+
+      // The budget case is the only one that needs one; the others throw on
+      // their own terms and a budget would only mask which.
+      const budget = label === "an exhausted budget" ? 2 : undefined;
+      await expect(run(f, budget)).rejects.toThrow(message);
+
+      expect(f.closing.has(OWNER)).toBe(false);
+      expect(f.closing.marks.size).toBe(0);
+    });
+
+    /**
+     * The reason marks are keyed by attempt. Two deletions of one account
+     * overlap; this one fails and lifts its own, and the other's has to
+     * survive - it is still sweeping, and the upload it is racing must still
+     * be refused.
+     */
+    test("is only its own, when another attempt is also sweeping", async () => {
+      const f = fixture(() => ({ deleteOwned: async () => false }));
+      seed(f, ["stuck"]);
+      const other = f.closing.mark(OWNER);
+
+      await expect(run(f)).rejects.toThrow(/not making progress/);
+
+      expect(f.closing.has(OWNER)).toBe(true);
+      expect([...f.closing.marks.keys()]).toEqual([other]);
+    });
+
+    /**
+     * The lift runs on a path that is already failing, usually because the
+     * database is unwell - so it is exactly the call likely to fail too, and
+     * it must not become the error the operator sees.
+     */
+    test("does not replace the failure that caused it", async () => {
+      const f = fixture(() => ({ deleteOwned: async () => false }));
+      seed(f, ["stuck"]);
+      f.closing.close = async () => {
+        throw new Error("database unreachable");
+      };
+
+      await expect(run(f)).rejects.toThrow(/not making progress/);
+
+      // Said once, where an operator will find it, rather than thrown.
+      const warned = f.logs.filter((line) =>
+        line.message.includes("could not lift the account-closing mark"),
+      );
+      expect(warned).toHaveLength(1);
+      expect(warned[0]?.fields).toMatchObject({ userId: OWNER });
     });
   });
 });
