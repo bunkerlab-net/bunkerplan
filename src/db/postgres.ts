@@ -116,8 +116,16 @@ async function acquire(
  * around to answering. Not a shorter `statement_timeout` for this one query -
  * as above, that needs a server well enough to enforce it, which is not the
  * case being bounded.
+ *
+ * Exported for the pool it takes, not for callers: `createPostgresDb` builds
+ * the only real one, and the abort windows below are races between that pool
+ * and the caller's signal. A test that cannot hand this a pool of its own can
+ * only reach them by timing, which is a flake rather than a test.
  */
-async function probeOnce(pool: pg.Pool, signal?: AbortSignal): Promise<void> {
+export async function probeOnce(
+  pool: pg.Pool,
+  signal?: AbortSignal,
+): Promise<void> {
   // Throwing, not returning: a probe that resolves is a probe that found the
   // database reachable, and an abandoned one established nothing.
   if (signal?.aborted) throw signal.reason;

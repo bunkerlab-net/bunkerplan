@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import {
+  closedRateLimits,
+  openAccounts,
+  openRateLimits,
+} from "./app-harness.ts";
 import { at, recordingLogger } from "./fakes.ts";
+import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /**
  * The shared fakes' own contracts, where a suite depending on one would not
@@ -63,5 +69,89 @@ describe("recordingLogger", () => {
       code: "ECONNREFUSED",
     });
     expect(line?.fields["stack"]).toContain("bucket unreachable");
+  });
+});
+
+/**
+ * The inert sharing stub, whose whole value is the answers it gives.
+ *
+ * Suites that have nothing to do with sharing spread this to satisfy
+ * `PlanRepo`, and every method answers negatively on purpose: a handler that
+ * unexpectedly reaches into sharing gets "no", rather than a convenient
+ * success that would let the test pass for the wrong reason.
+ *
+ * Nothing calls these, which is exactly why they are worth pinning. One of
+ * them flipped to a positive answer - `hasGrant` returning true, say - would
+ * turn a suite full of ownership assertions green without any of them
+ * exercising the thing they name, and no other test in the repo would fail.
+ */
+describe("basePlanRepoStub", () => {
+  /*
+   * Called with no arguments, which is how they are declared: each ignores
+   * what it is asked, so widening the signatures to accept a plan id would be
+   * adding surface the stub does not have in order to pass it values it would
+   * not read.
+   */
+  test("refuses every question it is asked", async () => {
+    expect(await basePlanRepoStub.findAccess()).toBeNull();
+    expect(await basePlanRepoStub.hasGrant()).toBe(false);
+    expect(await basePlanRepoStub.setVisibility()).toBe(false);
+    expect(await basePlanRepoStub.setShareCodeHash()).toBe(false);
+    expect(await basePlanRepoStub.listGrantHandles()).toBeNull();
+    expect(await basePlanRepoStub.revokeByHandle()).toBe(false);
+  });
+
+  /**
+   * The one that is not a boolean. `grantByHandle` answers with a reason, and
+   * "no-plan" is the negative one - anything else here would hand a suite a
+   * grant it never set up.
+   */
+  test("grants nothing, and says which negative answer it is", async () => {
+    expect(await basePlanRepoStub.grantByHandle()).toBe("no-plan");
+  });
+});
+
+/**
+ * The harness's own limiters and closing marker.
+ *
+ * Every suite built on `buildApp` gets these by default, and each one is a
+ * single word of behaviour that dozens of assertions quietly stand on: the
+ * upload tests mean something because `openRateLimits` allows, the throttle
+ * tests mean something because `closedRateLimits` refuses, and every upload
+ * assertion means something because `openAccounts` reports nothing closing.
+ *
+ * Flip any one of them and the suites do not fail - they pass without
+ * exercising what they name. `closedRateLimits.consume` answering `allowed`
+ * would turn every 429 assertion into a 200 the tests never asked about, and
+ * `openAccounts.isOpen` answering true would make every upload path return
+ * `409` while the tests that care about 409 kept passing too.
+ */
+describe("the harness fixtures", () => {
+  test("openRateLimits allows, and gives back what it never charged", async () => {
+    expect(await openRateLimits.consume("k", 1, 60)).toMatchObject({
+      allowed: true,
+    });
+    // Refunding is a no-op rather than an error: handlers refund on their
+    // success paths, and a fixture that threw there would fail the suites
+    // that are about the success rather than about the counter.
+    expect(await openRateLimits.refund("k", 0)).toBeUndefined();
+  });
+
+  test("closedRateLimits refuses, and names a wait", async () => {
+    const result = await closedRateLimits.consume("k", 1, 60);
+
+    expect(result.allowed).toBe(false);
+    // A 429 with no `retry-after` is a refusal a caller cannot act on, and
+    // several suites assert the header rather than only the status.
+    expect(result.retryAfter).toBeGreaterThan(0);
+    expect(await closedRateLimits.refund("k", 0)).toBeUndefined();
+  });
+
+  test("openAccounts reports nothing closing", async () => {
+    // The marker every upload checks. `true` here would answer `409 account
+    // is being deleted` on paths no upload suite is testing for.
+    expect(await openAccounts.isOpen("user-a")).toBe(false);
+    expect(await openAccounts.open("user-a")).toBe("attempt");
+    expect(await openAccounts.close("attempt")).toBeUndefined();
   });
 });

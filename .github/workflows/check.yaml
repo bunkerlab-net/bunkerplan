@@ -171,32 +171,11 @@ jobs:
       # These variables are the opt-in. A backend whose variable is missing
       # SKIPS, so dropping one turns a conformance suite off silently - they
       # are set here precisely so that cannot happen unnoticed.
-      #
-      # `TEST_VALKEY_URL` is the exception, and it is set on the step below
-      # instead. In one shared process the Valkey suite hangs and the block
-      # fails at Bun's 5000ms deadline; in its own process it does not. Only
-      # that correlation is established - see README.md for the measurements
-      # and for what is still not explained.
       - name: Test
         run: bun run test:only
         env:
           TEST_DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
-          TEST_S3_ENDPOINT: http://127.0.0.1:9000
           TEST_S3_ACCESS_KEY_ID: minioadmin
+          TEST_S3_ENDPOINT: http://127.0.0.1:9000
           TEST_S3_SECRET_ACCESS_KEY: minioadmin
-
-      # The Valkey conformance suite, in the process it needs. Same assertions
-      # the run above would have made, once, with no retry - the only thing
-      # that changed is what else is in the process with it. It reports its own
-      # coverage figure, which is why `src/kv/valkey.ts` reads low in the run
-      # above and 100% here.
-      #
-      # `!cancelled()` because the split must not cost information: without it
-      # a single failure in the step above skips this one, and a pull request
-      # that used to report on every backend would report on all but Valkey.
-      # Still skipped when someone cancels the run.
-      - name: Test Valkey
-        if: ${{ !cancelled() }}
-        run: BUNKERPLAN_PREBUILT=1 bun test --isolate ./tests/drivers/kv-store.valkey.test.ts
-        env:
           TEST_VALKEY_URL: redis://127.0.0.1:6379

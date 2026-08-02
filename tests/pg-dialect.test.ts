@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { type SQL, sql } from "drizzle-orm";
 import { PgDialect, type PgTransactionConfig } from "drizzle-orm/pg-core";
+import type pg from "pg";
 import { type PgDb, pgDialect } from "../src/db/pg-shared.ts";
+import { probeOnce } from "../src/db/postgres.ts";
 import { DatabaseUnavailable } from "../src/db/unavailable.ts";
 
 /**
@@ -222,5 +224,221 @@ describe("a claim that runs out of time", () => {
     await expect(claim(lockFails(violation))).rejects.not.toBeInstanceOf(
       DatabaseUnavailable,
     );
+  });
+});
+
+/**
+ * The health probe's two abort windows, which need a pool this test controls.
+ *
+ * `probeOnce` races `pool.connect()` against the caller's signal, and the
+ * losing side still has to be tidied: a client that turns up after the caller
+ * walked away must be destroyed rather than parked, because the deadline that
+ * expired is shorter than the query timeout the connection is still under.
+ * Parking it hands the next request a connection with an answer still coming
+ * down it.
+ *
+ * Neither window is reachable by timing from outside. The second one below is
+ * the subtle half: `acquire` attaches its abort listener after calling
+ * `connect`, so a signal that aborts in between is never heard by the race -
+ * `connect` wins, and the check after it is the only thing left that notices.
+ */
+describe("the health probe's deadline", () => {
+  interface FakeClient {
+    released: Array<Error | undefined>;
+    queries: string[];
+  }
+
+  /**
+   * A pool handing back one client. `beforeResolve` runs between the promise
+   * being created and `connect` returning it, which is the seam the windows
+   * live in.
+   */
+  function fakePool(beforeResolve: () => void = () => {}): {
+    pool: pg.Pool;
+    client: FakeClient;
+  } {
+    const client: FakeClient = { released: [], queries: [] };
+    const handle = {
+      query: async (statement: string) => {
+        client.queries.push(statement);
+        return { rows: [] };
+      },
+      release: (broken?: Error) => {
+        client.released.push(broken);
+      },
+    };
+    const pool = {
+      connect: () => {
+        const pending = Promise.resolve(handle);
+        beforeResolve();
+        return pending;
+      },
+    };
+    return { pool: pool as unknown as pg.Pool, client };
+  }
+
+  /**
+   * The other side of the race, and the leak the whole arrangement exists to
+   * stop. `pool.connect` takes no signal, so an acquisition the caller stopped
+   * waiting for is not cancelled - the client still turns up, after nobody is
+   * left to use it. Parking that one returns a connection to the pool while
+   * whatever it was waiting on may still be coming down it; destroying it
+   * frees the slot at the abort instead.
+   */
+  test("destroys a client that turns up after the wait was abandoned", async () => {
+    const reason = new Error("probe deadline");
+    const controller = new AbortController();
+    const released: Array<Error | undefined> = [];
+    const { promise: pending, resolve } = Promise.withResolvers<unknown>();
+    const pool = { connect: () => pending } as unknown as pg.Pool;
+
+    const probing = probeOnce(pool, controller.signal);
+    controller.abort(reason);
+    await expect(probing).rejects.toThrow(reason);
+
+    // Nothing released yet: the pool has not handed anything over.
+    expect(released).toEqual([]);
+
+    // Now it does, long after the caller gave up.
+    resolve({
+      query: async () => ({ rows: [] }),
+      release: (broken?: Error) => {
+        released.push(broken);
+      },
+    });
+    // The tidying handler was attached to this promise before this line was
+    // reached, and handlers run in the order they were registered - so by the
+    // time this await resumes, it has already run. No clock involved.
+    await pending;
+
+    expect(released).toHaveLength(1);
+    expect(released[0]).toBeInstanceOf(Error);
+    expect(released[0]?.message).toContain("abandoned");
+  });
+
+  /**
+   * And the same acquisition failing instead of arriving. Nothing is waiting
+   * on that promise any more - the caller already has its rejection - so a
+   * rejection left unhandled here takes the process down over a database blip
+   * the request itself already survived. The empty handler beside the tidying
+   * one is what stops that, and it is invisible until it is missing.
+   */
+  test("swallows an acquisition that fails after the wait was abandoned", async () => {
+    const reason = new Error("probe deadline");
+    const controller = new AbortController();
+    const { promise: pending, reject } = Promise.withResolvers<never>();
+    const pool = { connect: () => pending } as unknown as pg.Pool;
+
+    const probing = probeOnce(pool, controller.signal);
+    controller.abort(reason);
+    await expect(probing).rejects.toThrow(reason);
+
+    reject(new Error("connection refused"));
+    // Registered after the handler under test, so this resuming means that
+    // one has already taken the rejection: the promise is handled, and no
+    // `unhandledrejection` can follow.
+    await expect(pending).rejects.toThrow("connection refused");
+
+    // The caller still has its own reason, and no client was ever released
+    // because none ever arrived.
+    await expect(probing).rejects.toThrow(reason);
+  });
+
+  test("asks its one question and parks the client when nothing aborts", async () => {
+    const { pool, client } = fakePool();
+
+    await probeOnce(pool);
+
+    expect(client.queries).toEqual(["select 1"]);
+    // Parked, not destroyed: `undefined` is what returns a healthy connection
+    // to the pool.
+    expect(client.released).toEqual([undefined]);
+  });
+
+  test("refuses a signal already aborted before it asks for a client", async () => {
+    const reason = new Error("probe deadline");
+    const { pool, client } = fakePool();
+
+    await expect(probeOnce(pool, AbortSignal.abort(reason))).rejects.toThrow(
+      reason,
+    );
+
+    // Never acquired, so there is nothing to tidy.
+    expect(client.queries).toEqual([]);
+    expect(client.released).toEqual([]);
+  });
+
+  /**
+   * The window `acquire` cannot see. The signal aborts after `connect` was
+   * called and before the listener was attached, so the abort has already been
+   * dispatched to nobody and the race resolves with a live client the caller
+   * no longer wants.
+   */
+  test("destroys a client that arrived after the caller gave up", async () => {
+    const reason = new Error("probe deadline");
+    const controller = new AbortController();
+    const { pool, client } = fakePool(() => controller.abort(reason));
+
+    await expect(probeOnce(pool, controller.signal)).rejects.toThrow(reason);
+
+    // The query never ran - the point is the deadline, not a slow server.
+    expect(client.queries).toEqual([]);
+    // Destroyed rather than parked. An argument here is what discards the
+    // connection instead of returning it to the pool.
+    expect(client.released).toHaveLength(1);
+    expect(client.released[0]).toBeInstanceOf(Error);
+    expect(client.released[0]?.message).toContain("abandoned");
+  });
+
+  /**
+   * A query that fails on its own, with no abort in sight, still destroys the
+   * connection: a statement that errored can leave the protocol mid-message,
+   * so the client is not fit to hand out again.
+   */
+  test("destroys the client when the question itself fails", async () => {
+    const failure = new Error("connection reset");
+    const { pool, client } = fakePool();
+    const broken = {
+      ...pool,
+      connect: async () => ({
+        query: async () => {
+          throw failure;
+        },
+        release: (cause?: Error) => {
+          client.released.push(cause);
+        },
+      }),
+    } as unknown as pg.Pool;
+
+    await expect(probeOnce(broken)).rejects.toThrow(failure);
+
+    expect(client.released).toEqual([failure]);
+  });
+
+  /**
+   * And when both happen, the caller's reason wins. Destroying the connection
+   * is what makes the in-flight query reject, so reporting the driver's socket
+   * error would answer a different question from the two abort paths above -
+   * for the same event.
+   */
+  test("reports the caller's reason when the abort is what broke the query", async () => {
+    const reason = new Error("probe deadline");
+    const controller = new AbortController();
+    const released: Array<Error | undefined> = [];
+    const pool = {
+      connect: async () => ({
+        query: async () => {
+          controller.abort(reason);
+          throw new Error("terminating connection");
+        },
+        release: (cause?: Error) => {
+          released.push(cause);
+        },
+      }),
+    } as unknown as pg.Pool;
+
+    await expect(probeOnce(pool, controller.signal)).rejects.toThrow(reason);
+
+    expect(released).toHaveLength(1);
   });
 });

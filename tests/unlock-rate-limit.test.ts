@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { unlockPlan } from "../src/client/api.ts";
+import { hashShareCode } from "../src/http/share-auth.ts";
 import { createUnlockRoute } from "../src/http/unlock.ts";
 import {
   refundUnlockAttempt,
@@ -7,8 +8,8 @@ import {
   type UnlockRateConfig,
 } from "../src/http/unlock-rate-limit.ts";
 import type { Logger } from "../src/log.ts";
-import type { RateLimitRepo } from "../src/services/types.ts";
-import { memoryPlans } from "./fakes.ts";
+import type { PlanRepo, RateLimitRepo } from "../src/services/types.ts";
+import { memoryPlans, storedPlan } from "./fakes.ts";
 
 const CONFIG = {
   clientIpHeader: "cf-connecting-ip",
@@ -432,5 +433,124 @@ describe("the message a throttled reader sees", () => {
     );
 
     expect(message).toBe("Too many attempts. Try again shortly.");
+  });
+});
+
+/**
+ * A refund that fails.
+ *
+ * The refund itself is covered through the real stack in app-routes.test.ts -
+ * a correct code gives its count back, a wrong code and an unknown plan keep
+ * theirs, and a route that threw refunds. What none of those reach is the
+ * refund failing, which is deliberately swallowed: the reader already has
+ * their cookie, and a lost refund leaves the budget one lower, erring towards
+ * refusing rather than towards letting a guesser through.
+ *
+ * Swallowed, but not silent. The log line below is the only way to find a
+ * budget that never recovers, and without these cases it runs for the first
+ * time in production.
+ */
+describe("the refund", () => {
+  const CODE = "let-me-in";
+
+  /** A plan whose stored hash is the code below, so the route answers 204. */
+  const shared = async (): Promise<PlanRepo> =>
+    memoryPlans([
+      storedPlan({
+        id: "abc",
+        userId: "user-a",
+        visibility: "private",
+        shareCodeHash: await hashShareCode(CODE),
+      }),
+    ]);
+
+  const redeem = (headers: Record<string, string> = {}) =>
+    new Request("https://plans.example.test/api/plans/abc/unlock", {
+      method: "POST",
+      headers: { [ROUTE_CONFIG.clientIpHeader]: "203.0.113.7", ...headers },
+      body: JSON.stringify({ code: CODE }),
+    });
+
+  /**
+   * The reader keeps their 204. A refund is bookkeeping the caller has no
+   * stake in, so failing it must not turn a correct code into an error.
+   */
+  test("a failing refund still answers the reader", async () => {
+    const { limits } = fakeLimits(true);
+    const deps = {
+      plans: await shared(),
+      limits: {
+        ...limits,
+        refund: async () => {
+          throw new Error("counter unreachable");
+        },
+      },
+      config: ROUTE_CONFIG,
+      logger,
+    };
+
+    const response = await createUnlockRoute()(deps, redeem(), "abc");
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("set-cookie")).toContain("abc");
+  });
+
+  /**
+   * And says so, naming the bucket and window. A budget that never recovers
+   * is otherwise only knowable as "redemptions from this address started
+   * failing" - the digest is what makes it findable, and it is a digest
+   * rather than the address for the same reason the counter keys on one.
+   */
+  test("a failing refund is logged with the bucket it could not credit", async () => {
+    const { limits, spent } = fakeLimits(true);
+    const deps = {
+      plans: await shared(),
+      limits: {
+        ...limits,
+        refund: async () => {
+          throw new Error("counter unreachable");
+        },
+      },
+      config: ROUTE_CONFIG,
+      logger,
+    };
+
+    await createUnlockRoute()(deps, redeem(), "abc");
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe("unlock reservation was not refunded");
+    expect(warnings[0]?.fields).toMatchObject({
+      bucket: spent[0] as string,
+      windowStart: WINDOW_START,
+    });
+    // The address never reaches the log, only its keyed digest.
+    expect(JSON.stringify(warnings[0]?.fields)).not.toContain("203.0.113.7");
+  });
+
+  test("a refund that fails after a throw does not mask it", async () => {
+    const failure = new Error("database is gone");
+    const deps = {
+      plans: {
+        ...(await shared()),
+        findAccess: async () => {
+          throw failure;
+        },
+      },
+      limits: {
+        ...fakeLimits(true).limits,
+        refund: async () => {
+          throw new Error("counter unreachable");
+        },
+      },
+      config: ROUTE_CONFIG,
+      logger,
+    };
+
+    // The caller's fault, not the bookkeeping one that happened on the way out.
+    await expect(createUnlockRoute()(deps, redeem(), "abc")).rejects.toThrow(
+      failure,
+    );
+
+    expect(warnings).toHaveLength(1);
   });
 });

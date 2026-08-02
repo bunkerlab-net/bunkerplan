@@ -9,3 +9,4 @@ frozenLockfile = false
 # Enables coverage reporting.
 # Default `false`. Use `--coverage` to override.
 coverage = true
+coverageThreshold = 0.9
