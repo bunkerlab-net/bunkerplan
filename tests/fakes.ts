@@ -317,11 +317,19 @@ export function memoryPlans(
       ).length;
       if (held >= maxPlans) return "quota";
       if (rows.has(row.id)) return "duplicate";
-      // `grants` cloned, as the seed path does: a row that kept the caller's
-      // array would let a later `grantByHandle` write into an object the test
-      // still holds, which is a fake editing its own input.
-      const stored = { ...storedPlan(), ...row, createdAt: new Date() };
-      rows.set(row.id, { ...stored, grants: [...stored.grants] });
+      /*
+       * Built from `row` and the two things a database supplies, not from
+       * `storedPlan()` with `row` laid over it. The spread filled any field
+       * the caller left out with this module's own default, so a handler that
+       * stopped passing `visibility` would still store `"private"` here and
+       * every assertion would agree - while the real insert wrote whatever
+       * the column defaults to, or refused the statement.
+       *
+       * `grants` is cloned rather than aliased: a row keeping the caller's
+       * array would let a later `grantByHandle` write into an object the test
+       * still holds, which is a fake editing its own input.
+       */
+      rows.set(row.id, { ...row, createdAt: new Date(), grants: [] });
       return "created";
     },
     /*
@@ -334,15 +342,22 @@ export function memoryPlans(
      * let a test depend on an ordering production does not promise. With the
      * id it is promised, on both sides, and matching it here is what keeps
      * that true of the fake as well.
+     *
+     * Compared with `<`, not `localeCompare`. Both engines order text by code
+     * unit under their default collation, which is what plan ids are compared
+     * by there. `localeCompare` is a different order and a locale-dependent
+     * one: some ICU builds fold case, so `Ab` against `aB` could disagree with
+     * the database and with this same fake on another machine.
      */
     listByUser: async (userId, limit): Promise<PlanRow[]> =>
       [...rows.values()]
         .filter((row) => row.userId === userId)
-        .sort(
-          (a, b) =>
-            b.createdAt.getTime() - a.createdAt.getTime() ||
-            b.id.localeCompare(a.id),
-        )
+        .sort((a, b) => {
+          const byTime = b.createdAt.getTime() - a.createdAt.getTime();
+          if (byTime !== 0) return byTime;
+          if (a.id === b.id) return 0;
+          return a.id < b.id ? 1 : -1;
+        })
         .slice(0, limit)
         .map((row) => ({
           id: row.id,

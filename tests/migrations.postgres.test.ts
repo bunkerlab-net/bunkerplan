@@ -151,35 +151,39 @@ describe.skipIf(skip)("0013 against markers left by an older sweep", () => {
         `insert into account_closing (user_id, started_at) values ('owner', 1234)`,
       );
     });
+    // `finally`, so a failed assertion closes the pool too. Left open, its
+    // clients keep the process alive past the suite and every later file pays
+    // for it - and the visible symptom is a hang somewhere else entirely.
+    try {
+      const { rows } = await pool.query<{
+        attempt_id: string;
+        user_id: string;
+        started_at: string;
+      }>(`select attempt_id, user_id, started_at from account_closing`);
+      expect(rows).toEqual([
+        { attempt_id: "legacy:owner", user_id: "owner", started_at: "1234" },
+      ]);
 
-    const { rows } = await pool.query<{
-      attempt_id: string;
-      user_id: string;
-      started_at: string;
-    }>(`select attempt_id, user_id, started_at from account_closing`);
-    expect(rows).toEqual([
-      { attempt_id: "legacy:owner", user_id: "owner", started_at: "1234" },
-    ]);
+      // A second attempt can be placed beside the carried one - the whole
+      // reason the key moved - and the old key is genuinely gone rather than
+      // still enforcing one row per account.
+      await pool.query(
+        `insert into account_closing (attempt_id, user_id, started_at)
+         values ('retry', 'owner', 5678)`,
+      );
+      const { rows: both } = await pool.query<{ v: string }>(
+        `select count(*) as v from account_closing where user_id = 'owner'`,
+      );
+      expect(Number(both[0]?.v)).toBe(2);
 
-    // A second attempt can be placed beside the carried one - the whole reason
-    // the key moved - and the old key is genuinely gone rather than still
-    // enforcing one row per account.
-    await pool.query(
-      `insert into account_closing (attempt_id, user_id, started_at)
-       values ('retry', 'owner', 5678)`,
-    );
-    const { rows: both } = await pool.query<{ v: string }>(
-      `select count(*) as v from account_closing where user_id = 'owner'`,
-    );
-    expect(Number(both[0]?.v)).toBe(2);
-
-    // And both still cascade, which is what collects a mark no failure lifted.
-    await pool.query(`delete from "user" where id = 'owner'`);
-    const { rows: left } = await pool.query<{ v: string }>(
-      `select count(*) as v from account_closing`,
-    );
-    await pool.end();
-
-    expect(Number(left[0]?.v)).toBe(0);
+      // And both still cascade, which collects a mark no failure lifted.
+      await pool.query(`delete from "user" where id = 'owner'`);
+      const { rows: left } = await pool.query<{ v: string }>(
+        `select count(*) as v from account_closing`,
+      );
+      expect(Number(left[0]?.v)).toBe(0);
+    } finally {
+      await pool.end();
+    }
   });
 });

@@ -12,6 +12,21 @@ import {
   isStatementCancelled,
 } from "./unavailable.ts";
 
+/**
+ * How long one claim waits for the advisory lock before giving up.
+ *
+ * Well under `STATEMENT_TIMEOUT_MS` in src/db/postgres.ts, and that gap is the
+ * point. Both deadlines can end this wait, but only this one says what ended
+ * it: `55P03` is contention with nothing written, which earns a 503 and a
+ * retry, where the statement timeout's `57014` could have landed anywhere -
+ * the `COMMIT` included - and stays a fault. The shorter deadline is what
+ * keeps the answerable outcome reachable.
+ *
+ * Here rather than beside the other Postgres deadlines because that module
+ * imports this one, and the reverse import would close a cycle.
+ */
+const LOCK_TIMEOUT_MS = 3_000;
+
 export const pgSchema = {
   ...authSchema,
   ...planSchema,
@@ -142,7 +157,11 @@ function pgClaim(db: PgDb): Dialect["claim"] {
           try {
             // Transaction-local: `set local` reverts with the transaction, so
             // the connection goes back to the pool with the ordinary deadline.
-            await tx.execute(sql`set local lock_timeout = '3s'`);
+            // Interpolated rather than bound - `set local` takes a literal,
+            // and a parameter placeholder is a syntax error here.
+            await tx.execute(
+              sql.raw(`set local lock_timeout = '${LOCK_TIMEOUT_MS}ms'`),
+            );
             await tx.execute(
               sql`select pg_advisory_xact_lock(${await lockKey(userId)})`,
             );

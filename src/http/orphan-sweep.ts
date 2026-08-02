@@ -18,6 +18,20 @@ import type { PlanStorage } from "../services/types.ts";
  *
  * Deliberately not an ordering: each caller decides whether the object goes
  * first or the row does, and documents why. This is only the sweep.
+ *
+ * Awaited on the request path rather than deferred to `waitUntil`, and that is
+ * a choice rather than an oversight. Awaiting is what makes the compensation
+ * unconditional: it is attempted on every runtime this ships to, and either it
+ * happened or the line below says it did not, before anything answers. A
+ * deferral would make that guarantee depend on a lifetime capability nothing
+ * here holds - no `ExecutionContext` is threaded anywhere, and reaching one
+ * means carrying a Workers-only handle from the fetch handler through the
+ * router into all three callers, plus a no-op for Node and Bun and for every
+ * test that drives a handler directly.
+ *
+ * The caller does wait for one object delete, on paths already answering 404
+ * or 502. That is the price, and it is the same price on every runtime, which
+ * is the property worth more here than the milliseconds.
  */
 export async function sweepOrphanedObject(
   storage: Pick<PlanStorage, "delete">,

@@ -77,6 +77,11 @@ describe("the sharing body", () => {
     ["a number", { visibility: 1 }],
     ["a nested object", { visibility: { visibility: "public" } }],
     ["a boolean", { visibility: true }],
+    // The two bodies that are `typeof "object"` without being a record. A
+    // reader digging a field out has to answer rather than throw on both:
+    // `null.visibility` is a TypeError, and an array's is simply undefined.
+    ["a null body", null],
+    ["an array body", []],
   ])("refuses %s", (_, raw) => {
     expect(parseVisibility(raw, sharing)).toEqual({
       ok: false,

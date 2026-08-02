@@ -44,6 +44,14 @@ const config = wrangler as WranglerConfig;
  * The trailing dot goes first: a fully qualified `localhost.` is the same host
  * and `new URL()` keeps the dot, where it normalises the IPv4 forms for us -
  * `0x7f000001` and `2130706433` both arrive as `127.0.0.1` already.
+ *
+ * `0.0.0.0` and `::` are here too, though neither is loopback in the strict
+ * sense - they are the unspecified addresses, which name every interface
+ * rather than one. As a `PUBLIC_BASE_URL` they are the same mistake with the
+ * same consequence: not a name a browser can reach the deployment by, so the
+ * WebAuthn relying-party origin would never match and every ceremony would
+ * fail. What this guards is "did a development value ship", and those two are
+ * development values.
  */
 function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/\.$/, "").replace(/^\[|\]$/g, "");
@@ -51,6 +59,8 @@ function isLoopback(hostname: string): boolean {
     host === "localhost" ||
     host.endsWith(".localhost") ||
     host === "::1" ||
+    host === "::" ||
+    host === "0.0.0.0" ||
     /^127\./.test(host) ||
     /^::ffff:7f/i.test(host)
   );
@@ -77,6 +87,9 @@ describe("the deployed wrangler configuration", () => {
     "[::1]",
     "[::ffff:127.0.0.1]",
     "[::ffff:127.0.0.2]",
+    // Unspecified rather than loopback, and caught for the same reason.
+    "0.0.0.0",
+    "[::]",
   ])("%s is recognised as this machine", (host) => {
     // The predicate above is only worth as much as its coverage, and several
     // of these reach it already rewritten by `new URL()`.
@@ -126,9 +139,15 @@ describe("the deployed wrangler configuration", () => {
    * nothing looks for.
    */
   test("binds them under the names the runtime reaches for", () => {
-    expect(config.d1_databases.map((entry) => entry.binding)).toEqual(["DB"]);
-    expect(config.kv_namespaces.map((entry) => entry.binding)).toEqual(["KV"]);
-    expect(config.r2_buckets.map((entry) => entry.binding)).toEqual(["BUCKET"]);
+    // `?? []` for the same reason the id test above uses it: a missing block
+    // should fail on the name comparison, which names what is absent, rather
+    // than on a `TypeError` reading `.map` of undefined.
+    const names = (entries: { binding: string }[] | undefined) =>
+      (entries ?? []).map((entry) => entry.binding);
+
+    expect(names(config.d1_databases)).toEqual(["DB"]);
+    expect(names(config.kv_namespaces)).toEqual(["KV"]);
+    expect(names(config.r2_buckets)).toEqual(["BUCKET"]);
   });
 
   /**

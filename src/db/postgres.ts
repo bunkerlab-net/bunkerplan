@@ -52,6 +52,19 @@ const CONNECTION_TIMEOUT_MS = 5_000;
 const STATEMENT_TIMEOUT_MS = 15_000;
 /** Past `statement_timeout`, so the deadline with defined semantics wins. */
 const QUERY_TIMEOUT_MS = STATEMENT_TIMEOUT_MS + 1_000;
+/*
+ * The claim's own `lock_timeout` belongs in this list and cannot live here.
+ * It is `LOCK_TIMEOUT_MS` in src/db/pg-shared.ts, set on the transaction that
+ * takes the advisory lock, and it is deliberately well under
+ * `STATEMENT_TIMEOUT_MS`: both deadlines can end the same wait, but only the
+ * shorter one says what ended it. `55P03` means contention and nothing
+ * written - a 503 and a retry - where `57014` could have landed anywhere and
+ * stays a fault.
+ *
+ * Declaring it beside these would make src/db/pg-shared.ts import this module,
+ * which already imports it: a cycle, and one `bunx madge --circular` fails the
+ * build over. It sits with the statement that sets it instead.
+ */
 
 const ABANDONED = "health probe abandoned; connection discarded";
 
