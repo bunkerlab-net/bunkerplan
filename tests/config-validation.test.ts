@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { loadConfig } from "../src/config.ts";
+import { loadConfig, MIN_RATE_WINDOW_SEC } from "../src/config.ts";
+import { WORKERS_MAX_PLANS_PER_USER } from "../src/limits.ts";
+import {
+  CLIENT_IP_HEADER,
+  SELF_HOSTED as DRIVERS,
+  REQUIRED as MINIMUM,
+} from "./config-env.ts";
 
 /**
  * The refusals `loadConfig` makes, and the defaults it falls back to.
@@ -16,21 +22,13 @@ import { loadConfig } from "../src/config.ts";
  * is pinned to its own message.
  */
 
-const REQUIRED = {
-  BETTER_AUTH_SECRET: "x".repeat(32),
-  PUBLIC_BASE_URL: "https://plans.example.com",
-  CLIENT_IP_HEADER: "x-forwarded-for",
-};
-
-const SELF_HOSTED = {
-  ...REQUIRED,
-  STORAGE_DRIVER: "s3",
-  S3_BUCKET: "plans",
-  DB_DRIVER: "postgres",
-  DATABASE_URL: "postgres://localhost/plans",
-  KV_DRIVER: "valkey",
-  VALKEY_URL: "redis://localhost:6379",
-};
+/*
+ * The header added to both: off Workers the loader refuses to guess one, and
+ * without it every message below would carry a second complaint. The refusal
+ * itself belongs to tests/config.test.ts - see tests/config-env.ts.
+ */
+const REQUIRED = { ...MINIMUM, ...CLIENT_IP_HEADER };
+const SELF_HOSTED = { ...DRIVERS, ...CLIENT_IP_HEADER };
 
 /** The message `loadConfig` threw, or a failure saying it did not throw. */
 function refusal(env: Record<string, unknown>, workers = false): string {
@@ -111,11 +109,81 @@ describe("the drivers and their companions", () => {
     expect(config.kvDriver).toBe("kv");
   });
 
+  /**
+   * On Workers a driver name is not an implementation choice: the platform
+   * three are bindings, and nothing else is in the bundle at all. Accepting
+   * `DB_DRIVER=postgres` there built a Worker that resolved a driver it could
+   * not import, which surfaced as a runtime failure on the first request
+   * rather than at boot.
+   */
+  test.each([
+    ["DB_DRIVER", "postgres", "d1"],
+    ["KV_DRIVER", "valkey", "kv"],
+    ["STORAGE_DRIVER", "s3", "r2"],
+  ])("%s=%s is refused on Workers", (key, given, only) => {
+    const message = refusal({ ...REQUIRED, [key]: given }, true);
+
+    expect(message).toContain(
+      `${key} must be "${only}" on Cloudflare Workers, got "${given}"`,
+    );
+  });
+
+  // Paired in the table rather than looked up inside the body: an index into
+  // an object literal is `string | undefined` under `noUncheckedIndexedAccess`,
+  // so a typo in the key would set the variable to `undefined` and the case
+  // would quietly assert that omitting the setting is accepted - which it is,
+  // for a different reason.
+  test.each([
+    ["DB_DRIVER", "d1"],
+    ["KV_DRIVER", "kv"],
+    ["STORAGE_DRIVER", "r2"],
+  ])(
+    "naming the platform's own %s explicitly is still accepted",
+    (key, only) => {
+      expect(() =>
+        loadConfig({ ...REQUIRED, [key]: only } as never, { workers: true }),
+      ).not.toThrow();
+    },
+  );
+
+  /**
+   * The mirror image, and the reason it belongs here rather than in
+   * src/runtime/node.ts: that file reaches the drivers one at a time and
+   * throws on the first it cannot dispatch to, so an operator who named all
+   * three platform bindings would fix one, restart, and meet the next. This
+   * file exists to hand back every problem at once.
+   */
+  test("off Workers all three platform bindings are refused together", () => {
+    const message = refusal({
+      ...REQUIRED,
+      DB_DRIVER: "d1",
+      KV_DRIVER: "kv",
+      STORAGE_DRIVER: "r2",
+    });
+
+    expect(message).toContain(
+      "STORAGE_DRIVER=r2 is only available on Cloudflare Workers; use s3 " +
+        "when self-hosting",
+    );
+    expect(message).toContain(
+      "DB_DRIVER=d1 is only available on Cloudflare Workers; use sqlite or " +
+        "postgres when self-hosting",
+    );
+    expect(message).toContain(
+      "KV_DRIVER=kv is only available on Cloudflare Workers; use valkey " +
+        "when self-hosting",
+    );
+  });
+
   test("an unknown driver is refused and lists what is allowed", () => {
     const message = refusal({ ...SELF_HOSTED, STORAGE_DRIVER: "gcs" });
 
-    expect(message).toContain("STORAGE_DRIVER must be one of: r2, s3");
-    expect(message).toContain('got "gcs"');
+    // The whole clause including its end, not a prefix of it. `r2` is
+    // deliberately absent off Workers - it is not a choice there, and offering
+    // it would send an operator to a driver that refuses next - so a message
+    // reading "one of: s3, r2" has to fail, and it would satisfy a `toContain`
+    // that stopped at "s3".
+    expect(message).toContain('STORAGE_DRIVER must be one of: s3, got "gcs"');
   });
 
   test.each([
@@ -130,9 +198,11 @@ describe("the drivers and their companions", () => {
   });
 
   test("a bucket is not required for r2, which names its own binding", () => {
-    const { S3_BUCKET, ...rest } = SELF_HOSTED;
-    const config = loadConfig({ ...rest, STORAGE_DRIVER: "r2" } as never, {});
+    // On Workers, because that is the only runtime `r2` is accepted on now -
+    // off it the driver itself is refused before a bucket could be missed.
+    const config = loadConfig(REQUIRED as never, { workers: true });
 
+    expect(config.storageDriver).toBe("r2");
     expect(config.s3Bucket).toBeUndefined();
   });
 
@@ -264,31 +334,75 @@ describe("integer settings", () => {
     ).toBe(expected);
   });
 
-  test("a rate window below the floor is raised rather than refused", () => {
-    // Unlike the others: a one-second window is a legal number that would make
-    // the limiter useless, so it is clamped.
-    const config = loadConfig(
-      { ...SELF_HOSTED, UPLOAD_RATE_WINDOW_SEC: "1" } as never,
-      {},
+  test("a rate window below the floor is refused, not silently raised", () => {
+    // A one-second window is a legal number that would make the limiter
+    // useless. Refusing says so at boot; clamping left the deployment running
+    // a limit the operator did not configure and could not see.
+    //
+    // The floor comes off the constant so moving it cannot leave this
+    // asserting a bound the loader no longer enforces - the message would
+    // still match its own shape, which is exactly how that drift hides.
+    expect(refusal({ ...SELF_HOSTED, UPLOAD_RATE_WINDOW_SEC: "1" })).toContain(
+      `UPLOAD_RATE_WINDOW_SEC must be an integer >= ${MIN_RATE_WINDOW_SEC}, ` +
+        'got "1"',
     );
-
-    expect(config.uploadRateWindowSec).toBeGreaterThan(1);
   });
 
-  test("the unlock window is deliberately not clamped", () => {
+  /**
+   * The one ceiling that depends on the runtime. Deleting an account sweeps
+   * its objects one at a time inside one invocation, and on Workers that
+   * invocation has a subrequest budget - so a quota above what the sweep can
+   * finish is refused at boot rather than discovered by an account that
+   * cannot be deleted. Self-hosted there is no budget and no ceiling.
+   */
+  test("the plan quota is capped on Workers", () => {
+    // Off the constant, not the number. Hardcoding 400 here would let the
+    // ceiling move in src/limits.ts while this went on asserting the old one -
+    // and it would still pass, because the message it looks for would simply
+    // stop appearing and `refusal` would throw about something else.
+    const over = String(WORKERS_MAX_PLANS_PER_USER + 1);
+
+    expect(refusal({ ...REQUIRED, MAX_PLANS_PER_USER: over }, true)).toContain(
+      `MAX_PLANS_PER_USER must be an integer between 1 and ` +
+        `${WORKERS_MAX_PLANS_PER_USER}, got "${over}"`,
+    );
+  });
+
+  test("and the ceiling itself is accepted, not refused", () => {
+    // Inclusive, which the message above states as a range but does not
+    // prove: an off-by-one in `int`'s comparison would refuse exactly the
+    // quota `WORKERS_MAX_PLANS_PER_USER` is named for.
+    expect(
+      loadConfig(
+        {
+          ...REQUIRED,
+          MAX_PLANS_PER_USER: String(WORKERS_MAX_PLANS_PER_USER),
+        } as never,
+        { workers: true },
+      ).maxPlansPerUser,
+    ).toBe(WORKERS_MAX_PLANS_PER_USER);
+  });
+
+  test("and uncapped off Workers, where nothing counts the calls", () => {
+    const far = WORKERS_MAX_PLANS_PER_USER * 10;
+
+    expect(
+      loadConfig(
+        { ...SELF_HOSTED, MAX_PLANS_PER_USER: String(far) } as never,
+        {},
+      ).maxPlansPerUser,
+    ).toBe(far);
+  });
+
+  test("the unlock window has no such floor", () => {
     const config = loadConfig(
-      {
-        ...SELF_HOSTED,
-        UPLOAD_RATE_WINDOW_SEC: "1",
-        UNLOCK_RATE_WINDOW_SEC: "1",
-      } as never,
+      { ...SELF_HOSTED, UNLOCK_RATE_WINDOW_SEC: "1" } as never,
       {},
     );
 
     // The floor exists because Workers KV rejects an `expirationTtl` under
     // 60s, and the unlock counter is a database row with no TTL. A shorter
     // window is a weaker limit, which is the operator's call to make.
-    expect(config.uploadRateWindowSec).toBe(60);
     expect(config.unlockRateWindowSec).toBe(1);
   });
 });

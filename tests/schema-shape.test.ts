@@ -1,15 +1,27 @@
 import { describe, expect, test } from "bun:test";
-import { getTableName, is, SQL, type Table } from "drizzle-orm";
+import {
+  createTableRelationsHelpers,
+  getTableName,
+  is,
+  type Relation,
+  Relations,
+  SQL,
+  type Table,
+} from "drizzle-orm";
 import {
   PgDialect,
+  PgTable,
   getTableConfig as pgTableConfig,
 } from "drizzle-orm/pg-core";
 import {
   SQLiteSyncDialect,
+  SQLiteTable,
   getTableConfig as sqliteTableConfig,
 } from "drizzle-orm/sqlite-core";
 import * as pgAccountClosing from "../src/db/schema/account-closing.pg.ts";
 import * as sqliteAccountClosing from "../src/db/schema/account-closing.sqlite.ts";
+import * as pgAuth from "../src/db/schema/auth.pg.ts";
+import * as sqliteAuth from "../src/db/schema/auth.sqlite.ts";
 import * as pgPlan from "../src/db/schema/plan.pg.ts";
 import * as sqlitePlan from "../src/db/schema/plan.sqlite.ts";
 import * as pgRateLimit from "../src/db/schema/rate-limit.pg.ts";
@@ -479,6 +491,267 @@ describe("the plan table", () => {
         unique: false,
         columns: ["user_id"],
       });
+    },
+  );
+});
+
+describe("the account-closing table", () => {
+  test.each([
+    ["pg", pgAccountClosing.accountClosing],
+    ["sqlite", sqliteAccountClosing.accountClosing],
+  ] as const)(
+    "%s keys a mark by the attempt, not the account",
+    (dialect, table) => {
+      const shape = shapeOf(dialect, table);
+      /*
+       * The whole point of the table's shape. Keyed by `user_id`, a second
+       * deletion of one account could not place a mark of its own, and the
+       * first of the two to fail would lift the only one there - ending the
+       * other's protection while it was still sweeping.
+       */
+      expect(shape.primaryKey).toEqual(["attempt_id"]);
+      // And the account is what every read asks about, so it is indexed
+      // rather than scanned: `isOpen` runs on the upload path.
+      expect(shape.indexes).toContainEqual({
+        unique: false,
+        columns: ["user_id"],
+      });
+    },
+  );
+});
+
+/**
+ * The relational metadata in the two generated auth schemas.
+ *
+ * `src/db/schema/auth.pg.ts` and `auth.sqlite.ts` are written by
+ * `bun run auth:generate:*` rather than by hand, and each declares its
+ * relations through a callback drizzle only invokes when something builds the
+ * relational config. Nothing in this app does - Better Auth's adapter writes
+ * its own joins - so the callbacks are the one part of those files that has
+ * never run anywhere.
+ *
+ * Worth pinning for the same reason as everything above it: the two files must
+ * agree. A regeneration against a drifted config that dropped `passkey` from
+ * one side and not the other is a difference between two deployments, and it
+ * would be invisible until someone reached for a relational query. Asserting
+ * the shape rather than editing the files, because the generator owns them.
+ */
+describe("the generated auth relations", () => {
+  /** Invokes the callback drizzle defers, which is the point of the file. */
+  const relationsOf = (value: Relations): Record<string, Relation> =>
+    value.config(createTableRelationsHelpers(value.table));
+
+  const declared = (
+    module: Record<string, unknown>,
+  ): Record<string, string[]> =>
+    Object.fromEntries(
+      Object.entries(module)
+        .filter((entry): entry is [string, Relations] =>
+          is(entry[1], Relations),
+        )
+        .map(([name, value]) => [name, Object.keys(relationsOf(value)).sort()]),
+    );
+
+  test("both dialects declare the same relations on the same tables", () => {
+    const pg = declared(pgAuth);
+    const sqlite = declared(sqliteAuth);
+
+    // Non-empty first: two modules that both stopped declaring anything would
+    // otherwise agree perfectly and say nothing.
+    expect(Object.keys(pg).length).toBeGreaterThan(0);
+    expect(sqlite).toEqual(pg);
+  });
+
+  test.each([
+    ["pg", pgAuth],
+    ["sqlite", sqliteAuth],
+  ] as const)(
+    "%s points every relation at a real table",
+    (_dialect, module) => {
+      for (const value of Object.values(module)) {
+        if (!is(value, Relations)) continue;
+        for (const [field, relation] of Object.entries(relationsOf(value))) {
+          // A relation naming a table the schema does not have is a generator
+          // run against a config that no longer matches this app.
+          expect(getTableName(relation.referencedTable)).toBeTruthy();
+          expect(field).not.toBe("");
+        }
+      }
+    },
+  );
+
+  /**
+   * The account tables hang off `user`, which is what every cascade in this
+   * file above depends on being true in the schema as well as in the database.
+   */
+  test.each([
+    ["pg", pgAuth],
+    ["sqlite", sqliteAuth],
+  ] as const)(
+    "%s hangs the per-account tables off user",
+    (_dialect, module) => {
+      for (const name of ["sessionRelations", "accountRelations"] as const) {
+        const value = module[name];
+        expect(is(value, Relations)).toBe(true);
+        if (!is(value, Relations)) continue;
+
+        // Named rather than asserted non-null: a relation that stopped being
+        // declared should read as "missing", not as a crash on the line after.
+        const toUser = relationsOf(value)["user"];
+        expect(toUser, `${name} declares a user relation`).toBeDefined();
+        if (toUser === undefined) continue;
+        expect(getTableName(toUser.referencedTable)).toBe("user");
+      }
+    },
+  );
+});
+
+/**
+ * `updated_at`, which the generated schemas keep current rather than the
+ * database doing it.
+ *
+ * Every one of these columns carries an `$onUpdate` that drizzle calls while
+ * building an update, so the stamp is the application's job on both engines -
+ * neither schema declares an `ON UPDATE` trigger, and SQLite has no such thing
+ * to declare. A regeneration that dropped one would freeze that table's
+ * `updated_at` at whatever the insert wrote, silently: nothing reads it in a
+ * hot path, so the first symptom is a session-expiry or audit question nobody
+ * can answer months later.
+ *
+ * Asserted through the column rather than through a write, because the
+ * callback is what the two dialects have to agree on and only one of them has
+ * a server to write to.
+ */
+describe("the updated_at stamp", () => {
+  /**
+   * Every stamping column in one dialect, as `table.column` plus the callback
+   * itself. Narrowed with each dialect's own table class rather than the
+   * shared one, because `getTableConfig` is dialect-specific and a cast to
+   * get past that would be asserting exactly the thing being checked.
+   */
+  function pgStamps(): Array<[string, () => unknown]> {
+    const found: Array<[string, () => unknown]> = [];
+    for (const value of Object.values(pgAuth)) {
+      if (!is(value, PgTable)) continue;
+      for (const column of pgTableConfig(value).columns) {
+        const onUpdate = column.onUpdateFn;
+        if (onUpdate === undefined) continue;
+        found.push([`${getTableName(value)}.${column.name}`, onUpdate]);
+      }
+    }
+    return found.sort(([a], [b]) => a.localeCompare(b));
+  }
+
+  function sqliteStamps(): Array<[string, () => unknown]> {
+    const found: Array<[string, () => unknown]> = [];
+    for (const value of Object.values(sqliteAuth)) {
+      if (!is(value, SQLiteTable)) continue;
+      for (const column of sqliteTableConfig(value).columns) {
+        const onUpdate = column.onUpdateFn;
+        if (onUpdate === undefined) continue;
+        found.push([`${getTableName(value)}.${column.name}`, onUpdate]);
+      }
+    }
+    return found.sort(([a], [b]) => a.localeCompare(b));
+  }
+
+  // The four Better Auth keeps current. Named rather than counted, so a
+  // regeneration that moved the stamp to another table reads as a difference
+  // here instead of as the same total.
+  const EXPECTED = [
+    "account.updated_at",
+    "session.updated_at",
+    "user.updated_at",
+    "verification.updated_at",
+  ];
+
+  test.each([
+    ["pg", pgStamps],
+    ["sqlite", sqliteStamps],
+  ] as const)("%s stamps exactly the tables that carry one", (_d, stamps) => {
+    expect(stamps().map(([name]) => name)).toEqual(EXPECTED);
+  });
+
+  test.each([
+    ["pg", pgStamps],
+    ["sqlite", sqliteStamps],
+  ] as const)("%s stamps with the time of the update", (_d, stamps) => {
+    const before = Date.now();
+    const found = stamps();
+
+    // Non-vacuous: a schema that stopped declaring any would pass the loop.
+    expect(found).toHaveLength(EXPECTED.length);
+    for (const [name, onUpdate] of found) {
+      const stampedAt = onUpdate();
+      // A `Date` on both engines: the SQLite column stores epoch millis and
+      // the Postgres one a timestamp, and the conversion is the driver's.
+      expect(stampedAt, name).toBeInstanceOf(Date);
+      if (!(stampedAt instanceof Date)) continue;
+      expect(stampedAt.getTime()).toBeGreaterThanOrEqual(before);
+    }
+  });
+});
+
+/**
+ * The generated auth tables' cascades.
+ *
+ * The note at the top of this file says every table keyed by a user id
+ * cascades from `user`, and the suites above check that for the four tables
+ * this app wrote. The other four come out of `bun run auth:generate:*`, are
+ * never edited by hand, and carry the same requirement for the same reason:
+ * nothing prunes them, so a missing cascade leaves an account's sessions,
+ * credentials and API keys behind after the account is gone. `passkey` is the
+ * one that matters most - a row there is a credential.
+ *
+ * Generated does not mean exempt. The generator reads a config in
+ * `src/db/gen/`, and a change there - or a Better Auth release that revises
+ * its schema - lands here with nothing else failing.
+ */
+describe("the generated auth tables", () => {
+  /*
+   * The owning column, per table. `apikey` names it `reference_id` rather
+   * than `user_id` - the plugin's own column name - and spelling that out is
+   * the point: a table whose owner column got renamed by a regeneration would
+   * otherwise read as a table with no cascade at all.
+   */
+  const CASCADING = [
+    ["session", "user_id", pgAuth.session, sqliteAuth.session],
+    ["account", "user_id", pgAuth.account, sqliteAuth.account],
+    ["passkey", "user_id", pgAuth.passkey, sqliteAuth.passkey],
+    ["apikey", "reference_id", pgAuth.apikey, sqliteAuth.apikey],
+  ] as const;
+
+  test.each(CASCADING)(
+    "%s cascades from user on both dialects",
+    (_name, column, pgTable, sqliteTable) => {
+      for (const [dialect, table] of [
+        ["pg", pgTable],
+        ["sqlite", sqliteTable],
+      ] as const) {
+        expect(shapeOf(dialect, table).foreignKeys).toContainEqual({
+          columns: [column],
+          references: ["user.id"],
+          onDelete: "cascade",
+          // Ids are never rewritten, so there is nothing to follow on update -
+          // and a table that started cascading updates would be a schema this
+          // app did not ask for.
+          onUpdate: "no action",
+        });
+      }
+    },
+  );
+
+  /**
+   * And the two dialects declare the same set, not merely each a correct one.
+   * A key present on Postgres and absent on SQLite is a rule enforced on one
+   * deployment and not the other, which is what this whole file is for.
+   */
+  test.each(CASCADING)(
+    "%s declares identical keys on both dialects",
+    (_name, _column, pgTable, sqliteTable) => {
+      expect(shapeOf("sqlite", sqliteTable).foreignKeys).toEqual(
+        shapeOf("pg", pgTable).foreignKeys,
+      );
     },
   );
 });

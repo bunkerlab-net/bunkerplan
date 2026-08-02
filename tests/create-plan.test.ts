@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { pino } from "pino";
-import type { AppAuth } from "../src/auth/instance.ts";
 import type { Config } from "../src/config.ts";
+import { DatabaseUnavailable } from "../src/db/unavailable.ts";
 import { type CreatePlanDeps, createPlan } from "../src/http/create-plan.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
+import { at, fakeAuth, recordingLogger, silentLogger } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /**
@@ -28,18 +28,6 @@ const CONFIG = {
   uploadRateMax: 100,
   uploadRateWindowSec: 60,
 } as unknown as Config;
-
-/** Silent: these tests assert on responses, not on output. */
-const logger = pino({ level: "silent" });
-
-function fakeAuth(): AppAuth {
-  return {
-    api: {
-      verifyApiKey: async () => ({ valid: true, key: { referenceId: OWNER } }),
-      getSession: async () => null,
-    },
-  } as unknown as AppAuth;
-}
 
 function deps(over: Partial<PlanRepo> = {}): {
   deps: CreatePlanDeps;
@@ -66,10 +54,14 @@ function deps(over: Partial<PlanRepo> = {}): {
   };
   return {
     deps: {
-      auth: fakeAuth(),
+      auth: fakeAuth({ keyUser: OWNER }).auth,
       config: CONFIG,
       plans,
-      accountClosing: { open: async () => {}, isOpen: async () => false },
+      accountClosing: {
+        open: async () => "attempt",
+        close: async () => {},
+        isOpen: async () => false,
+      },
       uploadRateLimits: {
         consume: async () => ({
           allowed: true,
@@ -79,7 +71,7 @@ function deps(over: Partial<PlanRepo> = {}): {
         refund: async () => {},
       },
       storage,
-      logger,
+      logger: silentLogger,
     },
     stored,
   };
@@ -210,5 +202,53 @@ describe("createPlan when the upload budget is spent", () => {
     // row written for a refused upload would be a plan with no document.
     expect(inserted).toEqual([]);
     expect(request.bodyUsed).toBe(false);
+  });
+});
+
+describe("createPlan when the claim does not answer", () => {
+  /**
+   * Claiming an id serialises per account on Postgres, and waiting for that
+   * advisory lock is a statement with a deadline. Reaching it rolls the
+   * transaction back, so nothing was claimed and nothing was written - the
+   * deployment was busy, the request was fine, and the caller can simply ask
+   * again. A 500 would say the opposite and invite a bug report.
+   */
+  test("answers 503 with a retry, having stored nothing", async () => {
+    const { deps: d, stored } = deps({
+      insert: async () => {
+        throw new DatabaseUnavailable("claiming a plan id");
+      },
+    });
+    const { logger, lines } = recordingLogger();
+    d.logger = logger;
+
+    const response = await createPlan(d, upload("visibility=private"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("1");
+    expect(stored).toEqual([]);
+
+    // A 503 is the deployment saying it is struggling, so it has to leave a
+    // trace naming the account it happened to - a status code alone tells an
+    // operator nothing about how often, or to whom.
+    const warnings = at(lines, "warn");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe("plan claim timed out");
+    expect(warnings[0]?.fields).toMatchObject({ userId: OWNER });
+  });
+
+  test("any other failure is still a failure", async () => {
+    const { deps: d } = deps({
+      insert: async () => {
+        throw new Error('relation "plan" does not exist');
+      },
+    });
+
+    // Only the deadline is an answer. A schema that is wrong, a column that
+    // is missing - those are faults, and turning them into a 503 would tell
+    // every caller to retry a request that can never work.
+    await expect(createPlan(d, upload(""))).rejects.toThrow(
+      /relation "plan" does not exist/,
+    );
   });
 });

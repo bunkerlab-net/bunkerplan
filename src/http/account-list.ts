@@ -1,3 +1,4 @@
+import { MAX_GRANTS_PER_REQUEST } from "../limits.ts";
 import type { Logger } from "../log.ts";
 import type { GrantOutcome, PlanRepo } from "../services/types.ts";
 
@@ -16,24 +17,15 @@ import type { GrantOutcome, PlanRepo } from "../services/types.ts";
  * accepts the same comma-separated string so the two read alike. A JSON
  * caller may send an array instead; entries in it are split too, so
  * `["a,b", "c"]` and `"a, b, c"` mean the same thing.
- */
-
-/**
- * How many accounts one request may name.
  *
- * The work is one statement per account, so this is what stops a single
- * authenticated request from turning into an unbounded number of them. Fifty
- * is far above what anyone shares a plan with by hand and far below anything
- * that costs the database noticeably.
+ * The ceiling on the list, `MAX_GRANTS_PER_REQUEST`, and the body bound
+ * derived from it live in src/limits.ts, with the schemas and the published
+ * document that quote them. What that number is for is here: the work is one
+ * statement per account, so it is what stops a single authenticated request
+ * from turning into an unbounded number of them. Fifty is far above what
+ * anyone shares a plan with by hand and far below anything that costs the
+ * database noticeably.
  */
-export const MAX_GRANTS_PER_REQUEST = 50;
-
-/**
- * Room for the ceiling above at a generous identifier length, plus the JSON
- * wrapper. Derived, so raising the count cannot leave the body bound refusing
- * a list this module would otherwise accept.
- */
-export const MAX_ACCOUNT_LIST_BYTES = MAX_GRANTS_PER_REQUEST * 66 + 64;
 
 export type AccountList =
   | { accounts: string[] }

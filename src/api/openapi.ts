@@ -19,11 +19,13 @@
  */
 import type { ZodType } from "zod";
 import { type Config, MIN_SHARE_CODE_LENGTH } from "../config.ts";
-import { MAX_GRANTS_PER_REQUEST } from "../http/account-list.ts";
-import { MAX_PLAN_LABEL_LENGTH } from "../http/plan-label.ts";
-import { MAX_LABEL_BODY_BYTES } from "../http/relabel-plan.ts";
 import { SHARE_CODE_ALPHABET_LENGTH } from "../ids.ts";
-import { PLAN_PAGE_SIZE } from "../services/types.ts";
+import {
+  MAX_GRANTS_PER_REQUEST,
+  MAX_LABEL_BODY_BYTES,
+  MAX_PLAN_LABEL_LENGTH,
+  PLAN_PAGE_SIZE,
+} from "../limits.ts";
 import {
   componentSchemas,
   ErrorBody,
@@ -222,6 +224,27 @@ const LOCATION_HEADER = {
   },
 };
 
+/**
+ * The upload 503, its own constant for the same reason `UNLOCK_RATE_LIMITED`
+ * is: the operation is one literal, and the function-size lint counts it.
+ */
+const CLAIM_UNAVAILABLE = {
+  ...json(
+    ErrorBody,
+    "The database did not answer in time. Claiming an id serialises per " +
+      "account and the wait for that has a deadline, so this is the " +
+      "deployment being busy rather than the request being wrong. Nothing " +
+      "was stored - no row was claimed and no object was written - so " +
+      "repeating the request is safe.",
+  ),
+  headers: {
+    "retry-after": {
+      description: "Seconds to wait before repeating the request.",
+      schema: { type: "integer", minimum: 0 },
+    },
+  },
+};
+
 /** `tooLarge` and the code format differ per deployment. */
 function createPlanOperation(
   tooLarge: string,
@@ -273,6 +296,7 @@ function createPlanOperation(
         502: STORAGE_DOWN,
       }),
       "429": RATE_LIMITED,
+      "503": CLAIM_UNAVAILABLE,
     },
   };
 }
@@ -388,6 +412,37 @@ const unlockDescription = (codeFormat: string): string =>
   "rather than the plan, because the plan id is in the share link and a " +
   "per-plan bucket would let anyone holding it lock the other readers out.";
 
+/**
+ * The unlock 429, its own constant so `unlockPlanOperation` stays within the
+ * function-size lint: the operation is one literal, and this is its most
+ * self-contained branch.
+ */
+const UNLOCK_RATE_LIMITED = {
+  ...json(
+    ErrorBody,
+    "Too many redemptions from this address. `retry-after` says for " +
+      "how long. The bucket is the client address, so one address " +
+      "cannot spend another address's allowance - but callers sharing " +
+      "an address, behind one office NAT or mobile gateway, share the " +
+      "allowance too.\n\n" +
+      "One deployment fault answers with this status and does not " +
+      "refill: when the proxy in front is not sending the header the " +
+      "server was configured to trust, there is no address to bucket by " +
+      "and every redemption is refused. It is indistinguishable from " +
+      "the outside, so a client that keeps seeing 429 past its " +
+      "`retry-after` should report it rather than retry - the fix is to " +
+      "the deployment's proxy, not to the request.",
+  ),
+  headers: {
+    "retry-after": {
+      description:
+        "Seconds until the allowance refills. Always 60 for the " +
+        "misconfiguration above, where nothing refills.",
+      schema: { type: "integer", minimum: 0 },
+    },
+  },
+};
+
 function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
   return {
     operationId: "unlockPlan",
@@ -411,9 +466,11 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
       },
       ...failures({
         400:
-          "The body is not JSON, or `code` is missing, not a string, or " +
-          "empty. One status for all three: the gate page is the only caller " +
-          "and they mean the same thing to it.",
+          "The body will not parse, which answers `body must be JSON` - the " +
+          "same wording every bounded JSON body here uses - or `code` is " +
+          "missing, not a string, or empty, which answers `code is required`. " +
+          "One status for all four: the gate page is the only caller and they " +
+          "mean the same thing to it.",
         401: "The code did not match.",
         404: "No such plan, or it has no share code - the two are indistinguishable on purpose.",
         413: "The body is larger than a code could make it.",
@@ -431,22 +488,7 @@ function unlockPlanOperation(codeFormat: string): Record<string, unknown> {
           "if that release fails too, the count stays spent.",
         content: { "text/plain": { schema: { type: "string" } } },
       },
-      "429": {
-        ...json(
-          ErrorBody,
-          "Too many redemptions from this address. `retry-after` says for " +
-            "how long. The bucket is the client address, so one address " +
-            "cannot spend another address's allowance - but callers sharing " +
-            "an address, behind one office NAT or mobile gateway, share the " +
-            "allowance too.",
-        ),
-        headers: {
-          "retry-after": {
-            description: "Seconds until the allowance refills.",
-            schema: { type: "integer", minimum: 0 },
-          },
-        },
-      },
+      "429": UNLOCK_RATE_LIMITED,
     },
   };
 }

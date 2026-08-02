@@ -19,7 +19,8 @@ export async function readUploadBody(
 
   const bytes = await readBoundedBody(request, maxBytes);
   if (bytes === null) {
-    return problem(413, `upload exceeds ${maxBytes} bytes`);
+    // The same wording every bounded body answers with - see `readJsonBody`.
+    return problem(413, `body exceeds ${maxBytes} bytes`);
   }
 
   const validation = validateStandaloneHtml(bytes);

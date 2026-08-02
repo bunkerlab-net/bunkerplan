@@ -1,13 +1,8 @@
-import { createAuth } from "../auth/instance.ts";
+import { type AuthDb, createAuth } from "../auth/instance.ts";
 import { loadConfig } from "../config.ts";
 import { createLogger } from "../log.ts";
-import type {
-  Db,
-  KvStore,
-  PlanStorage,
-  RuntimeTarget,
-  Services,
-} from "../services/types.ts";
+import type { Services } from "../services/context.ts";
+import type { KvStore, PlanStorage, RuntimeTarget } from "../services/types.ts";
 
 /**
  * Node/Bun wiring. Structurally matches src/runtime/cloudflare.ts.
@@ -33,7 +28,7 @@ async function initialise(): Promise<Services> {
   // idle client failing - see src/db/postgres.ts.
   const logger = createLogger(config);
 
-  let db: Db;
+  let db: AuthDb;
   if (config.dbDriver === "postgres") {
     const { createPostgresDb } = await import("../db/postgres.ts");
     // loadConfig already rejects a missing DATABASE_URL for this driver; the
@@ -42,8 +37,11 @@ async function initialise(): Promise<Services> {
     db = createPostgresDb(connectionString, logger);
   } else if (config.dbDriver === "sqlite") {
     const { createBunSqliteDb } = await import("../db/bun-sqlite.ts");
-    db = createBunSqliteDb(config.sqlitePath);
+    db = createBunSqliteDb(config.sqlitePath, logger);
   } else {
+    // Unreachable: `loadConfig` refuses a binding driver off Workers, by name
+    // and alongside every other problem. Kept because `DbDriver` is a union of
+    // three and nothing in the type says which two this file can build.
     throw new Error(
       `DB_DRIVER=${config.dbDriver} is only available on Cloudflare Workers; ` +
         "use postgres or sqlite when self-hosting",
@@ -56,6 +54,7 @@ async function initialise(): Promise<Services> {
     // loadConfig already rejects a missing VALKEY_URL for this driver.
     kv = createValkeyKv(config.valkeyUrl ?? "");
   } else {
+    // Unreachable, as above.
     throw new Error(
       "KV_DRIVER=kv is only available on Cloudflare Workers; use valkey when self-hosting",
     );
@@ -66,6 +65,7 @@ async function initialise(): Promise<Services> {
     const { createS3Storage } = await import("../storage/s3.ts");
     storage = createS3Storage(config);
   } else {
+    // Unreachable, as above.
     throw new Error(
       "STORAGE_DRIVER=r2 is only available on Cloudflare Workers; use s3 when self-hosting",
     );

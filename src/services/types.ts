@@ -1,6 +1,22 @@
-import type { AppAuth } from "../auth/instance.ts";
-import type { Config } from "../config.ts";
-import type { Logger } from "../log.ts";
+/*
+ * No compatibility re-exports here, deliberately, and for two different
+ * reasons.
+ *
+ * `Services` moved to src/services/context.ts because this module sat in an
+ * import cycle: it named the assembled context while the modules that build
+ * that context imported their types from here. Forwarding it back would
+ * reopen exactly that, and `bunx madge --circular` fails the build on it.
+ *
+ * `PlanVisibility` moved to src/limits.ts for a plainer reason. That module is
+ * a leaf and this one already imports it, so a re-export closes no cycle - it
+ * would just be a second public path to one type, which is how half a
+ * codebase ends up importing it one way and half the other. The import below
+ * exists because the types in this file use the type. That is a consumer, not
+ * a forward.
+ *
+ * Every caller moved with both symbols; nothing points here for either.
+ */
+import type { PlanVisibility } from "../limits.ts";
 
 /**
  * Which wiring the entry point chose. Exported by both
@@ -112,8 +128,6 @@ export interface RateLimitRepo {
   refund(key: string, windowStart: number): Promise<void>;
 }
 
-export type PlanVisibility = "public" | "private";
-
 /**
  * What the read gate needs, in one row.
  *
@@ -188,7 +202,8 @@ export interface PlanRepo {
    * it is - so paging by it would hide them from the dashboard, and worse,
    * would make account deletion sweep only that many objects while the foreign
    * key removed every row, orphaning the remainder permanently. Use
-   * `PLAN_PAGE_SIZE` and page until a query comes back short.
+   * `PLAN_PAGE_SIZE` from src/limits.ts and page until a query comes back
+   * short.
    */
   listByUser(userId: string, limit: number): Promise<PlanRow[]>;
   findOwner(id: string): Promise<string | null>;
@@ -248,30 +263,58 @@ export interface PlanRepo {
 }
 
 /**
- * Rows fetched per `listByUser` call. Fixed, so it cannot drift with the
- * quota - see the note there.
- */
-export const PLAN_PAGE_SIZE = 500;
-
-/**
  * The admission gate for account deletion.
  *
  * Deleting an account removes objects the database does not know about, so it
  * sweeps them and then lets the foreign key take the rows. Marking the account
  * first is what stops an upload slipping between the sweep and the cascade and
  * leaving an object nothing owns.
+ *
+ * Two ways off, and they are not symmetric. A deletion that succeeds keeps the
+ * mark past the sweep on purpose - it has to cover Better Auth's own row
+ * delete, which is the second half of the window - and the `user` row taking
+ * it by cascade is what ends it. A deletion that fails lifts its own mark,
+ * because an account whose deletion did not happen still exists and its owner
+ * is still entitled to write to it.
+ *
+ * Marks are per attempt, so those two rules cannot collide: overlapping
+ * deletions each place one, and the one that fails lifts only what it placed.
+ *
+ * One gap remains, in the hook surface rather than here. Better Auth runs
+ * `beforeDelete`, then its own delete, then `afterDelete`, and offers nothing
+ * that fires when the middle step throws. A sweep that succeeded and a
+ * `deleteUser` that then failed leaves a mark nothing will lift. It blocks
+ * that account's writes but not another deletion: the retry places its own
+ * mark, and success cascades every row away, stale ones included.
  */
 export interface AccountClosingRepo {
-  /** Idempotent: re-running a failed deletion must not fail on the marker. */
-  open(userId: string): Promise<void>;
+  /**
+   * Marks the account and returns the id of this attempt's mark.
+   *
+   * Never merges with a mark already there: the mark is this attempt's own,
+   * and its id is what `close` needs to lift it and no other. It is a database
+   * write and can reject, so no mark is placed until it returns.
+   */
+  open(userId: string): Promise<string>;
+  /**
+   * Lifts one attempt's mark, by the id `open` returned.
+   *
+   * For the deletion that failed. Success needs no call: deleting the `user`
+   * row cascades every mark the account has.
+   */
+  close(attemptId: string): Promise<void>;
+  /** Whether any attempt is currently marking this account. */
   isOpen(userId: string): Promise<boolean>;
 }
 
 export interface Db {
   /**
-   * The value handed to `drizzleAdapter()`. `unknown` because the D1,
-   * bun-sqlite, and node-postgres drizzle instances are structurally different
-   * types; `src/auth/instance.ts` holds the single cast.
+   * The value handed to `drizzleAdapter()`. `unknown` here because the D1,
+   * bun-sqlite, and node-postgres drizzle instances are structurally
+   * different types; the pairing with `provider` is restored where it
+   * matters - `createAuth` takes `Db` intersected with the per-dialect
+   * handle types the drivers return (SqliteAuthHandle, PgAuthHandle), so a
+   * mistagged handle cannot typecheck into it.
    */
   adapter: unknown;
   /** Drizzle provider name for the adapter. */
@@ -285,13 +328,4 @@ export interface Db {
   unlockRateLimits: RateLimitRepo;
   accountClosing: AccountClosingRepo;
   probe(signal?: AbortSignal): Promise<void>;
-}
-
-export interface Services {
-  config: Config;
-  auth: AppAuth;
-  logger: Logger;
-  storage: PlanStorage;
-  kv: KvStore;
-  db: Db;
 }

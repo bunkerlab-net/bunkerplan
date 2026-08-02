@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { AppAuth } from "../src/auth/instance.ts";
 import { MAX_SHARE_CODE_LENGTH } from "../src/config.ts";
 import {
   MAX_UNLOCK_BODY_BYTES,
@@ -13,12 +12,16 @@ import {
   shareCookieName,
 } from "../src/http/share-auth.ts";
 import type { PlanAccessRow, PlanRepo } from "../src/services/types.ts";
-import { basePlanRepoStub } from "./plan-repo-stub.ts";
+import {
+  fakeAuth,
+  GRANTEE,
+  memoryPlans,
+  OWNER,
+  PLAN_ID as PLAN,
+  STRANGER,
+  storedPlan,
+} from "./fakes.ts";
 
-const OWNER = "user-owner";
-const GRANTEE = "user-grantee";
-const STRANGER = "user-stranger";
-const PLAN = "abcdefgh12345678";
 const CODE = "sHaReCoDe1234567";
 
 const CONFIG = {
@@ -26,56 +29,39 @@ const CONFIG = {
   publicBaseUrl: "https://plans.example.test",
 };
 
-interface AuthCalls {
-  sessions: number;
-  keys: number;
-}
-
 /**
- * Only the two endpoints the resolver touches. `AppAuth` is Better Auth's
- * fully inferred plugin-aware type - hundreds of endpoints that cannot be
- * spelled out here - so this is the one place a cast is the honest option.
+ * The one plan, at whatever access state a case needs. Built on the shared
+ * repository rather than a two-method stub, so a resolver that reached past
+ * `findAccess`/`hasGrant` meets a repository that answers the way the SQL
+ * does instead of throwing.
+ *
+ * Each grantee gets a handle mapping, because `memoryPlans` now throws for a
+ * grant naming an account nothing maps to - production joins the `user` table,
+ * so such a grant cannot come back from it. Nothing here reads the handles;
+ * they exist so the repository is internally consistent, and so a case that
+ * later calls `listGrantHandles` finds one rather than an error.
  */
-function fakeAuth(
-  over: { sessionUser?: string | null; keyUser?: string | null } = {},
-): { auth: AppAuth; calls: AuthCalls } {
-  const calls: AuthCalls = { sessions: 0, keys: 0 };
-  const api = {
-    getSession: async () => {
-      calls.sessions += 1;
-      const id = over.sessionUser ?? null;
-      return id === null ? null : { user: { id } };
-    },
-    verifyApiKey: async () => {
-      calls.keys += 1;
-      const referenceId = over.keyUser ?? null;
-      return referenceId === null
-        ? { valid: false, key: null }
-        : { valid: true, key: { referenceId } };
-    },
-  };
-  return { auth: { api } as unknown as AppAuth, calls };
-}
-
 function fakePlans(
   row: PlanAccessRow | null,
   grantees: string[] = [],
 ): PlanRepo {
-  return {
-    // Spread first, so the two this suite cares about win. Everything else is
-    // the shared refusal stub: the read gate never calls it, and spelling it
-    // out here only invited the list to drift from the interface.
-    ...basePlanRepoStub,
-    insert: async () => "created",
-    listByUser: async () => [],
-    findOwner: async () => null,
-    relabel: async () => false,
-    resize: async () => false,
-    deleteOwned: async () => false,
-    findAccess: async (id) => (id === PLAN ? row : null),
-    hasGrant: async (planId, userId) =>
-      planId === PLAN && grantees.includes(userId),
-  };
+  const handles = Object.fromEntries(
+    grantees.map((userId, index) => [`grantee-${index}`, userId]),
+  );
+  return memoryPlans(
+    row === null
+      ? []
+      : [
+          storedPlan({
+            id: PLAN,
+            userId: row.ownerId,
+            visibility: row.visibility,
+            shareCodeHash: row.shareCodeHash,
+            grants: grantees,
+          }),
+        ],
+    handles,
+  );
 }
 
 function get(url: string, headers: Record<string, string> = {}): Request {
@@ -154,7 +140,7 @@ describe("resolvePlanAccess", () => {
     ).toEqual({ kind: "granted", visibility: "public" });
     // The common case must stay one row read; a session lookup here would be
     // paid by every anonymous reader of every public plan.
-    expect(calls).toEqual({ sessions: 0, keys: 0 });
+    expect(calls).toEqual({ sessions: 0, keys: 0, handled: 0 });
   });
 
   test("a private plan with no credential is gated", async () => {
@@ -259,7 +245,7 @@ describe("resolvePlanAccess", () => {
         PLAN,
       ),
     ).toEqual({ kind: "gate", hasCode: false });
-    expect(calls).toEqual({ sessions: 0, keys: 1 });
+    expect(calls).toEqual({ sessions: 0, keys: 1, handled: 0 });
   });
 
   test("a valid ?code= grants and mints the cookie", async () => {
@@ -278,7 +264,7 @@ describe("resolvePlanAccess", () => {
     expect(access.setCookie).toContain(shareCookieName(PLAN));
     expect(access.setCookie).toContain(`Path=/p/${PLAN}`);
     // A code holder costs no credential lookup at all.
-    expect(calls).toEqual({ sessions: 0, keys: 0 });
+    expect(calls).toEqual({ sessions: 0, keys: 0, handled: 0 });
   });
 
   test("a wrong code falls through to the caller's own credential", async () => {
@@ -356,7 +342,7 @@ describe("resolvePlanAccess", () => {
         PLAN,
       ),
     ).toEqual({ kind: "granted", visibility: "private" });
-    expect(calls).toEqual({ sessions: 0, keys: 0 });
+    expect(calls).toEqual({ sessions: 0, keys: 0, handled: 0 });
   });
 
   test("a cookie minted for another plan does not carry over", async () => {
@@ -494,14 +480,33 @@ describe("unlockPlan", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
+  /**
+   * Two different mistakes, and the caller fixes them differently: a body the
+   * parser could not read at all, and a body that parsed into something with
+   * no usable code in it. Same status, same shared vocabulary as every other
+   * JSON route.
+   */
   test.each([
     ["no body", null],
     ["a non-JSON body", "not json"],
+  ])("%s is a 400 saying the body is not JSON", async (_, body) => {
+    const response = await unlockPlan(
+      fakePlans(await codedRow()),
+      CONFIG,
+      post(body),
+      PLAN,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await jsonOf(response)).toEqual({ error: "body must be JSON" });
+  });
+
+  test.each([
     ["a JSON array", "[]"],
     ["no code field", "{}"],
     ["a non-string code", '{"code":42}'],
     ["an empty code", '{"code":""}'],
-  ])("%s is one 400", async (_, body) => {
+  ])("%s is a 400 saying the code is missing", async (_, body) => {
     const response = await unlockPlan(
       fakePlans(await codedRow()),
       CONFIG,

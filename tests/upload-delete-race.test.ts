@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { pino } from "pino";
+import { sweepAccountObjects } from "../src/auth/instance.ts";
 import { storeAndConfirm } from "../src/http/store-plan.ts";
-import {
-  type AccountClosingRepo,
-  PLAN_PAGE_SIZE,
-  type PlanRepo,
-  type PlanStorage,
+import type {
+  AccountClosingRepo,
+  PlanRepo,
+  PlanStorage,
 } from "../src/services/types.ts";
-import { basePlanRepoStub } from "./plan-repo-stub.ts";
+import {
+  deferred,
+  type MemoryAccountClosing,
+  memoryAccountClosing,
+  memoryPlans,
+  type StoredPlan,
+  silentLogger,
+  storedPlan,
+} from "./fakes.ts";
 
 /**
  * Uploading claims a row and then writes the object. Deleting an account marks
@@ -24,21 +31,8 @@ import { basePlanRepoStub } from "./plan-repo-stub.ts";
 const OWNER = "user-a";
 const ID = "plan-1";
 
-/** Silent: these assert on stored state, not output. */
-const logger = pino({ level: "silent" });
-
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve = (): void => {};
-  const promise = new Promise<void>((settle) => {
-    resolve = settle;
-  });
-  return { promise, resolve };
-}
-
 function stores(holdPut = false) {
   const objects = new Map<string, number>();
-  const rows = new Map<string, { userId: string }>();
-  const closing = new Set<string>();
 
   const entered = deferred();
   const released = deferred();
@@ -58,65 +52,34 @@ function stores(holdPut = false) {
     probe: async () => {},
   };
 
-  const plans: PlanRepo = {
-    ...basePlanRepoStub,
-    insert: async (row) => {
-      if (rows.has(row.id)) return "duplicate";
-      rows.set(row.id, { userId: row.userId });
-      return "created";
-    },
-    listByUser: async (userId) =>
-      [...rows.entries()]
-        .filter(([, row]) => row.userId === userId)
-        .map(([id]) => ({
-          id,
-          label: null,
-          size: 0,
-          createdAt: new Date(),
-          visibility: "private" as const,
-          hasShareCode: false,
-          hasGrants: false,
-        })),
-    findOwner: async (id) => rows.get(id)?.userId ?? null,
-    relabel: async () => false,
-    resize: async () => false,
-    deleteOwned: async (id, userId) => {
-      if (rows.get(id)?.userId !== userId) return false;
-      rows.delete(id);
-      return true;
-    },
-  };
+  const plans = memoryPlans();
+  const rows = plans.rows;
 
-  const accountClosing: AccountClosingRepo = {
-    open: async (userId) => {
-      closing.add(userId);
-    },
-    isOpen: async (userId) => closing.has(userId),
-  };
+  const closing = memoryAccountClosing();
 
-  const deps = { storage, plans, accountClosing, logger };
+  const deps = {
+    storage,
+    plans,
+    accountClosing: closing,
+    logger: silentLogger,
+  };
   return { objects, rows, closing, deps, plans, storage, entered, released };
 }
 
-/** The sweep `src/auth/instance.ts` performs, before the cascade. */
-async function sweep(
+/**
+ * The sweep `src/auth/instance.ts` performs, before the cascade - the real
+ * one. What these tests are about is how an upload interleaves with it, so a
+ * local reimplementation would only prove things about the copy.
+ */
+const sweep = (
   deps: {
     plans: PlanRepo;
     storage: PlanStorage;
     accountClosing: AccountClosingRepo;
   },
   userId: string,
-): Promise<void> {
-  await deps.accountClosing.open(userId);
-  for (;;) {
-    const page = await deps.plans.listByUser(userId, PLAN_PAGE_SIZE);
-    if (page.length === 0) break;
-    for (const row of page) {
-      await deps.storage.delete(row.id);
-      await deps.plans.deleteOwned(row.id, userId);
-    }
-  }
-}
+): Promise<void> =>
+  sweepAccountObjects({ ...deps, logger: silentLogger, userId });
 
 /**
  * What Better Auth's `deleteUser` does after the hook returns: the foreign key
@@ -124,12 +87,12 @@ async function sweep(
  * marker, which is the case the marker check alone cannot see.
  */
 function cascade(
-  rows: Map<string, { userId: string }>,
-  closing: Set<string>,
+  rows: Map<string, StoredPlan>,
+  closing: MemoryAccountClosing,
   userId: string,
 ): void {
   for (const [id, row] of rows) if (row.userId === userId) rows.delete(id);
-  closing.delete(userId);
+  closing.cascade(userId);
 }
 
 type SeedRow = Parameters<PlanRepo["insert"]>[0];
@@ -137,16 +100,24 @@ type SeedRow = Parameters<PlanRepo["insert"]>[0];
 /**
  * A row with the fields no test here varies already filled in, so each seed
  * site shows only what it is actually choosing.
+ *
+ * Off `storedPlan` rather than a second set of defaults. `PlanRepo.insert`
+ * takes the stored shape minus `createdAt` and `grants` - both of which the
+ * database owns - so the two agree by construction instead of by being edited
+ * together. `size` is the one deliberate difference: these tests count
+ * objects, not bytes, and one is the smallest thing to write.
  */
 function planRow(overrides: Partial<SeedRow> & Pick<SeedRow, "id">): SeedRow {
-  return {
+  const {
+    createdAt: _createdAt,
+    grants: _grants,
+    ...row
+  } = storedPlan({
     userId: OWNER,
-    label: null,
     size: 1,
-    visibility: "private",
-    shareCodeHash: null,
     ...overrides,
-  };
+  });
+  return row;
 }
 
 async function claim(plans: PlanRepo, id: string): Promise<void> {
@@ -229,7 +200,7 @@ describe("upload racing account deletion", () => {
   test("keeps the row when withdrawing cannot remove the object", async () => {
     const { rows, deps, plans, closing } = stores();
     await claim(plans, ID);
-    closing.add(OWNER);
+    closing.mark(OWNER);
     deps.storage.delete = async () => {
       throw new Error("bucket unreachable");
     };

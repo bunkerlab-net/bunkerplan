@@ -1,25 +1,28 @@
 import { describe, expect, test } from "bun:test";
 import { PAGE_PROPS_ID } from "../src/client/mount.ts";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
-import { PLAN_PAGE_SIZE, type RateLimitRepo } from "../src/services/types.ts";
+import { PLAN_PAGE_SIZE } from "../src/limits.ts";
+import type { RateLimitRepo } from "../src/services/types.ts";
 import {
   buildApp,
   CLIENT_IP,
   CLIENT_IP_HEADER,
   closedRateLimits,
-  GRANTEE,
   type HarnessOptions,
   html,
   type MemoryStorage,
-  memoryPlans,
   memoryStorage,
-  OWNER,
-  PLAN_ID,
   PUBLIC_BASE_URL,
-  STRANGER,
-  storedPlan,
   upload,
 } from "./app-harness.ts";
+import {
+  GRANTEE,
+  memoryPlans,
+  OWNER,
+  PLAN_ID,
+  STRANGER,
+  storedPlan,
+} from "./fakes.ts";
 
 /**
  * Every route the app answers, driven through the real router in this process.
@@ -1180,8 +1183,8 @@ describe("the security headers the middleware pins", () => {
      * something that looks right.
      *
      * Asserted on the headers rather than the body, because that is the failure
-     * a body test cannot see - widening `PLAN_PATH_PREFIX` to `/` or `/s` would
-     * leave this markup unchanged.
+     * a body test cannot see - a stray `PLAN_DOCUMENT_HEADER` reaching this
+     * response would leave this markup unchanged.
      */
     const app = buildApp({
       plans: memoryPlans([storedPlan({ shareCodeHash: null })]),

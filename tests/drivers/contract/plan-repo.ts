@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { newPlanId } from "../../../src/ids.ts";
-import type { PlanRepo, PlanVisibility } from "../../../src/services/types.ts";
+import type { PlanVisibility } from "../../../src/limits.ts";
+import type { PlanRepo } from "../../../src/services/types.ts";
 import { type DbFixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
 
 /**
@@ -114,6 +115,31 @@ export function describePlanRepo(
         // value must survive it, they just stop being added to.
         expect(await plans.insert(row(userId), 1)).toBe("quota");
         expect(await fixture.countPlans(userId)).toBe(3);
+      });
+
+      /**
+       * Both refusals at once, and which one wins matters to the caller.
+       * `createPlan` retries a `duplicate` with a fresh id and stops on a
+       * `quota`, so an account at its ceiling reported as a duplicate would
+       * be sent round the retry loop to be refused the same way each time -
+       * and would end on "no free plan id was found", which is a lie about a
+       * full account.
+       */
+      test("a full account reports quota even when the id also collides", async () => {
+        const userId = await fixture.seedUser();
+        const taken = row(userId);
+        expect(await plans.insert(taken, 1)).toBe("created");
+
+        // The same id, against an account with no room for any id.
+        expect(await plans.insert(taken, 1)).toBe("quota");
+      });
+
+      test("and reports duplicate when only the id collides", async () => {
+        const userId = await fixture.seedUser();
+        const taken = row(userId);
+        expect(await plans.insert(taken, 10)).toBe("created");
+
+        expect(await plans.insert(taken, 10)).toBe("duplicate");
       });
 
       /**

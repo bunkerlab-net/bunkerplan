@@ -7,8 +7,9 @@ import {
   sqliteTable,
   text,
 } from "drizzle-orm/sqlite-core";
-import type { PlanVisibility } from "../../services/types.ts";
+import type { PlanVisibility } from "../../limits.ts";
 import { user } from "./auth.sqlite.ts";
+import { PLAN_VISIBILITY_CHECK } from "./visibility-check.ts";
 
 export const plan = sqliteTable(
   "plan",
@@ -41,13 +42,13 @@ export const plan = sqliteTable(
     // a migration or a console session can put anything in this column, and
     // the read gate treats every value that is not "public" as private.
     //
-    // The column is named unqualified rather than through `table.visibility`
-    // on purpose. SQLite has no `ADD CONSTRAINT`, so drizzle rebuilds the
-    // table: it creates `__new_plan`, copies, drops `plan`, and renames. A
-    // qualified reference is emitted as `"__new_plan"."visibility"` and is
-    // re-parsed after the rename, when that table name no longer exists -
-    // "error in table plan after rename: no such column".
-    check("plan_visibility_check", sql`"visibility" in ('public', 'private')`),
+    // The expression itself lives in src/db/schema/visibility-check.ts, beside
+    // the reasons it is shaped the way it is: derived from one tuple, spelled
+    // identically for both dialects, and unqualified because the rebuild
+    // SQLite performs would re-parse `"__new_plan"."visibility"` after the
+    // rename. `sql.raw`, because this text is emitted into a migration where a
+    // bound parameter would have no meaning.
+    check("plan_visibility_check", sql.raw(PLAN_VISIBILITY_CHECK)),
   ],
 );
 
@@ -66,6 +67,8 @@ export const planGrant = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.planId, table.userId] }),
+    // SQLite does not index a foreign key automatically either; without this,
+    // deleting an account scans this table. Same reason as the Postgres twin.
     index("plan_grant_userId_idx").on(table.userId),
   ],
 );

@@ -4,7 +4,7 @@ import { useSession } from "./auth.ts";
 import { SiteFrame } from "./Chrome.tsx";
 import { inputOf } from "./dom.ts";
 import { messageOf } from "./errors.ts";
-import type { GateProps } from "./pages.tsx";
+import type { GateProps } from "./page-props.ts";
 import { usePasskeyAction } from "./passkey.ts";
 
 /** One gate per page, so a constant id is unambiguous. */

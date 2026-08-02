@@ -58,11 +58,11 @@ These names are the API. They are not renamed across releases.
 | `RP_NAME`                | no              | `BunkerPlan`                  | shown in the passkey prompt                                              |
 | `CLIENT_IP_HEADER`       | **off Workers** | `cf-connecting-ip` on Workers | single header your proxy **overwrites** with the client IP               |
 | `MAX_UPLOAD_BYTES`       | no              | `2097152` (2 MiB)             |                                                                          |
-| `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`   |
+| `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`; max `400` on Workers |
 | `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
-| `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | clamped to a minimum of 60                                               |
+| `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | minimum 60; a shorter window multiplies the sustained rate               |
 | `UNLOCK_RATE_MAX`        | no              | `30`                          | share-code redemptions per window per client address                     |
-| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | no minimum; a database row, so no KV TTL floor applies                   |
+| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | minimum 1; no 60s floor, because a redemption stores nothing to guard    |
 | `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                 |
 | `SHARE_CODE_LENGTH`      | no              | `16`                          | characters in a share code; mixed-case alphanumeric, 16 to 64            |
 | `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                    |
@@ -83,6 +83,75 @@ These names are the API. They are not renamed across releases.
 
 A misconfigured deployment fails at boot with every problem listed at once, not
 on the first request.
+
+`MAX_PLANS_PER_USER` is the one limit whose ceiling depends on the runtime. On
+Workers it is refused above 400, because deleting an account removes its
+objects one at a time before the database cascades the rows. Every call the
+sweep makes is a subrequest - two per plan for the R2 and D1 deletes, one per
+page listed plus the empty listing that ends the loop, and one to mark the
+account - so 400 plans costs 800 + 2 + 1 = 803, which fits
+inside the 1,000 subrequests to Cloudflare services a free Worker gets per
+invocation with room for the deletion itself. Paid Workers get 10,000 by
+default, so the cap costs them nothing. 400 is a conservative application
+ceiling, not the platform's number.
+
+That is survivable rather than fatal, and not atomic. An account too large for
+one invocation - because it grew under an older, higher setting - is still
+deletable by repeating the delete. Each attempt removes as many plans as it
+can and then fails: those plans are gone for good, objects and rows both, and
+the account itself is untouched because the failure aborts the deletion before
+Better Auth removes anything. A retry therefore has less to do than the
+attempt before it, and enough retries finish. Self-hosted there is no
+per-request budget and no ceiling.
+
+A failed deletion leaves the account able to write again. The sweep marks the
+account before it starts - that mark is what refuses uploads while objects are
+being removed, so nothing can slip in behind it and outlive its row - and lifts
+it again on the way out if the sweep did not finish. Marks are per attempt, so
+two deletions of one account cannot interfere: each places its own, and the one
+that fails removes only what it placed.
+
+A mark can still be left behind, and then it needs an operator. Any attempt
+that ends without reaching its own cleanup leaves one: the process killed
+mid-sweep, the isolate evicted, the invocation cut short - or Better Auth
+deleting the user row and failing, which it offers no hook to react to at all.
+The symptom is an account whose uploads answer `409 account is being deleted`
+indefinitely. Deleting the account again clears it, because a successful
+deletion cascades every mark away; failing that, remove its rows:
+
+```sql
+delete from account_closing where user_id = '<user id>';
+```
+
+`started_at` is epoch milliseconds, written when the mark was placed and read
+by nothing in the application - it is there for exactly this. A sweep is
+bounded by the subrequest budget on Workers and takes as long as it takes off
+it, so there is no threshold worth hard-coding; pick one your deployment can
+justify and list what is older:
+
+The column is the same on both engines - it is written by the application, not
+defaulted by the database - but the way each spells "an hour ago" is not.
+Postgres:
+
+```sql
+select user_id, attempt_id, started_at
+from account_closing
+where started_at < (extract(epoch from now()) * 1000) - 3600000
+order by started_at;
+```
+
+SQLite and D1:
+
+```sql
+select user_id, attempt_id, started_at
+from account_closing
+where started_at < (strftime('%s', 'now') * 1000) - 3600000
+order by started_at;
+```
+
+Anything that query returns is either a deletion still running or a mark whose
+attempt is gone. Nothing here decides which for you, and nothing alerts on it:
+this project logs and does not collect metrics.
 
 ## Swap matrices
 

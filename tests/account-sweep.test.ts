@@ -1,0 +1,612 @@
+import { describe, expect, test } from "bun:test";
+import { sweepAccountObjects } from "../src/auth/instance.ts";
+import { PLAN_PAGE_SIZE, WORKERS_MAX_PLANS_PER_USER } from "../src/limits.ts";
+import type { Logger } from "../src/log.ts";
+import type {
+  AccountClosingRepo,
+  PlanRepo,
+  PlanStorage,
+} from "../src/services/types.ts";
+import {
+  type MemoryAccountClosing,
+  type MemoryPlans,
+  memoryAccountClosing,
+  memoryPlans,
+  type StoredPlan,
+  storedPlan,
+} from "./fakes.ts";
+
+/**
+ * The irreversible half of account deletion, driven directly.
+ *
+ * Better Auth calls it as `onBeforeDeleteUser` and aborts the deletion when it
+ * throws, so what these assertions are really about is the one invariant that
+ * survives every ending: an object is never left with no row naming it. The
+ * sweep may return having removed everything, or throw having removed some of
+ * it and left those rows deleted too - what it must never do is return while
+ * an object it did not reach still has a row, because the cascade then takes
+ * that row and strands the object at `/p/{id}` forever.
+ *
+ * Reaching it through `betterAuth` would mean standing up an auth instance to
+ * seed a refusal.
+ */
+
+const OWNER = "user-a";
+
+/** One `logger` call, so the sweep's own account of itself can be asserted. */
+interface LogLine {
+  level: "warn" | "info";
+  fields: Record<string, unknown>;
+  message: string;
+}
+
+/** The two levels `sweepAccountObjects` uses, and nothing else. */
+type SweepLogger = Pick<Logger, "warn" | "info">;
+
+interface Fixture {
+  /** Every id `storage.delete` was called with, in order, duplicates kept. */
+  objects: string[];
+  closing: MemoryAccountClosing;
+  rows: Map<string, StoredPlan>;
+  /**
+   * Every marker, listing, and object delete, in the order they happened. The
+   * marker going first is the whole reason the sweep is safe, and only an
+   * ordering can say so.
+   */
+  steps: string[];
+  /**
+   * The `limit` each listing asked for. `memoryPlans` honours it, so a sweep
+   * that paged wrongly would still finish - just in far more round trips than
+   * the subrequest budget was sized for, which `steps` cannot show and this
+   * does.
+   */
+  limits: number[];
+  /**
+   * What the sweep logged. The one report an operator gets of a deletion that
+   * finished with something odd about it, so the counts in it are a contract
+   * rather than decoration.
+   */
+  logs: LogLine[];
+  /**
+   * Exactly what the sweep asks for. Narrowed rather than cast to `Logger`:
+   * a cast would keep compiling if the sweep started calling `error`, and the
+   * fixture would answer `undefined is not a function` at run time instead of
+   * failing to typecheck.
+   */
+  logger: SweepLogger;
+  /** The unwrapped repository, for an override that delegates to it. */
+  base: MemoryPlans;
+  plans: PlanRepo;
+  storage: PlanStorage;
+  accountClosing: AccountClosingRepo;
+}
+
+/**
+ * `planOverrides` is a factory rather than an object so an override can
+ * delegate to the repository it is replacing a method on, which several need:
+ * a `deleteOwned` that refuses one id and defers the rest cannot be written
+ * before `base` exists. Assigning onto `f.plans` afterwards did the same job
+ * and left the fixture mutable, so a test could rewrite it halfway through.
+ */
+function fixture(
+  planOverrides: (base: MemoryPlans) => Partial<PlanRepo> = () => ({}),
+  storageOverrides: Partial<PlanStorage> = {},
+): Fixture {
+  const objects: string[] = [];
+  const steps: string[] = [];
+  const logs: LogLine[] = [];
+  const limits: number[] = [];
+  const closing = memoryAccountClosing();
+  const base = memoryPlans();
+  /*
+   * Overrides first, recorders around them. Wrapping the base repository and
+   * then spreading the overrides on top would let an overriding test silently
+   * remove the recording, so `steps` would miss exactly the calls a test cared
+   * enough about to replace - and the budget measurement would quietly count
+   * fewer subrequests than the sweep made.
+   */
+  const overridden: PlanRepo = { ...base, ...planOverrides(base) };
+  // Rest parameters, so a signature that grows an argument keeps forwarding
+  // it. Naming them here would silently drop the new one and leave the sweep
+  // being measured against a call it did not make.
+  const listByUser: PlanRepo["listByUser"] = async (...args) => {
+    steps.push("list");
+    limits.push(args[1]);
+    return await overridden.listByUser(...args);
+  };
+  const deleteOwned: PlanRepo["deleteOwned"] = async (...args) => {
+    steps.push("row");
+    return await overridden.deleteOwned(...args);
+  };
+  /*
+   * Pino's `LogFn` takes either an object and a message or a message alone, so
+   * both arrive here and the shape has to be worked out rather than asserted.
+   * A cast would let a message-only call record a bare string as `fields`,
+   * which every `toEqual` below would then compare against happily.
+   */
+  const record =
+    (level: LogLine["level"]) => (first: unknown, second?: string) => {
+      const messageOnly = typeof first === "string";
+      logs.push({
+        level,
+        fields:
+          !messageOnly && typeof first === "object" && first !== null
+            ? { ...first }
+            : {},
+        message: (messageOnly ? first : second) ?? "",
+      });
+    };
+
+  return {
+    objects,
+    steps,
+    limits,
+    logs,
+    logger: { warn: record("warn"), info: record("info") },
+    closing,
+    rows: base.rows,
+    base,
+    plans: { ...overridden, listByUser, deleteOwned },
+    storage: {
+      put: async () => {},
+      get: async () => null,
+      probe: async () => {},
+      ...storageOverrides,
+      /*
+       * The recorder sits above the override, not below it, for the same
+       * reason it does on the repository: spread last, an override would
+       * replace the recording and `steps` would miss the very call the test
+       * cared enough about to substitute. A failing delete is still a delete
+       * the sweep made and still a subrequest it spent.
+       */
+      delete: async (id) => {
+        steps.push("delete");
+        objects.push(id);
+        await storageOverrides.delete?.(id);
+      },
+    },
+    // The shared fake, wrapped only to record the calls. `close` counts too:
+    // it is a subrequest the sweep spends on the failing path, and the budget
+    // assertions measure what was actually issued.
+    accountClosing: {
+      ...closing,
+      open: async (userId) => {
+        steps.push("open");
+        return await closing.open(userId);
+      },
+      close: async (attemptId) => {
+        steps.push("unmark");
+        await closing.close(attemptId);
+      },
+    },
+  };
+}
+
+/** Rows straight into the map: `insert` would spend a quota none of this is about. */
+function seed(f: Fixture, ids: string[]): void {
+  for (const id of ids) f.rows.set(id, storedPlan({ id, userId: OWNER }));
+}
+
+function run(f: Fixture, maxAttempts?: number): Promise<void> {
+  return sweepAccountObjects({
+    plans: f.plans,
+    accountClosing: f.accountClosing,
+    storage: f.storage,
+    logger: f.logger,
+    userId: OWNER,
+    maxAttempts,
+  });
+}
+
+/**
+ * The tighter of the two Workers budgets, which is the one that binds.
+ *
+ * A free Worker gets 1,000 subrequests to Cloudflare services per invocation -
+ * D1 and R2 are Cloudflare services - where a paid one gets 10,000 by default.
+ * Sizing against the free figure is what makes the ceiling safe on both.
+ * https://developers.cloudflare.com/changelog/post/2026-02-11-subrequests-limit
+ */
+const WORKERS_SUBREQUEST_LIMIT = 1000;
+/** Left for the row deletion Better Auth performs around the hook. */
+const AUTH_RESERVE = 100;
+
+/**
+ * Listings a sweep of `plans` should make: one per page, plus the empty one
+ * that ends the loop.
+ *
+ * That `+ 1` is the sweep's termination rule written as arithmetic. There is
+ * no cursor: every pass asks for the first `PLAN_PAGE_SIZE` rows again, and
+ * the loop ends only on a listing that comes back with none. A short page
+ * does not end it - the rows are processed and another listing follows. So
+ * an account whose plans divide exactly into pages still costs one listing
+ * more than it has pages, and an empty account costs one.
+ */
+const listingsFor = (plans: number) => Math.ceil(plans / PLAN_PAGE_SIZE) + 1;
+
+/**
+ * The arithmetic behind `WORKERS_MAX_PLANS_PER_USER`, enforced rather than
+ * described.
+ *
+ * That constant is a subrequest figure dressed as a plan count, so it stops
+ * being correct the moment either it or `PLAN_PAGE_SIZE` moves - and nothing
+ * about a sweep that overruns the budget looks like a ceiling being wrong. It
+ * looks like workerd ending the request. This is what fails first instead.
+ */
+test("the sweep ceiling fits one Workers invocation", () => {
+  // The listings, plus the marker, plus the pair of deletes each plan costs.
+  const subrequests =
+    2 * WORKERS_MAX_PLANS_PER_USER +
+    listingsFor(WORKERS_MAX_PLANS_PER_USER) +
+    1;
+
+  expect(subrequests).toBeLessThanOrEqual(
+    WORKERS_SUBREQUEST_LIMIT - AUTH_RESERVE,
+  );
+});
+
+/**
+ * And the same ceiling measured rather than computed.
+ *
+ * The arithmetic above restates the formula the constant was chosen from, so
+ * the two agree by construction and would keep agreeing if the sweep itself
+ * started making a call neither of them knows about. This counts what the
+ * implementation actually issues for a full account.
+ */
+test("a full account's sweep issues no more calls than that", async () => {
+  const f = fixture();
+  seed(
+    f,
+    Array.from({ length: WORKERS_MAX_PLANS_PER_USER }, (_, i) => `p${i}`),
+  );
+
+  await run(f, WORKERS_MAX_PLANS_PER_USER);
+
+  // Every call the sweep made: the marker, each listing, each object delete,
+  // and each row delete. Counted rather than reconstructed, so a sweep that
+  // grew a call none of the arithmetic knows about is caught here.
+  const subrequests = f.steps.length;
+
+  expect(f.rows.size).toBe(0);
+  // Both the number of listings and the size each asked for, derived from the
+  // constants rather than written out.
+  //
+  // The count below would catch a page size small enough to multiply the
+  // listings - paging by one would make 401 of them and blow the budget. What
+  // it cannot see is a page size that is merely wrong: 400 or 499 still lists
+  // this account in two calls, so the total is identical and only the asked-for
+  // size says the sweep is paging the way `PLAN_PAGE_SIZE` says it does.
+  expect(f.limits).toEqual(
+    Array.from(
+      { length: listingsFor(WORKERS_MAX_PLANS_PER_USER) },
+      () => PLAN_PAGE_SIZE,
+    ),
+  );
+  expect(subrequests).toBeLessThanOrEqual(
+    WORKERS_SUBREQUEST_LIMIT - AUTH_RESERVE,
+  );
+});
+
+describe("sweepAccountObjects", () => {
+  /**
+   * The marker first, before anything is listed. An upload that claims a row
+   * after the sweep passed it and writes its object before the cascade would
+   * leave that object served at `/p/{id}` with no row to own it; the marker is
+   * what refuses that upload, so a sweep that read the first page before
+   * setting it has a window where nothing does.
+   */
+  test("marks the account, then removes every object and row", async () => {
+    const f = fixture();
+    seed(f, ["p1", "p2", "p3"]);
+
+    await run(f);
+
+    expect(f.steps[0]).toBe("open");
+    expect(f.steps.slice(0, 3)).toEqual(["open", "list", "delete"]);
+    expect(f.objects.toSorted()).toEqual(["p1", "p2", "p3"]);
+    expect(f.rows.size).toBe(0);
+
+    // One line, at info, counting what went. No `refusedCount`: the field is
+    // what distinguishes a sweep that met something odd from one that did not,
+    // so reporting a zero on every clean deletion would make it say nothing.
+    expect(f.logs).toEqual([
+      {
+        level: "info",
+        fields: { userId: OWNER, planCount: 3 },
+        message: "deleted plan objects before account deletion",
+      },
+    ]);
+
+    /*
+     * And the mark is still standing. It has to outlive the sweep: Better
+     * Auth deletes the `user` row after this returns, and an upload landing
+     * in that gap would claim a row the cascade is about to remove. The
+     * cascade takes the mark too, which is why nothing lifts it here.
+     */
+    expect(f.closing.has(OWNER)).toBe(true);
+    expect(f.steps).not.toContain("unmark");
+  });
+
+  /**
+   * The loop re-lists until nothing comes back, so a row `deleteOwned` refuses
+   * while `listByUser` keeps returning it is the one shape that cannot finish.
+   * It must end as an error, not as a hung request and not as a return - a
+   * return hands Better Auth an all-clear, and the cascade then removes a row
+   * naming an object the sweep never got.
+   */
+  test("throws on a row it can never remove, rather than looping", async () => {
+    const f = fixture(() => ({ deleteOwned: async () => false }));
+    seed(f, ["stuck"]);
+
+    await expect(run(f)).rejects.toThrow(/not making progress/);
+    expect(f.rows.size).toBe(1);
+  });
+
+  /** One object delete per plan, not one per pass: a refusal is not retried. */
+  test("sweeps a refused object once, however many passes it takes", async () => {
+    const f = fixture(() => ({ deleteOwned: async () => false }));
+    seed(f, ["stuck"]);
+
+    await expect(run(f)).rejects.toThrow();
+    expect(f.objects).toEqual(["stuck"]);
+  });
+
+  /**
+   * The benign refusal: the owner deleted that plan while the sweep ran, so
+   * the row is gone by the next listing. Nothing is orphaned - no row is left
+   * naming an object - and aborting the deletion over it would be wrong.
+   *
+   * It is not silent either. The account is gone irreversibly and one of its
+   * plans took a path nobody watched, so the warning is the only record that
+   * it happened - and the counts are what make it readable, since "some plans"
+   * with no numbers says nothing about whether one row raced or half the
+   * account did.
+   */
+  test("finishes when a refused row stops being listed, and says so", async () => {
+    const f = fixture((base) => ({
+      deleteOwned: async (id, userId) => {
+        if (id !== "vanishing") return await base.deleteOwned(id, userId);
+        base.rows.delete(id);
+        return false;
+      },
+    }));
+    seed(f, ["mine", "vanishing"]);
+
+    await expect(run(f)).resolves.toBeUndefined();
+    expect(f.rows.size).toBe(0);
+
+    // Warn, not info: a deletion that finished is still a deletion, but not
+    // the one that was asked for. `planCount` counts what this sweep removed
+    // and `refusedCount` what went by another route - one each here.
+    expect(f.logs).toEqual([
+      {
+        level: "warn",
+        fields: { userId: OWNER, planCount: 1, refusedCount: 1 },
+        message:
+          "some plans were removed by another writer during the account sweep",
+      },
+    ]);
+  });
+
+  /**
+   * A storage failure has to reach Better Auth, which aborts the deletion on
+   * it. Swallowing one would leave the object behind and let the cascade take
+   * the row naming it - the exact end this whole function exists to avoid, and
+   * reached by the one path where being quiet looks like being tidy.
+   *
+   * The row stays too: the object is the thing that could not be removed, and
+   * the row is the only handle left on it.
+   */
+  test("propagates a storage failure rather than deleting the row", async () => {
+    const f = fixture(() => ({}), {
+      delete: async () => {
+        throw new Error("bucket unreachable");
+      },
+    });
+    seed(f, ["p1"]);
+
+    await expect(run(f)).rejects.toThrow("bucket unreachable");
+    expect(f.rows.size).toBe(1);
+  });
+
+  test("leaves another account's plans alone", async () => {
+    const f = fixture();
+    seed(f, ["mine"]);
+    f.rows.set("theirs", storedPlan({ id: "theirs", userId: "user-b" }));
+
+    await run(f);
+
+    expect([...f.rows.keys()]).toEqual(["theirs"]);
+    expect(f.objects).toEqual(["mine"]);
+    expect(f.closing.has("user-b")).toBe(false);
+  });
+
+  describe("the per-invocation budget", () => {
+    test("does not fire on an account that fits it exactly", async () => {
+      const f = fixture();
+      seed(f, ["p1", "p2", "p3"]);
+
+      await expect(run(f, 3)).resolves.toBeUndefined();
+      expect(f.rows.size).toBe(0);
+    });
+
+    /**
+     * Past the budget the sweep stops rather than let workerd end the request
+     * with "Too many subrequests". What it removed stays removed, so the retry
+     * the message asks for resumes instead of starting over.
+     */
+    test("stops at the budget and resumes on the next attempt", async () => {
+      const f = fixture();
+      seed(f, ["p1", "p2", "p3", "p4", "p5"]);
+
+      await expect(run(f, 2)).rejects.toThrow(/Retry the deletion/);
+      expect(f.rows.size).toBe(3);
+      expect(f.objects).toHaveLength(2);
+
+      await expect(run(f, 2)).rejects.toThrow(/Retry the deletion/);
+      expect(f.rows.size).toBe(1);
+
+      await expect(run(f, 2)).resolves.toBeUndefined();
+      expect(f.rows.size).toBe(0);
+      expect(f.objects).toHaveLength(5);
+    });
+
+    /**
+     * Attempts, not removals. A refused row still spent its object delete and
+     * its row delete, so a budget counting only successes would let an account
+     * full of refusals run past the very limit this exists to respect.
+     *
+     * And the ending is the stalled one, not the resumable one: a budget spent
+     * without removing anything is a sweep no retry can advance, so the error
+     * must not ask for one.
+     */
+    test("is spent by refusals, and says so as a stall not a retry", async () => {
+      const f = fixture(() => ({ deleteOwned: async () => false }));
+      seed(f, ["p1", "p2", "p3"]);
+
+      await expect(run(f, 2)).rejects.toThrow(/not making progress/);
+      expect(f.objects).toHaveLength(2);
+    });
+
+    /**
+     * The refusal that must not read as a stall: these rows were removed by
+     * their owner while the sweep ran, so they are not listed again and the
+     * only thing left is work a retry will finish.
+     */
+    test("asks for a retry when the refusals were concurrent deletes", async () => {
+      const f = fixture((base) => ({
+        deleteOwned: async (id, userId) => {
+          if (id !== "vanishing") return await base.deleteOwned(id, userId);
+          base.rows.delete(id);
+          return false;
+        },
+      }));
+      seed(f, ["vanishing", "p1", "p2"]);
+
+      await expect(run(f, 2)).rejects.toThrow(/Retry the deletion/);
+      expect(f.rows.size).toBe(1);
+    });
+
+    test("is absent by default, which is what self-hosting gets", async () => {
+      const f = fixture();
+      seed(
+        f,
+        Array.from({ length: 50 }, (_, i) => `p${i}`),
+      );
+
+      await expect(run(f)).resolves.toBeUndefined();
+      expect(f.rows.size).toBe(0);
+    });
+
+    /**
+     * Every number the loop cannot count down to zero, refused at the door.
+     *
+     * Each of these would otherwise be accepted and then never satisfy
+     * `allowance === 0`, so the sweep would run unbounded while its caller
+     * believed it had asked for a bound - a budget that fails open, silently,
+     * which is worse than no budget at all because the caller stops watching.
+     *
+     * `1e20` is the one a sign test misses and `Number.isInteger` waves
+     * through: it is a whole number, and `1e20 - 1 === 1e20`.
+     */
+    test.each([
+      ["zero", 0],
+      ["negative", -1],
+      ["fractional", 2.5],
+      ["NaN", Number.NaN],
+      ["past exact arithmetic", 1e20],
+    ] as const)("refuses a %s budget rather than ignoring it", async (_, n) => {
+      const f = fixture();
+      seed(f, ["p1"]);
+
+      await expect(run(f, n)).rejects.toBeInstanceOf(TypeError);
+      // Refused before the marker, so a bad call leaves no half-closed
+      // account behind for the next one to trip over.
+      expect(f.closing.has(OWNER)).toBe(false);
+      expect(f.rows.size).toBe(1);
+    });
+  });
+
+  /**
+   * What a failed deletion owes the account it did not delete.
+   *
+   * Better Auth aborts on the throw, so the account survives - and an account
+   * that still exists must still be writable. Leaving the mark standing was
+   * the old behaviour and it meant any transient bucket or database failure
+   * during a sweep silently 409'd that account's uploads for good, with no
+   * path back that did not involve editing the database by hand.
+   */
+  describe("the mark a failed sweep leaves", () => {
+    test.each([
+      [
+        "a stall",
+        () => fixture(() => ({ deleteOwned: async () => false })),
+        /not making progress/,
+        // No budget: this throws on its own terms, and one here would only
+        // obscure which ending the case is about.
+        undefined,
+      ],
+      ["an exhausted budget", () => fixture(), /Retry the deletion/, 2],
+      [
+        "a storage failure",
+        () =>
+          fixture(() => ({}), {
+            delete: async () => {
+              throw new Error("bucket unreachable");
+            },
+          }),
+        /bucket unreachable/,
+        undefined,
+      ],
+    ] as const)(
+      "is lifted after %s",
+      async (_label, build, message, budget) => {
+        const f = build();
+        seed(f, ["p1", "p2", "p3"]);
+
+        await expect(run(f, budget)).rejects.toThrow(message);
+
+        expect(f.closing.has(OWNER)).toBe(false);
+        expect(f.closing.marks.size).toBe(0);
+      },
+    );
+
+    /**
+     * The reason marks are keyed by attempt. Two deletions of one account
+     * overlap; this one fails and lifts its own, and the other's has to
+     * survive - it is still sweeping, and the upload it is racing must still
+     * be refused.
+     */
+    test("is only its own, when another attempt is also sweeping", async () => {
+      const f = fixture(() => ({ deleteOwned: async () => false }));
+      seed(f, ["stuck"]);
+      const other = f.closing.mark(OWNER);
+
+      await expect(run(f)).rejects.toThrow(/not making progress/);
+
+      expect(f.closing.has(OWNER)).toBe(true);
+      expect([...f.closing.marks.keys()]).toEqual([other]);
+    });
+
+    /**
+     * The lift runs on a path that is already failing, usually because the
+     * database is unwell - so it is exactly the call likely to fail too, and
+     * it must not become the error the operator sees.
+     */
+    test("does not replace the failure that caused it", async () => {
+      const f = fixture(() => ({ deleteOwned: async () => false }));
+      seed(f, ["stuck"]);
+      f.closing.close = async () => {
+        throw new Error("database unreachable");
+      };
+
+      await expect(run(f)).rejects.toThrow(/not making progress/);
+
+      // Said once, where an operator will find it, rather than thrown.
+      const warned = f.logs.filter((line) =>
+        line.message.includes("could not lift the account-closing mark"),
+      );
+      expect(warned).toHaveLength(1);
+      expect(warned[0]?.fields).toMatchObject({ userId: OWNER });
+    });
+  });
+});

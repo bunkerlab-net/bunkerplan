@@ -8,8 +8,9 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import type { PlanVisibility } from "../../services/types.ts";
+import type { PlanVisibility } from "../../limits.ts";
 import { user } from "./auth.pg.ts";
+import { PLAN_VISIBILITY_CHECK } from "./visibility-check.ts";
 
 export const plan = pgTable(
   "plan",
@@ -39,9 +40,12 @@ export const plan = pgTable(
     // `$type` is a compile-time claim and the repo is not the only writer -
     // a migration or a console session can put anything in this column, and
     // the read gate treats every value that is not "public" as private.
-    // Unqualified to match the SQLite twin, where the qualified form breaks
-    // the table rebuild - see the note there.
-    check("plan_visibility_check", sql`"visibility" in ('public', 'private')`),
+    //
+    // The expression itself is src/db/schema/visibility-check.ts, shared with
+    // the SQLite twin so both dialects emit identical migration text. `sql.raw`
+    // for the same reason it does: this goes into a migration, where a bound
+    // parameter would have no meaning.
+    check("plan_visibility_check", sql.raw(PLAN_VISIBILITY_CHECK)),
   ],
 );
 

@@ -5,14 +5,18 @@ import type { AppAuth } from "../auth/instance.ts";
  *
  * A key acts for its owner on the whole plan API bar sharing: upload,
  * replacement, relabelling, delete, listing, and reading a plan that owner is
- * allowed to read. What stays session-only is handing out access - sharing,
- * share codes, grants - and those six handlers in src/http/plan-sharing.ts are
- * the only routes that call `resolveSessionUserId` directly; the other caller is
- * this function, which falls back to it. Managing keys and passkeys and
- * deleting the account are session-only too, but they are Better Auth's own
- * routes under `/api/auth/*` and never reach this module. No session is ever
- * minted for a key (`enableSessionForAPIKeys` stays at its `false` default), so
- * there is exactly one code path per credential type.
+ * allowed to read. Every one of those handlers calls this itself - the router in
+ * src/app.ts resolves nobody - so a route registered later cannot forget the
+ * check and each handler's 401 is testable without a server.
+ *
+ * What stays session-only is handing out access - sharing, share codes, grants -
+ * and those six handlers in src/http/plan-sharing.ts are the only routes that
+ * call `resolveSessionUserId` directly; the other caller is this function, which
+ * falls back to it. Managing keys and passkeys and deleting the account are
+ * session-only too, but they are Better Auth's own routes under `/api/auth/*`
+ * and never reach this module. No session is ever minted for a key
+ * (`enableSessionForAPIKeys` stays at its `false` default), so there is exactly
+ * one code path per credential type.
  */
 export async function resolveUserId(
   auth: AppAuth,

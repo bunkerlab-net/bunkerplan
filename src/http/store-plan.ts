@@ -59,6 +59,10 @@ export async function storeAndConfirm(
   // remain, so a row left behind gets the object retried on the next pass,
   // whereas dropping it first strands the object where nothing will look
   // again. A plan whose URL 404s is recoverable; an unowned object is not.
+  //
+  // Not `sweepOrphanedObject`: that one cannot fail its caller, and here the
+  // failure decides whether the row is dropped. This is the ordering, not the
+  // sweep.
   try {
     await storage.delete(id);
   } catch (error) {

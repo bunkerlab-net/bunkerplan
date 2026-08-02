@@ -3,8 +3,10 @@ import { createAuth } from "../auth/instance.ts";
 import { loadConfig } from "../config.ts";
 import { createD1Db } from "../db/d1.ts";
 import { createWorkersKv } from "../kv/workers-kv.ts";
+import { WORKERS_MAX_PLANS_PER_USER } from "../limits.ts";
 import { createLogger } from "../log.ts";
-import type { RuntimeTarget, Services } from "../services/types.ts";
+import type { Services } from "../services/context.ts";
+import type { RuntimeTarget } from "../services/types.ts";
 import { createR2Storage } from "../storage/r2.ts";
 
 /**
@@ -12,7 +14,10 @@ import { createR2Storage } from "../storage/r2.ts";
  * src/runtime/node.ts is its counterpart and must match it structurally.
  *
  * NOTHING reachable from here may import `pg`, `ioredis`, or `bun:sqlite` - the
- * Workers bundle would fail to resolve them.
+ * Workers bundle would fail to resolve them. Which is why the bindings below
+ * are wired unconditionally and `loadConfig(..., { workers: true })` accepts
+ * only `d1`/`kv`/`r2`: there is nothing here for any other driver value to
+ * dispatch to, so config refuses it at boot rather than ignoring it.
  *
  * Binding types come from the generated `Cloudflare.Env` in
  * worker-configuration.d.ts. Re-run `bun run cf-typegen` after editing
@@ -43,10 +48,25 @@ async function initialise(): Promise<Services> {
   const config = loadConfig(settings, { workers: true });
 
   const logger = createLogger(config);
-  const db = createD1Db(env.DB);
+  const db = createD1Db(env.DB, logger);
   const kv = createWorkersKv(env.KV);
   const storage = createR2Storage(env.BUCKET);
-  const auth = createAuth({ config, db, kv, storage, logger });
+  // The sweep's own allowance, and the same constant `src/config.ts` refuses
+  // `MAX_PLANS_PER_USER` above. One value read in two places rather than two
+  // that have to agree, so the quota can never be set past what a deletion can
+  // finish - the drift a second number here would allow does not exist.
+  //
+  // It therefore only fires for an account grown under an older, higher quota,
+  // and then it stops the sweep with a message saying to retry rather than
+  // letting workerd end the request with "Too many subrequests".
+  const auth = createAuth({
+    config,
+    db,
+    kv,
+    storage,
+    logger,
+    maxSweepAttempts: WORKERS_MAX_PLANS_PER_USER,
+  });
 
   return await Promise.resolve({ config, auth, logger, storage, kv, db });
 }

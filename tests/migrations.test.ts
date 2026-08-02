@@ -171,6 +171,79 @@ describe.each([
   });
 });
 
+describe.each([
+  ["in one transaction, as drizzle runs it", true],
+  ["statement by statement", false],
+])("0012 against markers left by an older sweep (%s)", (_, wrap) => {
+  /**
+   * The marker table was keyed by account and is now keyed by attempt, which
+   * on SQLite means a table rebuild. Drizzle generated the copy as
+   * `SELECT "attempt_id"` - a column the old table does not have - so the
+   * statement was written by hand, and this is what says the hand-written one
+   * is right. No fresh-database test can: they never have a row to carry.
+   */
+  test("carries an existing marker across under a derived id", () => {
+    const db = migrate(
+      12,
+      (seeded) => {
+        seedLegacyPlan(seeded);
+        seeded.exec(
+          `INSERT INTO account_closing (user_id, started_at)
+           VALUES ('owner', 1234)`,
+        );
+      },
+      wrap,
+    );
+
+    expect(db.query(`select * from account_closing`).all()).toEqual([
+      { attempt_id: "legacy:owner", user_id: "owner", started_at: 1234 },
+    ]);
+    db.close();
+  });
+
+  /**
+   * The point of carrying it rather than dropping it. That account was mid
+   * deletion when the migration ran, and the mark is what refuses uploads for
+   * it - a rebuild that lost the row would reopen the window the marker
+   * exists to close, silently.
+   */
+  test("leaves the account still marked, and still cascading", () => {
+    const db = migrate(
+      12,
+      (seeded) => {
+        seedLegacyPlan(seeded);
+        seeded.exec(
+          `INSERT INTO account_closing (user_id, started_at)
+           VALUES ('owner', 1234)`,
+        );
+      },
+      wrap,
+    );
+
+    // Readable the way `isOpen` asks, which is by account and not by key.
+    expect(count(db, "account_closing")).toBe(1);
+    expect(
+      db
+        .query(`select count(*) as v from account_closing where user_id = ?`)
+        .get("owner"),
+    ).toEqual({ v: 1 });
+
+    // And a second attempt can still be placed beside it, which is what makes
+    // the carried row an inconvenience rather than a lock.
+    db.exec(
+      `INSERT INTO account_closing (attempt_id, user_id, started_at)
+       VALUES ('retry', 'owner', 5678)`,
+    );
+    expect(count(db, "account_closing")).toBe(2);
+
+    db.exec(`PRAGMA foreign_keys = ON`);
+    db.exec(`DELETE FROM plan WHERE user_id = 'owner'`);
+    db.exec(`DELETE FROM user WHERE id = 'owner'`);
+    expect(count(db, "account_closing")).toBe(0);
+    db.close();
+  });
+});
+
 /**
  * `<statement> <table>`, however the dialect chose to quote the name.
  *

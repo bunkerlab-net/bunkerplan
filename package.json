@@ -15,15 +15,18 @@
     "db:migrate:local": "wrangler d1 migrations apply bunkerplan --local",
     "db:migrate:pg": "drizzle-kit migrate --config drizzle.pg.config.ts",
     "db:migrate:sqlite": "drizzle-kit migrate --config drizzle.sqlite.config.ts",
-    "deploy": "bun run scripts/check-deploy-config.ts && bun run build && wrangler deploy",
+    "deploy": "bun run deploy:check && bun run build && wrangler deploy",
+    "deploy:check": "bun test tests/wrangler-config.test.ts",
     "dev": "bun run scripts/dev.ts",
     "dev:node": "bun run scripts/dev.ts node",
     "postinstall": "bun run scripts/vendor-scalar.ts",
     "start": "bun dist/server/index.js",
-    "test": "bun run build && BUNKERPLAN_PREBUILT=1 bun test --isolate",
+    "test": "bun run build && bun run test:only",
     "test:backends": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml up -d --wait postgres valkey minio",
     "test:backends:down": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml down -v",
-    "typecheck": "bun run build && tsc --noEmit"
+    "test:only": "BUNKERPLAN_PREBUILT=1 bun test --isolate",
+    "typecheck": "bun run build && bun run typecheck:only",
+    "typecheck:only": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1096.0",
@@ -53,7 +56,6 @@
     "@types/pg": "^8.20.0",
     "auth": "^1.6.25",
     "drizzle-kit": "^0.31.10",
-    "happy-dom": "^20.11.1",
     "miniflare": "^4.20260730.0",
     "sort-package-json": "^4.0.0",
     "wrangler": "^4.115.0"

@@ -13,11 +13,14 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    # Native service containers rather than the Docker Compose stack. Compose
-    # is how a developer brings these up locally (docker-compose.test.yml); on
-    # a runner the same images attach directly, so nothing has to shell out to
-    # a second orchestrator, and the health gates below are what the job waits
-    # on instead of a script polling ports.
+    # Service containers rather than the Docker Compose stack. Compose is how a
+    # developer brings these up locally (docker-compose.test.yml); on a runner
+    # the same images attach directly, so nothing has to shell out to a second
+    # orchestrator and the health gates below are what the job waits on.
+    #
+    # MinIO is the exception and is started as a step further down, because a
+    # service container cannot supply a command and the only MinIO image that
+    # carries one was built in July 2021 - see the note there.
     #
     # Every one of these is what makes a suite run rather than skip. Without
     # them tests/drivers/* reports success having exercised only the Cloudflare
@@ -54,23 +57,6 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-      # `edge-cicd` rather than the ordinary MinIO tag for exactly that reason:
-      # it carries `CMD ["minio","server","/data"]`, so it needs no argument.
-      # The bucket is not created here - tests/drivers/backends.ts makes its own
-      # per run and drops it, so nothing has to survive between jobs.
-      minio:
-        image: docker.io/minio/minio:edge-cicd
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -fsS http://localhost:9000/minio/health/live"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -91,15 +77,86 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-bun-${{ hashFiles('**/bun.lock') }}
       - run: bun install --frozen-lockfile
 
+      # MinIO as a step, not a service container, and the same dated release
+      # docker-compose.yml pins. A service container cannot supply a command,
+      # so it could only run `edge-cicd` - the one MinIO image carrying
+      # `CMD ["minio","server","/data"]`, and one built in July 2021 - which
+      # pointed the S3 conformance suite at a server years behind the September
+      # 2025 release a self-hoster gets. Started here the argument is just an
+      # argument, and
+      # local and CI exercise the same MinIO.
+      #
+      # Pinned by release tag, not by digest. That is a repository-wide
+      # decision rather than an oversight here: every image reference in this
+      # project names a version and none names a `sha256:`, because a digest
+      # has to be re-resolved by hand on every bump. Keep this reference and
+      # docker-compose.yml's on the same release.
+      #
+      # Credentials are inherited by name rather than written into the command,
+      # where they would reach the run log. The bucket is not created:
+      # tests/drivers/backends.ts makes its own per run and drops it.
+      - name: Start MinIO
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
+            docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          # Each probe bounded, not just the loop. `curl` with no deadline can
+          # sit on a socket that accepts and never answers, which is exactly
+          # what a half-started server does - and forty of those turn an
+          # eighty-second wait into the job's own timeout with no output.
+          for _ in $(seq 1 40); do
+            if curl --fail --silent --show-error \
+              --connect-timeout 2 --max-time 5 \
+              http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MinIO did not become healthy"
+          docker logs minio
+          exit 1
+
       # `hk` is the same gate the pre-commit hook runs, so CI cannot disagree
       # with a clean local commit. It covers Biome, Pkl, package.json ordering,
       # line endings, and private keys in one pass.
       - name: Lint and format
         run: hk check --all
-      - name: Typecheck
-        run: bun run typecheck
 
-      # `bun run test` is `bun test --isolate`, with coverage on through
+      # A schema change is only real once its migration is committed. Nothing
+      # reconciles src/db/schema/** with drizzle/** at runtime - the tables a
+      # deployment has are the ones the migrations built - so `db:generate`
+      # leaving the tree clean is the evidence the two still agree. The
+      # `plan_visibility_check` constraint is the sharp edge: it is generated
+      # from the PLAN_VISIBILITIES tuple in src/limits.ts, where adding one
+      # word rewrites SQL that has already been applied to every database.
+      - name: Migrations match the schema
+        run: |
+          bun run db:generate
+          if [ -n "$(git status --porcelain -- drizzle)" ]; then
+            echo "::error::drizzle/ is stale - run 'bun run db:generate' and commit the result"
+            git status --porcelain -- drizzle
+            exit 1
+          fi
+
+      # Built once, here. Both steps below need `dist/` and the generated
+      # asset manifest - the typecheck because that manifest is a source file,
+      # the suite because it serves the real Workers bundle on Miniflare - and
+      # each used to build its own, three times per run with the deploy job.
+      # This is also what a separate build step always covered: a bundle that
+      # does not build fails here, before anything is published.
+      #
+      # `bun run typecheck` and `bun run test` still build first, so the local
+      # commands stay a single word. The `:only` variants are those same
+      # commands with the build removed for a job that has already done it.
+      - name: Build
+        run: bun run build
+      - name: Typecheck
+        run: bun run typecheck:only
+
+      # `bun run test:only` is `bun test --isolate`, with coverage on through
       # bunfig.toml. That is the topology that measures coverage correctly.
       #
       # Run once, on purpose. Bun's `--rerun-each` repeats every test rather
@@ -108,39 +165,17 @@ jobs:
       # green second attempt is the exact evidence README.md says not to
       # accept. A red run here is a thing to read, not a thing to re-roll.
       #
-      # The suite also serves the real Workers bundle on Miniflare, so it
-      # builds one first. That covers what a separate build step used to: a
-      # bundle that does not build fails here, before anything is published.
+      # It runs against the bundle built above; `BUNKERPLAN_PREBUILT=1` in the
+      # script is what tells the suite not to rebuild it.
       #
       # These variables are the opt-in. A backend whose variable is missing
       # SKIPS, so dropping one turns a conformance suite off silently - they
       # are set here precisely so that cannot happen unnoticed.
-      #
-      # `TEST_VALKEY_URL` is the exception, and it is set on the step below
-      # instead. In one shared process the Valkey suite hangs and the block
-      # fails at Bun's 5000ms deadline; in its own process it does not. Only
-      # that correlation is established - see README.md for the measurements
-      # and for what is still not explained.
       - name: Test
-        run: bun run test
+        run: bun run test:only
         env:
           TEST_DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
-          TEST_S3_ENDPOINT: http://127.0.0.1:9000
           TEST_S3_ACCESS_KEY_ID: minioadmin
+          TEST_S3_ENDPOINT: http://127.0.0.1:9000
           TEST_S3_SECRET_ACCESS_KEY: minioadmin
-
-      # The Valkey conformance suite, in the process it needs. Same assertions
-      # the run above would have made, once, with no retry - the only thing
-      # that changed is what else is in the process with it. It reports its own
-      # coverage figure, which is why `src/kv/valkey.ts` reads low in the run
-      # above and 100% here.
-      #
-      # `!cancelled()` because the split must not cost information: without it
-      # a single failure in the step above skips this one, and a pull request
-      # that used to report on every backend would report on all but Valkey.
-      # Still skipped when someone cancels the run.
-      - name: Test Valkey
-        if: ${{ !cancelled() }}
-        run: BUNKERPLAN_PREBUILT=1 bun test --isolate ./tests/drivers/kv-store.valkey.test.ts
-        env:
           TEST_VALKEY_URL: redis://127.0.0.1:6379

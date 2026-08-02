@@ -1,6 +1,12 @@
--- A public plan must not keep a share code. Before this, flipping a plan to
--- public left its digest in place: the code granted nothing while public, then
--- started working again the moment the plan went private, along with every
--- unlock cookie minted under it. Rows written under that behaviour are repaired
--- here, so "public implies no share code" holds for old rows as well as new.
+-- A one-time repair, written when a public plan was not allowed to keep a share
+-- code. Before it, flipping a plan to public left its digest in place: the code
+-- granted nothing while public, then started working again the moment the plan
+-- went private, along with every unlock cookie minted under it. This clears the
+-- digest from the rows written under that behaviour.
+--
+-- The rule it enforced no longer holds. A share code now survives a visibility
+-- flip in either direction, and `POST /share-code` (replaces one) and
+-- `DELETE /share-code` (drops it) are what retire a digest - see the note on
+-- `setShareCodeHash` in src/services/types.ts. So this statement records what
+-- was done to the data at the time, not an invariant the schema still keeps.
 UPDATE plan SET share_code_hash = NULL WHERE visibility = 'public';

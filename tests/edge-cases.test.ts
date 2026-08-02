@@ -1,8 +1,19 @@
 import { describe, expect, test } from "bun:test";
+import { type SQL, sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { pino } from "pino";
 import { z } from "zod";
 import { ref } from "../src/api/schemas.ts";
+import type { Dialect } from "../src/db/dialect.ts";
 import { retryAfterSeconds, sometimes } from "../src/db/rate-limit-window.ts";
+import { createUnlockRateLimitRepo } from "../src/db/rate-limits.shared.ts";
+import { accountClosing } from "../src/db/schema/account-closing.sqlite.ts";
+import { user } from "../src/db/schema/auth.sqlite.ts";
+import { plan, planGrant } from "../src/db/schema/plan.sqlite.ts";
+import {
+  unlockRateLimit,
+  uploadRateLimit,
+} from "../src/db/schema/rate-limit.sqlite.ts";
 import { healthz, PROBE_TIMEOUT_MS, type Probed } from "../src/http/healthz.ts";
 import { replacePlan } from "../src/http/replace-plan.ts";
 import type {
@@ -15,11 +26,19 @@ import {
   CONFIG,
   html,
   memoryStorage,
-  OWNER,
-  PLAN_ID,
+  openAccounts,
+  openRateLimits,
   PUBLIC_BASE_URL,
   upload,
 } from "./app-harness.ts";
+import {
+  at,
+  fakeAuth,
+  OWNER,
+  PLAN_ID,
+  recordingLogger,
+  silentLogger,
+} from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 /**
@@ -29,8 +48,6 @@ import { basePlanRepoStub } from "./plan-repo-stub.ts";
  * e2e stack, because every one requires a backend that is broken in a specific
  * way.
  */
-
-const logger = pino({ level: "silent" });
 
 describe("the dashboard route", () => {
   test("renders the dashboard document", async () => {
@@ -123,7 +140,11 @@ describe("uploading to an account being deleted", () => {
     const storage = memoryStorage();
     const app = buildApp({
       sessionUser: OWNER,
-      accountClosing: { open: async () => {}, isOpen: async () => true },
+      accountClosing: {
+        open: async () => "attempt",
+        close: async () => {},
+        isOpen: async () => true,
+      },
       storage: {
         ...storage,
         put: async (id, body) => {
@@ -186,6 +207,21 @@ describe("replacing a plan whose row vanishes underneath", () => {
     return { storage, plans, objects, logged, sink };
   }
 
+  /**
+   * Everything `replacePlan` needs except the logger, which is the one thing
+   * these two cases differ on. The session resolves to the owner because the
+   * handler authenticates itself now - the router used to - and the upload
+   * allowance is open because its refusal has a suite of its own.
+   */
+  const replaceDeps = (storage: PlanStorage, plans: PlanRepo) => ({
+    auth: fakeAuth({ sessionUser: OWNER }).auth,
+    config: CONFIG,
+    plans,
+    uploadRateLimits: openRateLimits,
+    accountClosing: openAccounts,
+    storage,
+  });
+
   const request = () =>
     new Request(`${PUBLIC_BASE_URL}/api/plans/${PLAN_ID}`, {
       method: "PUT",
@@ -197,13 +233,9 @@ describe("replacing a plan whose row vanishes underneath", () => {
     const { storage, plans, objects } = racing(false);
 
     const response = await replacePlan(
-      storage,
-      plans,
-      logger,
+      { ...replaceDeps(storage, plans), logger: silentLogger },
       request(),
       PLAN_ID,
-      OWNER,
-      CONFIG,
     );
 
     expect(response.status).toBe(404);
@@ -215,13 +247,9 @@ describe("replacing a plan whose row vanishes underneath", () => {
     const { storage, plans, logged, sink, objects } = racing(true);
 
     const response = await replacePlan(
-      storage,
-      plans,
-      sink,
+      { ...replaceDeps(storage, plans), logger: sink },
       request(),
       PLAN_ID,
-      OWNER,
-      CONFIG,
     );
 
     // The caller still gets the honest answer; the orphan is the operator's
@@ -230,7 +258,9 @@ describe("replacing a plan whose row vanishes underneath", () => {
     // Located by message rather than by position: the log is not ordered by
     // this test, and `logged[0]` would silently start checking another line.
     const orphan = logged.find(
-      (line) => line["msg"] === "orphaned plan object",
+      (line) =>
+        line["msg"] ===
+        "failed to delete an orphaned plan object; its bytes are still stored",
     );
     // Named separately so a missing line reads as "no such log entry" rather
     // than as a shape mismatch against `undefined`.
@@ -524,6 +554,117 @@ describe("the fixed-window arithmetic both limiters share", () => {
     // the path the per-address cap cannot bound.
     expect(fired).toBeGreaterThan(4000 / 16 / 3);
     expect(fired).toBeLessThan((4000 / 16) * 3);
+  });
+});
+
+describe("the unlock bucket's opportunistic prune", () => {
+  /**
+   * `sometimes` fires on one call in sixteen, so a prune that throws would
+   * refuse that fraction of redemptions - on the one route with no credential
+   * to retry with. The prune is housekeeping and the count is the decision;
+   * only the second may fail the request.
+   */
+
+  /** A window far enough back that the wait is the floored one second. */
+  const WINDOW_START = 1_700_000_000_000;
+
+  /**
+   * The prune and nothing else. One predicate, used both to decide what the
+   * stub refuses and to assert what it was asked - two copies of the same
+   * `startsWith` would let the test refuse one statement and count another.
+   */
+  const isPrune = (statement: string) =>
+    statement.trimStart().toLowerCase().startsWith("delete");
+
+  /** Every statement `run` was asked to execute, so the prune is identifiable. */
+  interface Dispatched {
+    statements: string[];
+  }
+
+  /**
+   * The counter's allowed answer, whatever it is asked: `consumeOne` reads one
+   * row back from its upsert, so a stub that always returns one is a bucket
+   * that always has room. It is the prune above it that is under test.
+   *
+   * `run` records what it was given and refuses only what `onDelete` picks
+   * out, so a test can fail the prune without failing anything else - and can
+   * then assert the prune was attempted at all, which a `run` that threw
+   * unconditionally could never distinguish from one that never ran.
+   */
+  const dialect = (
+    dispatched: Dispatched,
+    onDelete: () => Promise<void> = async () => {},
+  ): Dialect => {
+    const render = new PgDialect();
+    const run = async (query: SQL) => {
+      const text = render.sqlToQuery(query).sql;
+      dispatched.statements.push(text);
+      if (isPrune(text)) await onDelete();
+    };
+    return {
+      rows: async <T extends Record<string, unknown>>() =>
+        [{ windowStart: WINDOW_START }] as unknown as T[],
+      run,
+      tables: {
+        plan,
+        planGrant,
+        user,
+        accountClosing,
+        uploadRateLimit,
+        unlockRateLimit,
+      },
+      claim: async (_userId, body) => await body({ rows: async () => [], run }),
+      createdAt: (value) => new Date(Number(value)),
+      floor: (expr) => sql`max(${expr}, 0)`,
+    };
+  };
+
+  /** The prune, as `run` sees it: the only `delete` the repo issues. */
+  const pruned = (dispatched: Dispatched) =>
+    dispatched.statements.filter(isPrune);
+
+  test("a prune that fails is logged, and the redemption still passes", async () => {
+    const { logger, lines } = recordingLogger();
+    const failure = new Error("database is locked");
+    const dispatched: Dispatched = { statements: [] };
+    const repo = createUnlockRateLimitRepo(
+      dialect(dispatched, async () => {
+        throw failure;
+      }),
+      logger,
+      { shouldSweep: () => true },
+    );
+
+    expect(await repo.consume("addr", 3, 60)).toEqual({
+      allowed: true,
+      retryAfter: 1,
+      windowStart: WINDOW_START,
+    });
+    // Attempted, and it was the prune that failed rather than the sweep being
+    // skipped - which every other assertion here would read the same way.
+    expect(pruned(dispatched)).toHaveLength(1);
+    // The cause travels, not just the fact. A line saying only that a sweep
+    // failed leaves an operator with a table that stops shrinking and nothing
+    // naming why - and this is the one place the reason is still in hand.
+    const warnings = at(lines, "warn");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe("unlock rate-limit sweep failed");
+    expect(warnings[0]?.fields["err"]).toBe(failure);
+  });
+
+  test("and a prune that succeeds says nothing", async () => {
+    // Captured, like its sibling above, rather than thrown from. A `warn` that
+    // throws would be caught by the very `try` under test and reported as a
+    // failed prune, so the test would pass whether the sweep warned or not.
+    const { logger, lines } = recordingLogger();
+    const dispatched: Dispatched = { statements: [] };
+    const repo = createUnlockRateLimitRepo(dialect(dispatched), logger, {
+      shouldSweep: () => true,
+    });
+
+    expect((await repo.consume("addr", 3, 60)).allowed).toBe(true);
+    expect(pruned(dispatched)).toHaveLength(1);
+    expect(at(lines, "warn")).toEqual([]);
   });
 });
 

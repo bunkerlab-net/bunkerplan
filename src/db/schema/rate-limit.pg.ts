@@ -10,7 +10,7 @@ import { user } from "./auth.pg.ts";
  * deleted mid-window and the limit would reset early.
  *
  * `windowStart` is epoch milliseconds rather than a `timestamp` column so the
- * conditional upsert in src/db/rate-limits.pg.ts can compare it to a plain
+ * conditional upsert in src/db/rate-limits.shared.ts can compare it to a plain
  * bound number inside SQL.
  */
 export const uploadRateLimit = pgTable("upload_rate_limit", {
@@ -46,7 +46,7 @@ export const unlockRateLimit = pgTable(
     count: integer("count").notNull(),
     windowStart: bigint("window_start", { mode: "number" }).notNull(),
   },
-  // The sweep in src/db/rate-limits.pg.ts deletes by window, so without this
-  // pruning would scan the whole table on every redemption.
+  // The sweep in src/db/rate-limits.shared.ts deletes by window, so without
+  // this, pruning would scan the whole table on every redemption.
   (table) => [index("unlock_rate_limit_windowStart_idx").on(table.windowStart)],
 );

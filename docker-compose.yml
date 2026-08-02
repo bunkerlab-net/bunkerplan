@@ -29,7 +29,9 @@ services:
       retries: 10
 
   minio:
-    image: docker.io/minio/minio
+    # Pinned like postgres and valkey above. MinIO publishes no moving
+    # major-version tag, only dated releases, so this is the tag to bump.
+    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -45,7 +47,9 @@ services:
       retries: 10
 
   minio-init:
-    image: docker.io/minio/mc
+    # Pinned like the server above. `mc` releases on its own cadence, so this
+    # tag does not track the `minio` one and is bumped separately.
+    image: docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
         condition: service_healthy

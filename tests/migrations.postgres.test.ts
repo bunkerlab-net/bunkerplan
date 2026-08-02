@@ -131,3 +131,83 @@ describe.skipIf(skip)("0011 against rows already stored", () => {
     expect(Number(rows[0]?.v)).toBe(0);
   });
 });
+
+describe.skipIf(skip)("0013 against markers left by an older sweep", () => {
+  /**
+   * The generated migration was `ADD COLUMN "attempt_id" text PRIMARY KEY NOT
+   * NULL` next to a commented-out placeholder for dropping the old key, which
+   * fails on a populated table twice over - a NOT NULL column with no default,
+   * and a second primary key beside the first. It was rewritten by hand as
+   * nullable, backfill, constrain, and this is the test that says the rewrite
+   * works against the data the old shape allowed.
+   */
+  test("carries an existing marker across and re-keys the table", async () => {
+    const pool = await migrate(13, async (run) => {
+      await run(
+        `insert into "user" (id, name, email, email_verified, created_at, updated_at)
+         values ('owner', 'owner', 'owner@x', false, now(), now())`,
+      );
+      await run(
+        `insert into account_closing (user_id, started_at) values ('owner', 1234)`,
+      );
+    });
+    // `finally`, so a failed assertion closes the pool too. Left open, its
+    // clients keep the process alive past the suite and every later file pays
+    // for it - and the visible symptom is a hang somewhere else entirely.
+    try {
+      const { rows } = await pool.query<{
+        attempt_id: string;
+        user_id: string;
+        started_at: string;
+      }>(`select attempt_id, user_id, started_at from account_closing`);
+      expect(rows).toEqual([
+        { attempt_id: "legacy:owner", user_id: "owner", started_at: "1234" },
+      ]);
+
+      // A second attempt can be placed beside the carried one - the whole
+      // reason the key moved - and the old key is genuinely gone rather than
+      // still enforcing one row per account.
+      await pool.query(
+        `insert into account_closing (attempt_id, user_id, started_at)
+         values ('retry', 'owner', 5678)`,
+      );
+      const { rows: both } = await pool.query<{ v: string }>(
+        `select count(*) as v from account_closing where user_id = 'owner'`,
+      );
+      expect(Number(both[0]?.v)).toBe(2);
+
+      /*
+       * The index the migration adds, checked here because nothing else can.
+       * The schema-shape suite compares the two dialects' drizzle objects and
+       * so would agree with itself if both were wrong, and the driver suites
+       * build their schema from these same migrations. `isOpen` runs on the
+       * upload path and now looks up by `user_id`, which stopped being the
+       * primary key three statements ago - without this it is a sequential
+       * scan that nothing would notice until the table grew.
+       *
+       * Scoped to `current_schema()`, which the pool's `search_path` makes
+       * this run's scratch schema. Every other suite's schema holds an
+       * `account_closing` with the same index name, so matching on the table
+       * name alone finds however many happen to be alive.
+       */
+      const { rows: indexed } = await pool.query<{ indexdef: string }>(
+        `select indexdef from pg_indexes
+         where schemaname = current_schema()
+           and tablename = 'account_closing'
+           and indexname = 'account_closing_user_idx'`,
+      );
+      expect(indexed).toHaveLength(1);
+      expect(indexed[0]?.indexdef).toContain("(user_id)");
+      expect(indexed[0]?.indexdef).not.toContain("UNIQUE");
+
+      // And both still cascade, which collects a mark no failure lifted.
+      await pool.query(`delete from "user" where id = 'owner'`);
+      const { rows: left } = await pool.query<{ v: string }>(
+        `select count(*) as v from account_closing`,
+      );
+      expect(Number(left[0]?.v)).toBe(0);
+    } finally {
+      await pool.end();
+    }
+  });
+});

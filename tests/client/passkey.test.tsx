@@ -219,6 +219,67 @@ describe("usePasskeyAction", () => {
     expect(view.find<HTMLButtonElement>("#register").disabled).toBe(true);
   });
 
+  test("two presses in one tick run one ceremony, not two", async () => {
+    /*
+     * The window `disabled` cannot close. It needs a render and `busy` is
+     * state, so a second handler dispatched before that render runs from the
+     * enabled one - and WebAuthn answering twice means two credentials for a
+     * visitor who pressed once, or a second prompt on top of the first.
+     *
+     * `inFlight` is the ref that closes it, kept separately from the
+     * credentials panels' `useWriteLatch` because this success path is the
+     * opposite one: it navigates and stays latched.
+     */
+    let attempts = 0;
+    const ceremony = deferred<{ data: unknown; error: null }>();
+    client.passkey.addPasskey = async () => {
+      attempts += 1;
+      return await ceremony.answer();
+    };
+    const view = mount(<Runner />);
+
+    const press = () =>
+      view
+        .find("#register")
+        .dispatchEvent(
+          new MouseEvent("click", { bubbles: true, cancelable: true }),
+        );
+    press();
+    press();
+    ceremony.release({ data: { id: "pk1" }, error: null });
+    await flush();
+
+    expect(attempts).toBe(1);
+    expect(navigations).toEqual(["/dashboard"]);
+
+    // And a third press, after the render the success produced. The latch is
+    // deliberately never released on this path - the page is leaving - so this
+    // is the difference between a guard against one turn and a guard that
+    // holds until the document goes.
+    press();
+    await flush();
+
+    expect(attempts).toBe(1);
+    expect(navigations).toEqual(["/dashboard"]);
+  });
+
+  test("a refused ceremony can be pressed again in the next tick", async () => {
+    // The latch is a guard against the same turn, not a one-shot: releasing it
+    // on a refusal is what makes a cancelled prompt retryable, and a ref that
+    // stayed set would leave the buttons enabled and inert.
+    let attempts = 0;
+    client.signIn.passkey = async () => {
+      attempts += 1;
+      return { data: null, error: { message: "cancelled" } };
+    };
+    const view = mount(<Runner />);
+
+    await click(view.find("#signin"));
+    await click(view.find("#signin"));
+
+    expect(attempts).toBe(2);
+  });
+
   test("a refusal releases the buttons so the ceremony can be retried", async () => {
     client.signIn.passkey = refuse("cancelled");
     const view = mount(<Runner />);

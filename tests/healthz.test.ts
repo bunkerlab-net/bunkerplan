@@ -1,18 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { pino } from "pino";
 import { healthz } from "../src/http/healthz.ts";
+import type { Logger } from "../src/log.ts";
 import type { Db, KvStore, PlanStorage } from "../src/services/types.ts";
+import { silentLogger } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
-
-/** Silent: these tests assert on responses and side effects, not on output. */
-const logger = pino({ level: "silent" });
 
 interface Fakes {
   services: () => Promise<{
     storage: PlanStorage;
     db: Db;
     kv: KvStore;
-    logger: typeof logger;
+    // The production contract, not `typeof silentLogger`. Naming the fake
+    // would make this fixture agree with whatever the fake happens to be, so
+    // a logger `healthz` needs and the fake lacks would typecheck here and
+    // fail where it is called.
+    logger: Logger;
   }>;
   probed: string[];
 }
@@ -59,14 +61,15 @@ function fakes(fails: string[] = []): Fakes {
       refund: async () => {},
     },
     accountClosing: {
-      open: async () => {},
+      open: async () => "attempt",
+      close: async () => {},
       isOpen: async () => false,
     },
     probe: probe("db"),
   } satisfies Db;
 
   return {
-    services: async () => ({ storage, db, kv, logger }),
+    services: async () => ({ storage, db, kv, logger: silentLogger }),
     probed,
   };
 }

@@ -5,14 +5,16 @@ import {
   buildApp,
   CLIENT_IP,
   CLIENT_IP_HEADER,
+  memoryStorage,
+} from "./app-harness.ts";
+import {
   GRANTEE,
   memoryPlans,
-  memoryStorage,
   OWNER,
   PLAN_ID,
   STRANGER,
   storedPlan,
-} from "./app-harness.ts";
+} from "./fakes.ts";
 
 /**
  * `GET /p/:id` - the route the whole product exists to serve, and the one

@@ -1,15 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import {
-  MAX_PLAN_LABEL_LENGTH,
-  parsePlanLabel,
-} from "../src/http/plan-label.ts";
+import { parsePlanLabel } from "../src/http/plan-label.ts";
 import { relabelPlan } from "../src/http/relabel-plan.ts";
+import { MAX_PLAN_LABEL_LENGTH } from "../src/limits.ts";
 import type { PlanRepo } from "../src/services/types.ts";
+import { fakeAuth } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";
 
 const OWNER = "user-a";
 const OTHER = "user-b";
 const ID = "plan-1";
+
+/** The session the handler resolves; it authenticates itself now. */
+const as = (userId: string) => fakeAuth({ sessionUser: userId }).auth;
 
 /** Only the owner's row exists; `relabel` enforces that, as the real one does. */
 function fakes() {
@@ -75,10 +77,10 @@ describe("relabelPlan", () => {
   test("stores a trimmed label and echoes it back", async () => {
     const { plans, stored } = fakes();
     const response = await relabelPlan(
+      as(OWNER),
       plans,
       patch({ label: " Q3 " }),
       ID,
-      OWNER,
     );
     expect(response.status).toBe(200);
     expect(
@@ -91,10 +93,10 @@ describe("relabelPlan", () => {
     const { plans, stored } = fakes();
     stored.label = "old";
     const response = await relabelPlan(
+      as(OWNER),
       plans,
       patch({ label: null }),
       ID,
-      OWNER,
     );
     expect(response.status).toBe(200);
     expect(stored.label).toBeNull();
@@ -103,39 +105,63 @@ describe("relabelPlan", () => {
   test("404s for another account's plan without writing", async () => {
     const { plans, stored } = fakes();
     const response = await relabelPlan(
+      as(OTHER),
       plans,
       patch({ label: "mine" }),
       ID,
-      OTHER,
     );
     expect(response.status).toBe(404);
     expect(stored.label).toBeNull();
   });
 
+  /**
+   * 401, not 404. The distinction is the point: "your session is not valid"
+   * and "no such plan of yours" are different answers, and the handler
+   * resolves the caller itself rather than trusting a router to have done it.
+   * Every other case here arrives already signed in, so nothing else would
+   * notice an auth check that stopped running.
+   */
+  test("401s an unauthenticated caller without writing", async () => {
+    const { plans, stored } = fakes();
+    const response = await relabelPlan(
+      fakeAuth({ sessionUser: null }).auth,
+      plans,
+      patch({ label: "mine" }),
+      ID,
+    );
+    expect(response.status).toBe(401);
+    expect(stored.label).toBeNull();
+  });
+
   test("rejects a body that is not JSON", async () => {
     const { plans } = fakes();
-    const response = await relabelPlan(plans, patch("not json"), ID, OWNER);
+    const response = await relabelPlan(as(OWNER), plans, patch("not json"), ID);
     expect(response.status).toBe(400);
   });
 
   test("rejects a missing label field rather than clearing", async () => {
     const { plans, stored } = fakes();
     stored.label = "keep";
-    const response = await relabelPlan(plans, patch({}), ID, OWNER);
+    const response = await relabelPlan(as(OWNER), plans, patch({}), ID);
     expect(response.status).toBe(400);
     expect(stored.label).toBe("keep");
   });
 
   test("rejects a non-string label", async () => {
     const { plans } = fakes();
-    const response = await relabelPlan(plans, patch({ label: 7 }), ID, OWNER);
+    const response = await relabelPlan(
+      as(OWNER),
+      plans,
+      patch({ label: 7 }),
+      ID,
+    );
     expect(response.status).toBe(400);
   });
 
   test("rejects an over-long label", async () => {
     const { plans, stored } = fakes();
     const label = "x".repeat(MAX_PLAN_LABEL_LENGTH + 1);
-    const response = await relabelPlan(plans, patch({ label }), ID, OWNER);
+    const response = await relabelPlan(as(OWNER), plans, patch({ label }), ID);
     expect(response.status).toBe(400);
     expect(stored.label).toBeNull();
   });

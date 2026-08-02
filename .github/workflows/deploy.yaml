@@ -45,6 +45,14 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-bun-${{ hashFiles('**/bun.lock') }}
       - run: bun install --frozen-lockfile
 
+      # Before the migrations, not just before the Worker. `bun run deploy`
+      # runs this too, but by then the schema has already moved: a
+      # `wrangler.jsonc` this refuses would migrate the production database and
+      # then fail on the way out, leaving the deployment half done. Running it
+      # here costs one second and makes the whole job refuse together.
+      - name: Check the deploy configuration
+        run: bun run deploy:check
+
       # Schema first: the reverse order puts the new Worker in front of a table
       # it expects to exist. Wrangler skips its confirmation when it detects CI,
       # captures a backup, and rolls a failed migration back to the previous one.
@@ -54,10 +62,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # `bun run deploy` is the path a local deploy already takes: refuse the
-      # dev placeholders, build, then deploy the generated config rather than
-      # wrangler.jsonc. Calling wrangler directly here would be a second
-      # mechanism, free to drift from the one people run by hand.
+      # `bun run deploy` is the path a local deploy already takes: check, build,
+      # then `wrangler deploy` against wrangler.jsonc. Calling wrangler directly
+      # here would be a second mechanism, free to drift from the one people
+      # run by hand - so the check above is a repeat rather than a replacement.
       - name: Deploy Worker
         run: bun run deploy
         env:

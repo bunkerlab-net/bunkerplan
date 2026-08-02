@@ -1,5 +1,6 @@
 import { Redis } from "ioredis";
 import type { KvStore } from "../services/types.ts";
+import { MIN_TTL_SECONDS } from "./min-ttl.ts";
 
 /**
  * A `KvStore` that owns a connection, and so can be asked to give it up.
@@ -29,8 +30,18 @@ export function createValkeyKv(url: string): ValkeyKv {
     },
 
     async set(key, value, ttlSeconds) {
+      // Valkey would honour a shorter TTL exactly, but Workers KV cannot -
+      // see src/kv/min-ttl.ts. Both drivers floor so `KvStore.set` means one
+      // lifetime everywhere.
       if (ttlSeconds === undefined) await client.set(key, value);
-      else await client.set(key, value, "EX", ttlSeconds);
+      else {
+        await client.set(
+          key,
+          value,
+          "EX",
+          Math.max(MIN_TTL_SECONDS, ttlSeconds),
+        );
+      }
     },
 
     async delete(key) {

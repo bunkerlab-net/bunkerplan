@@ -6,6 +6,8 @@
  * container fails loudly at boot instead of on the first request.
  */
 
+import { WORKERS_MAX_PLANS_PER_USER } from "./limits.ts";
+
 export type StorageDriver = "r2" | "s3";
 export type DbDriver = "d1" | "sqlite" | "postgres";
 export type KvDriver = "kv" | "valkey";
@@ -78,9 +80,26 @@ export interface LoadConfigOptions {
 /** Values are whatever the runtime supplies; `str` coerces them to text. */
 type Env = Record<string, unknown>;
 
+const DEFAULT_MAX_PLANS_PER_USER = 250;
 const MIN_SECRET_LENGTH = 32;
-/** Workers KV rejects `expirationTtl` below 60 seconds. */
-const MIN_RATE_WINDOW_SEC = 60;
+/**
+ * Floor on `UPLOAD_RATE_WINDOW_SEC`. A policy floor, not a platform one: the
+ * counter is a database row with millisecond precision (src/db/rate-limits.*),
+ * so nothing technical stops a shorter window. What stops it is that
+ * `UPLOAD_RATE_MAX` is a count *per window*, so shrinking the window silently
+ * multiplies the sustained upload rate while reading like a tightening - and
+ * uploads are the one limit standing between an account and the deployment's
+ * storage bill. The Workers KV `expirationTtl` minimum this used to cite is a
+ * fact about a different subsystem; it lives at MIN_TTL_SECONDS in
+ * src/kv/min-ttl.ts, where both KV drivers read it.
+ *
+ * Exported so the test asserting the refusal reads the floor instead of
+ * repeating it. Here and not in src/limits.ts: that module carries ceilings
+ * the wire can see - page sizes, quotas, the visibility enum - and this is a
+ * bound on one environment variable, meaningful only to the loader that
+ * enforces it.
+ */
+export const MIN_RATE_WINDOW_SEC = 60;
 const DEFAULT_MAX_UPLOAD_BYTES = 2_097_152;
 const DEFAULT_PLAN_ID_LENGTH = 16;
 /**
@@ -186,6 +205,59 @@ function oneOf<T extends string>(
   return raw as T;
 }
 
+/**
+ * A driver setting, which means something different on each runtime.
+ *
+ * On Workers it is not dispatchable at all: src/runtime/cloudflare.ts wires the
+ * D1, KV, and R2 bindings by name and nothing reachable from it may import
+ * `pg`, `ioredis`, or `bun:sqlite` - the bundle would fail to resolve them. So
+ * there the binding is the only accepted value: defaulted for an operator who
+ * sets nothing, refused with an explanation for one who sets something else.
+ * Accepting and ignoring is the outcome that closes - `DB_DRIVER=postgres` with
+ * a `DATABASE_URL` used to boot clean on Workers and write every row to D1
+ * regardless.
+ *
+ * Self-hosted it is a genuine choice and required, since no default is right
+ * for every deployment - but the binding is refused there too, and by name.
+ * src/runtime/node.ts cannot dispatch to it either and says so, one driver at
+ * a time as it reaches each; refusing here instead is what makes an operator
+ * who set all three see all three, which is the whole reason this file
+ * collects problems rather than throwing on the first.
+ */
+function driver<T extends string>(
+  env: Env,
+  key: string,
+  allowed: readonly T[],
+  binding: T,
+  workers: boolean,
+  problems: string[],
+): T {
+  const raw = str(env, key);
+  if (workers) {
+    if (raw === undefined || raw === binding) return binding;
+    problems.push(
+      `${key} must be "${binding}" on Cloudflare Workers, got "${raw}": ` +
+        "drivers there are bindings, not implementations this build can " +
+        "dispatch to",
+    );
+    return binding;
+  }
+
+  // Named rather than left to `oneOf`, which would either list a value nothing
+  // off Workers can dispatch to or omit it and leave an operator guessing why
+  // a documented driver is rejected. Returned early so one wrong value is one
+  // problem.
+  const selfHosted = allowed.filter((value) => value !== binding);
+  if (raw === binding) {
+    problems.push(
+      `${key}=${binding} is only available on Cloudflare Workers; use ` +
+        `${selfHosted.join(" or ")} when self-hosting`,
+    );
+    return binding;
+  }
+  return oneOf(env, key, selfHosted, undefined, problems);
+}
+
 interface Drivers {
   storageDriver: StorageDriver;
   s3Bucket: string | undefined;
@@ -209,11 +281,12 @@ function parseStorage(
   workers: boolean,
   problems: string[],
 ): StorageSettings {
-  const storageDriver = oneOf(
+  const storageDriver = driver(
     env,
     "STORAGE_DRIVER",
     ["r2", "s3"] as const,
-    workers ? "r2" : undefined,
+    "r2",
+    workers,
     problems,
   );
   const s3Bucket = str(env, "S3_BUCKET");
@@ -236,11 +309,12 @@ function parseStorage(
 function parseDrivers(env: Env, workers: boolean, problems: string[]): Drivers {
   const storage = parseStorage(env, workers, problems);
 
-  const dbDriver = oneOf(
+  const dbDriver = driver(
     env,
     "DB_DRIVER",
     ["d1", "sqlite", "postgres"] as const,
-    workers ? "d1" : undefined,
+    "d1",
+    workers,
     problems,
   );
   const databaseUrl = str(env, "DATABASE_URL");
@@ -248,11 +322,12 @@ function parseDrivers(env: Env, workers: boolean, problems: string[]): Drivers {
     problems.push("DATABASE_URL is required when DB_DRIVER=postgres");
   }
 
-  const kvDriver = oneOf(
+  const kvDriver = driver(
     env,
     "KV_DRIVER",
     ["kv", "valkey"] as const,
-    workers ? "kv" : undefined,
+    "kv",
+    workers,
     problems,
   );
   const valkeyUrl = str(env, "VALKEY_URL");
@@ -327,7 +402,7 @@ interface Limits {
   unlockRateWindowSec: number;
 }
 
-function parseLimits(env: Env, problems: string[]): Limits {
+function parseLimits(env: Env, workers: boolean, problems: string[]): Limits {
   return {
     maxUploadBytes: int(
       env,
@@ -352,21 +427,50 @@ function parseLimits(env: Env, problems: string[]): Limits {
       problems,
       MAX_SHARE_CODE_LENGTH,
     ),
-    maxPlansPerUser: int(env, "MAX_PLANS_PER_USER", 250, 1, problems),
+    // Capped on Workers, where an account that outgrows one invocation's
+    // subrequest budget is an account whose deletion cannot finish in one
+    // attempt - see WORKERS_MAX_PLANS_PER_USER.
+    maxPlansPerUser: int(
+      env,
+      "MAX_PLANS_PER_USER",
+      DEFAULT_MAX_PLANS_PER_USER,
+      1,
+      problems,
+      workers ? WORKERS_MAX_PLANS_PER_USER : undefined,
+    ),
+    ...parseRateLimits(env, problems),
+  };
+}
+
+/** The two counters: how much each allows, and over how long. */
+type RateLimits = Pick<
+  Limits,
+  | "uploadRateMax"
+  | "uploadRateWindowSec"
+  | "unlockRateMax"
+  | "unlockRateWindowSec"
+>;
+
+function parseRateLimits(env: Env, problems: string[]): RateLimits {
+  return {
     uploadRateMax: int(env, "UPLOAD_RATE_MAX", 30, 1, problems),
-    uploadRateWindowSec: Math.max(
+    uploadRateWindowSec: int(
+      env,
+      "UPLOAD_RATE_WINDOW_SEC",
       MIN_RATE_WINDOW_SEC,
-      int(env, "UPLOAD_RATE_WINDOW_SEC", MIN_RATE_WINDOW_SEC, 1, problems),
+      MIN_RATE_WINDOW_SEC,
+      problems,
     ),
     // Redeeming a share code is the one unauthenticated write, so its bucket
     // is the client address rather than an account. Generous by default: a
     // reader types a code once or twice, and a whole office can share one
     // address.
     unlockRateMax: int(env, "UNLOCK_RATE_MAX", 30, 1, problems),
-    // No `MIN_RATE_WINDOW_SEC` floor: that constant exists because Workers KV
-    // rejects an `expirationTtl` under 60s, and this counter is a database row
-    // with no TTL. A shorter window is a weaker limit, which is the operator's
-    // call to make.
+    // No `MIN_RATE_WINDOW_SEC` floor, deliberately: that floor keeps the
+    // upload rate honest against the storage it buys, and this counter buys
+    // nothing durable - it only bounds work on the one unauthenticated route.
+    // A shorter window is a weaker limit, which is the operator's call to
+    // make.
     unlockRateWindowSec: int(env, "UNLOCK_RATE_WINDOW_SEC", 60, 1, problems),
   };
 }
@@ -420,7 +524,7 @@ export function loadConfig(env: Env, options: LoadConfigOptions = {}): Config {
 
   const drivers = parseDrivers(env, workers, problems);
 
-  const limits = parseLimits(env, problems);
+  const limits = parseLimits(env, workers, problems);
   const s3ForcePathStyle = bool(env, "S3_FORCE_PATH_STYLE", true, problems);
   const logging = parseLogging(env, problems);
   const rpId = str(env, "RP_ID") ?? baseHostname;

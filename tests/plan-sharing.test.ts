@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import type { AppAuth } from "../src/auth/instance.ts";
-import { MAX_GRANTS_PER_REQUEST } from "../src/http/account-list.ts";
 import {
   clearShareCode,
   getPlanSharing,
@@ -10,37 +9,29 @@ import {
   setPlanSharing,
 } from "../src/http/plan-sharing.ts";
 import { hashShareCode } from "../src/http/share-auth.ts";
-import type {
-  GrantOutcome,
-  PlanRepo,
-  PlanVisibility,
-} from "../src/services/types.ts";
+import { MAX_GRANTS_PER_REQUEST, type PlanVisibility } from "../src/limits.ts";
+import type { GrantOutcome, PlanRepo } from "../src/services/types.ts";
+import {
+  memoryPlans,
+  OWNER,
+  PLAN_ID as PLAN,
+  fakeAuth as sharedAuth,
+  storedPlan,
+} from "./fakes.ts";
 
-const OWNER = "user-owner";
-const PLAN = "abcdefgh12345678";
 const HANDLE = "k7mjq2rvxn";
 
 /**
- * `AppAuth` is Better Auth's fully inferred plugin-aware type - hundreds of
- * endpoints - so a structural fake needs the cast.
- *
  * `keyUser` is what makes the session-only assertions below mean anything: a
  * handler that reached for `resolveUserId` instead would resolve *this* and
- * succeed.
+ * succeed. The counts the shared fake keeps are not used here - `calls` below
+ * records repository traffic, which is what these handlers are judged on.
  */
 function fakeAuth(
   sessionUser: string | null,
   keyUser: string | null = null,
 ): AppAuth {
-  const api = {
-    getSession: async () =>
-      sessionUser === null ? null : { user: { id: sessionUser } },
-    verifyApiKey: async () =>
-      keyUser === null
-        ? { valid: false, key: null }
-        : { valid: true, key: { referenceId: keyUser } },
-  };
-  return { api } as unknown as AppAuth;
+  return sharedAuth({ sessionUser, keyUser }).auth;
 }
 
 interface Calls {
@@ -76,39 +67,42 @@ function fakePlans(
     hashes: [],
     visibilities: [],
   };
-  // Stateful, so a handler that answers with the new state is actually
-  // checked against it rather than against a constant the fake would have
-  // returned either way.
-  const stored: { visibility: PlanVisibility; shareCodeHash: string | null } = {
-    visibility: "private",
-    shareCodeHash: null,
-  };
+  /*
+   * The shared repository holds the state - visibility, the share digest,
+   * ownership - so a handler that answers with the new state is checked
+   * against what was actually written rather than against a constant.
+   * `owned: false` is simply the empty repository, which is what "no row
+   * matched your id and your ownership" is.
+   *
+   * `calls.visibilities` and `calls.hashes` are the other half, and they
+   * record attempts rather than writes: the push happens before the delegate
+   * runs, so a value the repository refuses - a code minted against a public
+   * plan, a write to a row the caller does not own - is in the list all the
+   * same. That is what makes them useful, since "the handler tried to do this
+   * and was told no" is a case worth asserting. What was actually stored is
+   * read back off `memory` instead.
+   */
+  const memory = memoryPlans(
+    owned ? [storedPlan({ id: PLAN, userId: OWNER })] : [],
+  );
   const granted = new Set<string>();
   const plans: PlanRepo = {
-    insert: async () => "created",
-    listByUser: async () => [],
-    // `applyGrants` resolves ownership here before it touches a handle, so
-    // this has to follow `owned` like the rest of the fake.
-    findOwner: async () => (owned ? OWNER : null),
-    relabel: async () => false,
-    resize: async () => false,
-    deleteOwned: async () => false,
-    findAccess: async () => (owned ? { ownerId: OWNER, ...stored } : null),
-    hasGrant: async () => false,
-    setVisibility: async (_id, _userId, visibility) => {
+    ...memory,
+    setVisibility: async (id, userId, visibility) => {
       calls.visibilities.push(visibility);
-      if (owned) stored.visibility = visibility;
-      return owned;
+      return await memory.setVisibility(id, userId, visibility);
     },
-    setShareCodeHash: async (_id, _userId, hash) => {
+    setShareCodeHash: async (id, userId, hash) => {
       calls.hashes.push(hash);
-      if (owned) stored.shareCodeHash = hash;
-      return owned;
+      return await memory.setShareCodeHash(id, userId, hash);
     },
-    // Stateful, like `visibility` and `shareCodeHash` above: a handler that
-    // reports the sharing state is then checked against what was actually
-    // granted rather than against a constant the fake would have returned
-    // whatever happened.
+    /*
+     * Grants are staged here rather than through the shared repository's
+     * handle table: these cases name arbitrary handles by the dozen and pick
+     * the outcome per account, which is the whole point of the suite. The
+     * list stays stateful so a handler reporting the sharing state is checked
+     * against what was actually granted.
+     */
     listGrantHandles: async () => (owned ? [...granted] : null),
     grantByHandle: async (planId, ownerId, account) => {
       calls.granted.push({ planId, ownerId, account });

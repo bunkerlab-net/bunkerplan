@@ -6,10 +6,12 @@ import { type DbFixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
  * The `AccountClosingRepo` contract, run against D1, bun:sqlite, and Postgres.
  *
  * The marker is what stops an upload slipping between the object sweep and
- * the row cascade and leaving an object nothing owns. Two properties carry
- * that: `open` is idempotent, so a deletion retried after a failure does not
- * trip over its own previous attempt, and `isOpen` is per account, so one
- * closing account cannot lock everybody else out of uploading.
+ * the row cascade and leaving an object nothing owns. Three properties carry
+ * that: `isOpen` is per account, so one closing account cannot lock everybody
+ * else out of uploading; a mark belongs to the attempt that placed it, so a
+ * failed deletion lifting its own cannot end a concurrent one's protection;
+ * and the cascade collects every mark an account has, however many attempts
+ * left one.
  */
 
 export function describeAccountClosingRepo(
@@ -40,22 +42,66 @@ export function describeAccountClosingRepo(
       expect(await closing.isOpen(userId)).toBe(true);
     });
 
-    test("marking twice is not an error", async () => {
+    test("each attempt gets its own mark", async () => {
       const userId = await fixture.seedUser();
-      await closing.open(userId);
       // A deletion that failed partway is retried, and the marker its own
       // previous attempt left must not be what stops the retry.
+      const first = await closing.open(userId);
+      const second = await closing.open(userId);
+
+      expect(second).not.toBe(first);
+      expect(await closing.isOpen(userId)).toBe(true);
+      expect(await fixture.countAccountClosings(userId)).toBe(2);
+    });
+
+    test("concurrent marks all land, and none collides", async () => {
+      const userId = await fixture.seedUser();
+      const ids = await Promise.all(
+        Array.from({ length: 8 }, () => closing.open(userId)),
+      );
+      expect(new Set(ids).size).toBe(8);
+      expect(await closing.isOpen(userId)).toBe(true);
+      expect(await fixture.countAccountClosings(userId)).toBe(8);
+    });
+
+    /**
+     * The property the per-attempt key exists for. Two deletions of one
+     * account overlap; the first to fail lifts its own mark and the account
+     * must still read as closing, because the other is still sweeping and the
+     * upload it is racing has to keep being refused.
+     */
+    test("lifting one attempt's mark leaves another's standing", async () => {
+      const userId = await fixture.seedUser();
+      const failing = await closing.open(userId);
       await closing.open(userId);
-      await closing.open(userId);
+
+      await closing.close(failing);
+
       expect(await closing.isOpen(userId)).toBe(true);
       expect(await fixture.countAccountClosings(userId)).toBe(1);
     });
 
-    test("concurrent marks settle on one row without throwing", async () => {
+    test("lifting the last mark reopens the account", async () => {
       const userId = await fixture.seedUser();
-      await Promise.all(Array.from({ length: 8 }, () => closing.open(userId)));
-      expect(await closing.isOpen(userId)).toBe(true);
-      expect(await fixture.countAccountClosings(userId)).toBe(1);
+      const only = await closing.open(userId);
+
+      await closing.close(only);
+
+      expect(await closing.isOpen(userId)).toBe(false);
+      expect(await fixture.countAccountClosings(userId)).toBe(0);
+    });
+
+    test("lifting a mark twice is not an error", async () => {
+      // The sweep's cleanup runs on an already-failing path and must not add a
+      // second failure of its own.
+      const userId = await fixture.seedUser();
+      const attemptId = await closing.open(userId);
+
+      await closing.close(attemptId);
+      await expect(closing.close(attemptId)).resolves.toBeUndefined();
+      await expect(
+        closing.close(`ghost-${crypto.randomUUID()}`),
+      ).resolves.toBeUndefined();
     });
 
     test("one closing account does not close another", async () => {
@@ -84,14 +130,15 @@ export function describeAccountClosingRepo(
     });
 
     /**
-     * The safe direction, and deliberate: a completed deletion cleans the
-     * marker up, a failed one leaves it, and the account stays unusable until
-     * an operator looks.
+     * Every mark, not just one. An attempt that failed after its sweep leaves
+     * a row nothing will lift; the account is still deletable, and completing
+     * that deletion has to collect the stale row along with the live one.
      */
-    test("completing the deletion takes the marker with the account", async () => {
+    test("completing the deletion takes every mark with the account", async () => {
       const userId = await fixture.seedUser();
       await closing.open(userId);
-      expect(await fixture.countAccountClosings(userId)).toBe(1);
+      await closing.open(userId);
+      expect(await fixture.countAccountClosings(userId)).toBe(2);
 
       await fixture.deleteUser(userId);
       expect(await fixture.countAccountClosings(userId)).toBe(0);

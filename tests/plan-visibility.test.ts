@@ -1,26 +1,44 @@
 import { describe, expect, test } from "bun:test";
-import {
-  parsePlanVisibility,
-  parseUploadVisibility,
-  storedVisibility,
-} from "../src/http/plan-visibility.ts";
+import { parseVisibility } from "../src/http/plan-visibility.ts";
 
-describe("parseUploadVisibility", () => {
+/**
+ * One parser for both readers of the setting, with the differences named at
+ * the call rather than baked into two functions: the upload route takes a
+ * query parameter and allows `code`; the sharing route takes a JSON body,
+ * refuses `code`, and refuses an absent value instead of defaulting.
+ */
+const upload = { code: true, absent: "private", from: "value" } as const;
+const sharing = { code: false, absent: "refuse", from: "body" } as const;
+
+describe("the upload parameter", () => {
   test("an absent parameter means private", () => {
     // The default is the whole point of the feature: a client that predates
     // it, and sends no parameter at all, must not publish anything.
-    expect(parseUploadVisibility(null)).toEqual({
+    expect(parseVisibility(null, upload)).toEqual({
       ok: true,
       requested: "private",
+      stored: "private",
     });
   });
 
-  test.each(["public", "private", "code"] as const)(
-    "accepts %s",
-    (requested) => {
-      expect(parseUploadVisibility(requested)).toEqual({ ok: true, requested });
-    },
-  );
+  test.each(["public", "private"] as const)("accepts %s", (requested) => {
+    expect(parseVisibility(requested, upload)).toEqual({
+      ok: true,
+      requested,
+      stored: requested,
+    });
+  });
+
+  test("code is an intent, not a stored state", () => {
+    // The column holds two values. A third leaking in would reach the
+    // dashboard, the API document, and the read gate's comparison - so the
+    // parser reports what was asked for and what is written separately.
+    expect(parseVisibility("code", upload)).toEqual({
+      ok: true,
+      requested: "code",
+      stored: "private",
+    });
+  });
 
   test.each([
     ["an unknown word", "unlisted"],
@@ -28,45 +46,53 @@ describe("parseUploadVisibility", () => {
     ["a near miss in case", "Public"],
     ["whitespace around a valid value", " public "],
   ])("refuses %s", (_, raw) => {
-    expect(parseUploadVisibility(raw)).toEqual({
+    expect(parseVisibility(raw, upload)).toEqual({
       ok: false,
       reason: "visibility must be public, private, or code",
     });
   });
 });
 
-describe("storedVisibility", () => {
-  test("code is an intent, not a stored state", () => {
-    // The column holds two values. A third leaking in would reach the
-    // dashboard, the API document, and the read gate's comparison.
-    expect(storedVisibility("code")).toBe("private");
-    expect(storedVisibility("private")).toBe("private");
-    expect(storedVisibility("public")).toBe("public");
-  });
-});
-
-describe("parsePlanVisibility", () => {
+describe("the sharing body", () => {
   test.each(["public", "private"] as const)("accepts %s", (visibility) => {
-    expect(parsePlanVisibility(visibility)).toEqual({ ok: true, visibility });
+    expect(parseVisibility({ visibility }, sharing)).toEqual({
+      ok: true,
+      requested: visibility,
+      stored: visibility,
+    });
   });
 
   test("refuses code, which is an upload intent", () => {
     // Giving an existing plan a code is POST /share-code, because that is the
     // request that hands back a plaintext.
-    expect(parsePlanVisibility("code")).toEqual({
+    expect(parseVisibility({ visibility: "code" }, sharing)).toEqual({
       ok: false,
       reason: "visibility must be public or private",
     });
   });
 
   test.each([
-    ["undefined", undefined],
-    ["null", null],
-    ["a number", 1],
-    ["an object", { visibility: "public" }],
-    ["a boolean", true],
-  ])("refuses %s from a JSON body", (_, raw) => {
-    expect(parsePlanVisibility(raw)).toEqual({
+    ["no visibility key at all", {}],
+    ["an explicit null", { visibility: null }],
+    ["a number", { visibility: 1 }],
+    ["a nested object", { visibility: { visibility: "public" } }],
+    ["a boolean", { visibility: true }],
+    // The two bodies that are `typeof "object"` without being a record. A
+    // reader digging a field out has to answer rather than throw on both:
+    // `null.visibility` is a TypeError, and an array's is simply undefined.
+    ["a null body", null],
+    ["an array body", []],
+  ])("refuses %s", (_, raw) => {
+    expect(parseVisibility(raw, sharing)).toEqual({
+      ok: false,
+      reason: "visibility must be public or private",
+    });
+  });
+
+  test("refuses a bare JSON string, which is not a body with a field", () => {
+    // `from: "body"` digs the field out itself rather than being handed it, so
+    // a body that happens to be the right word is still the wrong shape.
+    expect(parseVisibility("public", sharing)).toEqual({
       ok: false,
       reason: "visibility must be public or private",
     });

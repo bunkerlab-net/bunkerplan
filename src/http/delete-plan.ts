@@ -1,6 +1,17 @@
+import type { AppAuth } from "../auth/instance.ts";
 import type { Logger } from "../log.ts";
 import type { PlanRepo, PlanStorage } from "../services/types.ts";
+import { sweepOrphanedObject } from "./orphan-sweep.ts";
 import { problem } from "./problem.ts";
+import { resolveUserId } from "./require-user.ts";
+
+/** Four things, so they arrive named - as `ReplacePlanDeps` does next door. */
+export interface DeletePlanDeps {
+  auth: AppAuth;
+  storage: PlanStorage;
+  plans: PlanRepo;
+  logger: Logger;
+}
 
 /**
  * Object first, row second - the mirror of the upload path.
@@ -11,14 +22,21 @@ import { problem } from "./problem.ts";
  * the plan is still listed, and the caller can retry. A database failure after
  * a successful object delete leaves only a stale row, which lists a plan whose
  * URL 404s and which the owner can retry away (object deletes are idempotent).
+ *
+ * The caller is resolved here rather than in the router, so a route registered
+ * later cannot forget it. A key or a session: a credential that may replace the
+ * document may destroy the plan. Unmetered - the upload allowance covers upload
+ * and replace only, and this writes no object.
  */
 export async function deletePlan(
-  storage: PlanStorage,
-  plans: PlanRepo,
-  logger: Logger,
+  deps: DeletePlanDeps,
+  request: Request,
   id: string,
-  userId: string,
 ): Promise<Response> {
+  const { auth, storage, plans, logger } = deps;
+  const userId = await resolveUserId(auth, request);
+  if (userId === null) return problem(401, "authentication required");
+
   // 404 rather than 403 for someone else's plan: never confirm that an id
   // belonging to another account exists.
   const owner = await plans.findOwner(id);
@@ -44,9 +62,7 @@ export async function deletePlan(
   // check pass before this line, and it would then be served by `/p/{id}`
   // with no row to own it. Every such write precedes this point, so this is
   // the one place that can catch it; ordinarily it removes nothing.
-  await storage.delete(id).catch((error: unknown) => {
-    logger.error({ err: error, planId: id }, "orphaned plan object");
-  });
+  await sweepOrphanedObject(storage, logger, id);
 
   return new Response(null, { status: 204 });
 }

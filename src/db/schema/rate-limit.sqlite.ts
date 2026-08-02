@@ -10,7 +10,7 @@ import { user } from "./auth.sqlite.ts";
  * deleted mid-window and the limit would reset early.
  *
  * `windowStart` is epoch milliseconds rather than a `timestamp_ms` column so
- * the conditional upsert in src/db/rate-limits.sqlite.ts can compare it to a
+ * the conditional upsert in src/db/rate-limits.shared.ts can compare it to a
  * plain bound number inside SQL.
  */
 export const uploadRateLimit = sqliteTable("upload_rate_limit", {
@@ -46,7 +46,7 @@ export const unlockRateLimit = sqliteTable(
     count: integer("count").notNull(),
     windowStart: integer("window_start").notNull(),
   },
-  // The sweep in src/db/rate-limits.sqlite.ts deletes by window, so without this
-  // pruning would scan the whole table on every redemption.
+  // The sweep in src/db/rate-limits.shared.ts deletes by window, so without
+  // this, pruning would scan the whole table on every redemption.
   (table) => [index("unlock_rate_limit_windowStart_idx").on(table.windowStart)],
 );

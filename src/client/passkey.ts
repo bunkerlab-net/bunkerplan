@@ -1,4 +1,4 @@
-import { useState } from "hono/jsx";
+import { useRef, useState } from "hono/jsx";
 import { authClient } from "./auth.ts";
 import { messageOf } from "./errors.ts";
 
@@ -65,14 +65,35 @@ export function samePathOnly(destination: string, origin: string): string {
 export function usePasskeyAction(destination = "/dashboard") {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * The same guard as `busy`, but readable in the turn it is set.
+   *
+   * `busy` is state: both buttons close over the value from the render that
+   * created them, and `disabled` needs a re-render to appear, so two presses in
+   * one tick both reach `action()` - which is two WebAuthn ceremonies for one
+   * credential, and on registration two credentials for one press the visitor
+   * meant. The credentials panels take this from `useWriteLatch`; this runner
+   * keeps its own because its success path is the opposite one - see below.
+   *
+   * Released exactly where `busy` is, and for the same reason: a success is
+   * navigating away, and browsers run that navigation asynchronously. Releasing
+   * it there would reopen both buttons while the next document is still
+   * loading, which is the second ceremony this exists to prevent. That is also
+   * why this is not `useWriteLatch`: that hook releases in a `finally` and
+   * refreshes a list, and there is no list here - the page leaves.
+   */
+  const inFlight = useRef(false);
 
   const run = async (action: () => Promise<Outcome>) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
       const failure = (await action())?.error;
       if (failure) {
         setError(messageOf(failure, FAILED));
+        inFlight.current = false;
         setBusy(false);
         return;
       }
@@ -85,6 +106,7 @@ export function usePasskeyAction(destination = "/dashboard") {
       window.location.assign(samePathOnly(destination, window.location.origin));
     } catch (cause) {
       setError(messageOf(cause, FAILED));
+      inFlight.current = false;
       setBusy(false);
     }
   };

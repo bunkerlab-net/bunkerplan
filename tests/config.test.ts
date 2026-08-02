@@ -1,21 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config.ts";
-
-const REQUIRED = {
-  BETTER_AUTH_SECRET: "x".repeat(32),
-  PUBLIC_BASE_URL: "https://plans.example.com",
-};
-
-/** The driver set a self-hosted deployment must supply. */
-const SELF_HOSTED = {
-  ...REQUIRED,
-  STORAGE_DRIVER: "s3",
-  S3_BUCKET: "plans",
-  DB_DRIVER: "postgres",
-  DATABASE_URL: "postgres://localhost/plans",
-  KV_DRIVER: "valkey",
-  VALKEY_URL: "redis://localhost:6379",
-};
+import { REQUIRED, SELF_HOSTED } from "./config-env.ts";
 
 /**
  * Better Auth keys its rate limit on the client IP. When it cannot resolve

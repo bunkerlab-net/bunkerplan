@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { unlockPlan } from "../src/client/api.ts";
+import { hashShareCode } from "../src/http/share-auth.ts";
+import { createUnlockRoute } from "../src/http/unlock.ts";
 import {
   refundUnlockAttempt,
   reserveUnlockAttempt,
+  type UnlockRateConfig,
 } from "../src/http/unlock-rate-limit.ts";
 import type { Logger } from "../src/log.ts";
-import type { RateLimitRepo } from "../src/services/types.ts";
+import type { PlanRepo, RateLimitRepo } from "../src/services/types.ts";
+import { memoryPlans, storedPlan } from "./fakes.ts";
 
 const CONFIG = {
   clientIpHeader: "cf-connecting-ip",
@@ -15,14 +19,11 @@ const CONFIG = {
   unlockRateWindowSec: 60,
 };
 
-/**
- * A config no earlier call has seen.
- *
- * The missing-header warning is reported once per config object, so a test
- * that reaches that path and reuses `CONFIG` would read the silence a previous
- * test earned rather than its own.
- */
-const unreported = () => ({ ...CONFIG });
+/** The gate config plus what `unlockPlan`'s cookie mint needs, for the route. */
+const ROUTE_CONFIG = {
+  ...CONFIG,
+  publicBaseUrl: "https://plans.example.test",
+};
 
 const WINDOW_START = 1_700_000_000_000;
 
@@ -51,12 +52,16 @@ const post = (headers: Record<string, string> = {}) =>
     body: JSON.stringify({ code: "x" }),
   });
 
-/** What the gate logged, so the one case about that can read it. */
+/**
+ * What the route logged. The gate itself no longer takes a logger - it
+ * reports `reason` instead - so this belongs to the route describe below.
+ *
+ * `Pick<Logger, "warn">`, the parameter's own type, rather than a cast: a
+ * double that stops matching the signature should fail here at compile time
+ * instead of being asserted into place.
+ */
 const warnings: Array<{ fields: unknown; message: string }> = [];
 
-// `Pick<Logger, "warn">`, the parameter's own type, rather than a cast: a
-// double that stops matching the signature should fail here at compile time
-// instead of being asserted into place.
 const logger: Pick<Logger, "warn"> = {
   warn: (fields: unknown, message?: string) => {
     warnings.push({ fields, message: message ?? "" });
@@ -67,12 +72,8 @@ beforeEach(() => {
   warnings.length = 0;
 });
 
-/** The first three arguments; the helpers below supply the logger. */
-type GateArgs = [
-  Parameters<typeof reserveUnlockAttempt>[0],
-  Parameters<typeof reserveUnlockAttempt>[1],
-  Parameters<typeof reserveUnlockAttempt>[2],
-];
+/** The three arguments the gate now takes; the logger moved to the route. */
+type GateArgs = [RateLimitRepo, UnlockRateConfig, Request];
 
 /**
  * The reservation a passed gate handed back, or a failure naming what came
@@ -83,7 +84,7 @@ type GateArgs = [
 const reservationOf = async (
   ...args: GateArgs
 ): Promise<{ bucket: string; windowStart: number }> => {
-  const held = await reserveUnlockAttempt(...args, logger);
+  const held = await reserveUnlockAttempt(...args);
   if ("refused" in held) {
     throw new Error(`gate refused with ${held.refused.status}`);
   }
@@ -91,10 +92,15 @@ const reservationOf = async (
 };
 
 /** The refusal a closed gate produced, asserted as one. */
-const refusalOf = async (...args: GateArgs): Promise<Response> => {
-  const held = await reserveUnlockAttempt(...args, logger);
+const refusalOf = async (
+  ...args: GateArgs
+): Promise<{
+  refused: Response;
+  reason: "no-client-address" | "budget-spent";
+}> => {
+  const held = await reserveUnlockAttempt(...args);
   if (!("refused" in held)) throw new Error("gate allowed the request");
-  return held.refused;
+  return held;
 };
 
 describe("the unlock rate limit", () => {
@@ -210,7 +216,7 @@ describe("the unlock rate limit", () => {
 
   test("answers 429 with retry-after once the allowance is spent", async () => {
     const { limits } = fakeLimits(false, 17);
-    const refused = await refusalOf(
+    const { refused, reason } = await refusalOf(
       limits,
       CONFIG,
       post({ "cf-connecting-ip": "203.0.113.9" }),
@@ -218,6 +224,9 @@ describe("the unlock rate limit", () => {
 
     expect(refused.status).toBe(429);
     expect(refused.headers.get("retry-after")).toBe("17");
+    // The two refusals are the same status and the caller cannot tell them
+    // apart, which is deliberate - the reason is how the route can.
+    expect(reason).toBe("budget-spent");
   });
 
   test("reads the header the configuration names, not a fixed one", async () => {
@@ -250,56 +259,125 @@ describe("the unlock rate limit", () => {
     // a matter of type rather than of the handler remembering.
     const { limits, spent } = fakeLimits(true);
 
-    const refused = await refusalOf(limits, unreported(), post());
+    const { refused, reason } = await refusalOf(limits, CONFIG, post());
 
     expect(refused.status).toBe(429);
     // A minute, not the second a spent budget gets: nothing refills here, so a
     // client told to retry at once retries forever against a fixed answer.
     expect(refused.headers.get("retry-after")).toBe("60");
     expect(spent).toEqual([]);
+    // Named, because this is the one an operator has to be told about and the
+    // spent-budget refusal is not.
+    expect(reason).toBe("no-client-address");
   });
+
+  test("refuses a blank header rather than reserving an empty bucket", async () => {
+    const { limits, spent } = fakeLimits(true);
+
+    // Off `CONFIG` rather than the literal, because this is the one case where
+    // the two must be the same header - a mismatch here would pass for the
+    // wrong reason, by looking exactly like the header never arriving. Not the
+    // shared `CLIENT_IP_HEADER` from tests/app-harness.ts: that names a
+    // different header, and the point is the one this config asked for.
+    const { refused, reason } = await refusalOf(
+      limits,
+      CONFIG,
+      post({ [CONFIG.clientIpHeader]: "" }),
+    );
+
+    expect(refused.status).toBe(429);
+    expect(spent).toEqual([]);
+    expect(reason).toBe("no-client-address");
+  });
+});
+
+/**
+ * The operator's notice, which the route owns rather than the gate.
+ *
+ * Once per route instance, held in the factory's closure. It used to be keyed
+ * on the config object process-wide, which made "once" depend on whether two
+ * app instances happened to share a `Config` - so a second deployment in the
+ * same process could be silently misconfigured.
+ */
+describe("the missing-header warning", () => {
+  // `spent` kept rather than dropped on the floor: these cases are about a
+  // request that never reaches the counter, so what makes them mean anything
+  // is that the bucket stayed untouched - and `fakeLimits(true).limits` alone
+  // throws that evidence away.
+  const route = () => {
+    const { limits, spent } = fakeLimits(true);
+    return {
+      run: createUnlockRoute(),
+      deps: { plans: memoryPlans(), limits, config: ROUTE_CONFIG, logger },
+      spent,
+    };
+  };
 
   test("says so in the log, because the symptom is otherwise silent", async () => {
     // Every redemption on this deployment answers 429 and no reader can tell
     // why. Configuration refuses to load without naming a header, so reaching
     // here means the proxy in front is not sending the one it was told to
     // trust - which is an operator's problem and needs saying once.
-    const { limits } = fakeLimits(true);
-    const config = unreported();
+    const { run, deps, spent } = route();
 
-    await refusalOf(limits, config, post());
+    expect((await run(deps, post(), "abc")).status).toBe(429);
 
+    // Refused before the counter, so no bucket was charged - which is what
+    // makes this a deployment fault rather than a caller using up its budget.
+    expect(spent).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toContain("no trusted client address header");
     // Names the header it looked for, so the fix does not need a code read.
-    expect(warnings[0]?.fields).toEqual({ header: config.clientIpHeader });
+    expect(warnings[0]?.fields).toEqual({
+      header: ROUTE_CONFIG.clientIpHeader,
+    });
+  });
+
+  /**
+   * Present and empty, which is a different branch from absent: a proxy that
+   * forwards the header but has nothing to put in it. `clientAddress` tests
+   * `=== ""` beside its null check for exactly this, and without a case here
+   * dropping that half would leave an empty string hashed into a bucket key -
+   * one shared bucket for every caller behind that proxy, which is the
+   * silent-throttle failure the null path exists to avoid.
+   */
+  test("treats a header sent empty as a header not sent", async () => {
+    const { run, deps, spent } = route();
+
+    const request = post({ [ROUTE_CONFIG.clientIpHeader]: "" });
+    expect((await run(deps, request, "abc")).status).toBe(429);
+
+    expect(spent).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("no trusted client address header");
+    expect(warnings[0]?.fields).toEqual({
+      header: ROUTE_CONFIG.clientIpHeader,
+    });
   });
 
   test("says it once, so a stranger cannot flood the log with refusals", async () => {
     // The route takes no credential, and every one of these answers 429 - so a
     // line per attempt is a log bill anyone can run up. The refusal itself is
     // still every time; only the operator's notice is deduplicated.
-    const { limits } = fakeLimits(true);
-    const config = unreported();
+    const { run, deps } = route();
 
-    await refusalOf(limits, config, post());
-    await refusalOf(limits, config, post());
-    await refusalOf(limits, config, post());
+    for (let i = 0; i < 3; i += 1) {
+      expect((await run(deps, post(), "abc")).status).toBe(429);
+    }
 
     expect(warnings).toHaveLength(1);
   });
 
-  test("refuses a blank header rather than reserving an empty bucket", async () => {
-    const { limits, spent } = fakeLimits(true);
+  test("a second route instance says it again, rather than inheriting silence", async () => {
+    // The bug the closure replaced: two apps in one process shared the flag
+    // whenever they shared a config object, so the second stayed quiet.
+    const first = route();
+    await first.run(first.deps, post(), "abc");
 
-    const refused = await refusalOf(
-      limits,
-      unreported(),
-      post({ "cf-connecting-ip": "" }),
-    );
+    const second = route();
+    await second.run(second.deps, post(), "abc");
 
-    expect(refused.status).toBe(429);
-    expect(spent).toEqual([]);
+    expect(warnings).toHaveLength(2);
   });
 });
 
@@ -355,5 +433,124 @@ describe("the message a throttled reader sees", () => {
     );
 
     expect(message).toBe("Too many attempts. Try again shortly.");
+  });
+});
+
+/**
+ * A refund that fails.
+ *
+ * The refund itself is covered through the real stack in app-routes.test.ts -
+ * a correct code gives its count back, a wrong code and an unknown plan keep
+ * theirs, and a route that threw refunds. What none of those reach is the
+ * refund failing, which is deliberately swallowed: the reader already has
+ * their cookie, and a lost refund leaves the budget one lower, erring towards
+ * refusing rather than towards letting a guesser through.
+ *
+ * Swallowed, but not silent. The log line below is the only way to find a
+ * budget that never recovers, and without these cases it runs for the first
+ * time in production.
+ */
+describe("the refund", () => {
+  const CODE = "let-me-in";
+
+  /** A plan whose stored hash is the code below, so the route answers 204. */
+  const shared = async (): Promise<PlanRepo> =>
+    memoryPlans([
+      storedPlan({
+        id: "abc",
+        userId: "user-a",
+        visibility: "private",
+        shareCodeHash: await hashShareCode(CODE),
+      }),
+    ]);
+
+  const redeem = (headers: Record<string, string> = {}) =>
+    new Request("https://plans.example.test/api/plans/abc/unlock", {
+      method: "POST",
+      headers: { [ROUTE_CONFIG.clientIpHeader]: "203.0.113.7", ...headers },
+      body: JSON.stringify({ code: CODE }),
+    });
+
+  /**
+   * The reader keeps their 204. A refund is bookkeeping the caller has no
+   * stake in, so failing it must not turn a correct code into an error.
+   */
+  test("a failing refund still answers the reader", async () => {
+    const { limits } = fakeLimits(true);
+    const deps = {
+      plans: await shared(),
+      limits: {
+        ...limits,
+        refund: async () => {
+          throw new Error("counter unreachable");
+        },
+      },
+      config: ROUTE_CONFIG,
+      logger,
+    };
+
+    const response = await createUnlockRoute()(deps, redeem(), "abc");
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("set-cookie")).toContain("abc");
+  });
+
+  /**
+   * And says so, naming the bucket and window. A budget that never recovers
+   * is otherwise only knowable as "redemptions from this address started
+   * failing" - the digest is what makes it findable, and it is a digest
+   * rather than the address for the same reason the counter keys on one.
+   */
+  test("a failing refund is logged with the bucket it could not credit", async () => {
+    const { limits, spent } = fakeLimits(true);
+    const deps = {
+      plans: await shared(),
+      limits: {
+        ...limits,
+        refund: async () => {
+          throw new Error("counter unreachable");
+        },
+      },
+      config: ROUTE_CONFIG,
+      logger,
+    };
+
+    await createUnlockRoute()(deps, redeem(), "abc");
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toBe("unlock reservation was not refunded");
+    expect(warnings[0]?.fields).toMatchObject({
+      bucket: spent[0] as string,
+      windowStart: WINDOW_START,
+    });
+    // The address never reaches the log, only its keyed digest.
+    expect(JSON.stringify(warnings[0]?.fields)).not.toContain("203.0.113.7");
+  });
+
+  test("a refund that fails after a throw does not mask it", async () => {
+    const failure = new Error("database is gone");
+    const deps = {
+      plans: {
+        ...(await shared()),
+        findAccess: async () => {
+          throw failure;
+        },
+      },
+      limits: {
+        ...fakeLimits(true).limits,
+        refund: async () => {
+          throw new Error("counter unreachable");
+        },
+      },
+      config: ROUTE_CONFIG,
+      logger,
+    };
+
+    // The caller's fault, not the bookkeeping one that happened on the way out.
+    await expect(createUnlockRoute()(deps, redeem(), "abc")).rejects.toThrow(
+      failure,
+    );
+
+    expect(warnings).toHaveLength(1);
   });
 });

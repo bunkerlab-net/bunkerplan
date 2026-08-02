@@ -2,29 +2,30 @@
 // worker-configuration.d.ts - see `bun run cf-typegen`.
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { Logger } from "../log.ts";
 import type { Db } from "../services/types.ts";
-import { createSqliteAccountClosingRepo } from "./account-closing.sqlite.ts";
-import { createSqlitePlanRepo } from "./plans.sqlite.ts";
+import { createDialectRepos } from "./repos.ts";
 import {
-  createSqliteRateLimitRepo,
-  createSqliteUnlockRateLimitRepo,
-} from "./rate-limits.sqlite.ts";
-import { sqliteSchema } from "./sqlite-shared.ts";
+  type SqliteAuthHandle,
+  sqliteDialect,
+  sqliteSchema,
+} from "./sqlite-shared.ts";
 
 /**
  * D1 enforces foreign keys unconditionally (equivalent to
  * `PRAGMA foreign_keys = ON` for every transaction), so the ON DELETE CASCADE
  * constraints in the schema are live without any extra setup.
  */
-export function createD1Db(binding: D1Database): Db {
+export function createD1Db(
+  binding: D1Database,
+  logger: Pick<Logger, "warn">,
+): Db & SqliteAuthHandle {
   const db = drizzle(binding as never, { schema: sqliteSchema });
+  const dialect = sqliteDialect(db);
   return {
     adapter: db,
     provider: "sqlite",
-    plans: createSqlitePlanRepo(db),
-    uploadRateLimits: createSqliteRateLimitRepo(db),
-    unlockRateLimits: createSqliteUnlockRateLimitRepo(db),
-    accountClosing: createSqliteAccountClosingRepo(db),
+    ...createDialectRepos(dialect, logger),
     async probe() {
       await db.run(sql`select 1`);
     },
