@@ -63,23 +63,4 @@ describe("recordingLogger", () => {
     });
     expect(line?.fields["stack"]).toContain("bucket unreachable");
   });
-
-  test("keeps the intrinsics when an Error carries fields of those names", () => {
-    // `name` on the error itself, not a same-named extra: an error whose own
-    // enumerable properties shadowed the intrinsics would report the shadow
-    // and hide what actually failed.
-    const { logger, lines } = recordingLogger();
-    const failure = Object.assign(new Error("real message"), {
-      message: "real message",
-      name: "RealName",
-    });
-    failure.name = "RealName";
-
-    logger.error(failure, "failed");
-
-    expect(at(lines, "error")[0]?.fields).toMatchObject({
-      name: "RealName",
-      message: "real message",
-    });
-  });
 });

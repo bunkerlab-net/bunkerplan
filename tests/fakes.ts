@@ -70,8 +70,10 @@ export function recordingLogger(): { logger: Logger; lines: LogLine[] } {
    */
   const fieldsOf = (first: unknown): Record<string, unknown> => {
     if (first instanceof Error) {
-      // The enumerable extras first - `err.code` and friends - so the three
-      // below always win over anything sharing their names.
+      // Both halves are needed and neither covers the other: the spread takes
+      // the enumerable extras a thrower attached - `err.code` on a driver
+      // error is the one worth having - and the three named below are own but
+      // not enumerable, so only naming them brings them across.
       return {
         ...first,
         name: first.name,
