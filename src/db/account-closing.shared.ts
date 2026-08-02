@@ -17,11 +17,14 @@ export function createAccountClosingRepo(dialect: Dialect): AccountClosingRepo {
        * the account together and neither can end the other's protection.
        *
        * `started_at` is written and nothing here reads it. That is deliberate:
-       * it is for the operator, not for this module. A mark can outlive its
-       * attempt in one case - Better Auth's own row delete failing after the
-       * sweep succeeded, which it offers no hook for - and the age is what
-       * distinguishes that leftover from a deletion running right now. The
-       * query is in docs/self-hosting.md.
+       * it is for the operator, not for this module. A mark outlives its
+       * attempt whenever that attempt ends without reaching its own cleanup -
+       * the process killed mid-sweep, the isolate evicted, the invocation cut
+       * short, or Better Auth's own row delete failing after the sweep
+       * succeeded, which it offers no hook for at all. The age does not tell
+       * you which - a long sweep off Workers looks the same as an abandoned
+       * mark - it only surfaces the ones old enough for an operator to go and
+       * check. The query, and that caveat, are in docs/self-hosting.md.
        *
        * No threshold and no alerting here. A repository method is the wrong
        * place to decide how long is too long: a sweep is bounded by the

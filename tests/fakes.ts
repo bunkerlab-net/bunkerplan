@@ -59,15 +59,34 @@ export interface LogLine {
  */
 export function recordingLogger(): { logger: Logger; lines: LogLine[] } {
   const lines: LogLine[] = [];
+  /*
+   * Pino's `LogFn` takes an object and a message, a message alone, or - the
+   * case that used to vanish here - an `Error` as the first argument.
+   * Spreading one yields `{}`: `name`, `message`, and `stack` are own but not
+   * enumerable. A suite asserting on that line would have seen an empty
+   * `fields` and agreed with itself, while pino serialised the error properly
+   * in production. Named explicitly so the fake reports something a test can
+   * be wrong about.
+   */
+  const fieldsOf = (first: unknown): Record<string, unknown> => {
+    if (first instanceof Error) {
+      // The enumerable extras first - `err.code` and friends - so the three
+      // below always win over anything sharing their names.
+      return {
+        ...first,
+        name: first.name,
+        message: first.message,
+        stack: first.stack,
+      };
+    }
+    return typeof first === "object" && first !== null ? { ...first } : {};
+  };
   const record =
     (level: LogLine["level"]) => (first: unknown, second?: string) => {
       const messageOnly = typeof first === "string";
       lines.push({
         level,
-        fields:
-          !messageOnly && typeof first === "object" && first !== null
-            ? { ...first }
-            : {},
+        fields: messageOnly ? {} : fieldsOf(first),
         message: (messageOnly ? first : second) ?? "",
       });
     };

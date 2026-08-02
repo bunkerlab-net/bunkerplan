@@ -24,9 +24,17 @@ import wrangler from "../wrangler.jsonc";
 
 interface WranglerConfig {
   vars: Record<string, string | number | boolean>;
-  d1_databases: Array<{ binding: string; database_id: string }>;
-  kv_namespaces: Array<{ binding: string; id: string }>;
-  r2_buckets: Array<{ binding: string }>;
+  /*
+   * Optional, because the file is data and nothing validates it before this
+   * cast. A block that is absent - deleted, renamed, never added - reads as
+   * `undefined` at runtime whatever the type says, and declaring it required
+   * would make the `?? []` guards below look like dead code while being the
+   * only thing standing between a missing block and a `TypeError` that names
+   * nothing.
+   */
+  d1_databases?: Array<{ binding: string; database_id: string }>;
+  kv_namespaces?: Array<{ binding: string; id: string }>;
+  r2_buckets?: Array<{ binding: string }>;
 }
 
 /** Bun's `.jsonc` loader; `Bun.file(...).json()` is strict JSON and rejects it. */

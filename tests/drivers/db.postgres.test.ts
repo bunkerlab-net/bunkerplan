@@ -180,6 +180,16 @@ describe.skipIf(skip)("a claim whose body waits on a row", () => {
       );
       expect(rows).toEqual([{ id: 1 }]);
     } finally {
+      /*
+       * `rollback` first, and unconditionally. A failed expectation above
+       * jumps here with the holder's transaction still open, so the `drop`
+       * would run inside it and `end()` would take the whole transaction down
+       * with the drop in it - leaving the table behind under a name nothing
+       * will ever look for again. Ending the transaction first is what makes
+       * the drop stick. Both are swallowed: the test has already decided, and
+       * a cleanup error must not become the failure a reader sees.
+       */
+      await holder.query("rollback").catch(() => {});
       await holder.query(`drop table if exists ${table}`).catch(() => {});
       await holder.end();
       await pool.end();

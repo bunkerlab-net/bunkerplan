@@ -176,6 +176,30 @@ describe.skipIf(skip)("0013 against markers left by an older sweep", () => {
       );
       expect(Number(both[0]?.v)).toBe(2);
 
+      /*
+       * The index the migration adds, checked here because nothing else can.
+       * The schema-shape suite compares the two dialects' drizzle objects and
+       * so would agree with itself if both were wrong, and the driver suites
+       * build their schema from these same migrations. `isOpen` runs on the
+       * upload path and now looks up by `user_id`, which stopped being the
+       * primary key three statements ago - without this it is a sequential
+       * scan that nothing would notice until the table grew.
+       *
+       * Scoped to `current_schema()`, which the pool's `search_path` makes
+       * this run's scratch schema. Every other suite's schema holds an
+       * `account_closing` with the same index name, so matching on the table
+       * name alone finds however many happen to be alive.
+       */
+      const { rows: indexed } = await pool.query<{ indexdef: string }>(
+        `select indexdef from pg_indexes
+         where schemaname = current_schema()
+           and tablename = 'account_closing'
+           and indexname = 'account_closing_user_idx'`,
+      );
+      expect(indexed).toHaveLength(1);
+      expect(indexed[0]?.indexdef).toContain("(user_id)");
+      expect(indexed[0]?.indexdef).not.toContain("UNIQUE");
+
       // And both still cascade, which collects a mark no failure lifted.
       await pool.query(`delete from "user" where id = 'owner'`);
       const { rows: left } = await pool.query<{ v: string }>(

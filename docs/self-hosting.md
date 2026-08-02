@@ -111,12 +111,13 @@ it again on the way out if the sweep did not finish. Marks are per attempt, so
 two deletions of one account cannot interfere: each places its own, and the one
 that fails removes only what it placed.
 
-One case needs an operator, and only one. Better Auth runs the sweep, then
-deletes the user row, and offers no hook that fires if that second step fails -
-so a sweep that succeeded followed by a delete that did not leaves a mark with
-nothing to lift it. The symptom is an account whose uploads answer `409 account
-is being deleted` indefinitely. Deleting the account again clears it, because a
-successful deletion cascades every mark away; failing that, remove its rows:
+A mark can still be left behind, and then it needs an operator. Any attempt
+that ends without reaching its own cleanup leaves one: the process killed
+mid-sweep, the isolate evicted, the invocation cut short - or Better Auth
+deleting the user row and failing, which it offers no hook to react to at all.
+The symptom is an account whose uploads answer `409 account is being deleted`
+indefinitely. Deleting the account again clears it, because a successful
+deletion cascades every mark away; failing that, remove its rows:
 
 ```sql
 delete from account_closing where user_id = '<user id>';

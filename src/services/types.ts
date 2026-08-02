@@ -1,3 +1,21 @@
+/*
+ * No compatibility re-exports here, deliberately, and for two different
+ * reasons.
+ *
+ * `Services` moved to src/services/context.ts because this module sat in an
+ * import cycle: it named the assembled context while the modules that build
+ * that context imported their types from here. Forwarding it back would
+ * reopen exactly that, and `bunx madge --circular` fails the build on it.
+ *
+ * `PlanVisibility` moved to src/limits.ts for a plainer reason. That module is
+ * a leaf and this one already imports it, so a re-export closes no cycle - it
+ * would just be a second public path to one type, which is how half a
+ * codebase ends up importing it one way and half the other. The import below
+ * exists because the types in this file use the type. That is a consumer, not
+ * a forward.
+ *
+ * Every caller moved with both symbols; nothing points here for either.
+ */
 import type { PlanVisibility } from "../limits.ts";
 
 /**

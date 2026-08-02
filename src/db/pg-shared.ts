@@ -155,10 +155,21 @@ function pgClaim(db: PgDb): Dialect["claim"] {
       return await db.transaction(
         async (tx) => {
           try {
-            // Transaction-local: `set local` reverts with the transaction, so
-            // the connection goes back to the pool with the ordinary deadline.
-            // Interpolated rather than bound - `set local` takes a literal,
-            // and a parameter placeholder is a syntax error here.
+            /*
+             * Transaction-local: `set local` reverts with the transaction, so
+             * the connection goes back to the pool with the ordinary deadline.
+             * Interpolated rather than bound - `set local` takes a literal,
+             * and a parameter placeholder is a syntax error here.
+             *
+             * And it does bound the advisory wait below, which is worth
+             * stating because the exclusions around `lock_timeout` invite the
+             * opposite guess. Settled against a real server rather than from
+             * the manual: "a claim that loses a race for a lock" in
+             * tests/drivers/db.postgres.test.ts holds this exact lock from a
+             * second session and asserts the wait ends as `55P03`. If a
+             * future Postgres stopped applying it here, that test fails
+             * rather than the deadline quietly becoming unbounded.
+             */
             await tx.execute(
               sql.raw(`set local lock_timeout = '${LOCK_TIMEOUT_MS}ms'`),
             );
