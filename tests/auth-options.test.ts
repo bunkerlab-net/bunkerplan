@@ -55,6 +55,23 @@ describe("the options as a whole", () => {
     });
   });
 
+  test("consumes verification in the database, not in KV", () => {
+    // Better Auth 1.7 consumes a secondary-storage-only verification through
+    // `SecondaryStorage.getAndDelete`, which the shared KvStore path cannot
+    // provide uniformly - Valkey has `GETDEL`, Workers KV has nothing like it.
+    // On the database path `consumeOne` is a single `DELETE ... RETURNING`, so
+    // exactly one caller carries a WebAuthn challenge away. This is also what
+    // keeps the two refusing methods in src/kv/secondary-storage.ts out of
+    // reach.
+    expect(options.verification.storeInDatabase).toBe(true);
+  });
+
+  test("reads relations through a join rather than a second query", () => {
+    // Moved out of `experimental` in 1.7. It reads the generated relations, so
+    // both dialects have to be regenerated when this changes.
+    expect(options.advanced.database.joins).toBe(true);
+  });
+
   test("enables account deletion", () => {
     expect(options.user.deleteUser.enabled).toBe(true);
   });
@@ -99,6 +116,8 @@ describe("secondary storage", () => {
   test("is passed through when one is", () => {
     const kv = {
       get: async () => null,
+      getAndDelete: async () => null,
+      increment: async () => 1,
       set: async () => {},
       delete: async () => {},
     };

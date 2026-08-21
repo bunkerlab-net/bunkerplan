@@ -168,4 +168,35 @@ describe("toSecondaryStorage", () => {
 
     expect(calls).toEqual([{ method: "set", args: ["sess:1", "", 60] }]);
   });
+
+  /**
+   * The two methods Better Auth 1.7 requires and the shared `KvStore` path
+   * cannot honour uniformly: Valkey could manage `getAndDelete` with `GETDEL`
+   * and `increment` only with a Lua script or a transaction, and Workers KV
+   * can do neither. This deployment keeps verification and rate limiting in the
+   * database so nothing reaches them, and they refuse rather than emulate: a
+   * get-then-delete pair reads as atomic while racing, and what it would be
+   * guarding is a WebAuthn challenge being redeemed twice.
+   *
+   * Asserted because the refusal is the contract. Were one of these to quietly
+   * start returning a value, the guarantee would be gone and every other test
+   * here would still pass.
+   */
+  test("refuses getAndDelete rather than emulating it", async () => {
+    const { kv, calls } = recordingKv();
+
+    expect(() => toSecondaryStorage(kv).getAndDelete("verification:1")).toThrow(
+      /not available on this KV store/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  test("refuses increment rather than emulating it", async () => {
+    const { kv, calls } = recordingKv();
+
+    expect(() => toSecondaryStorage(kv).increment("rl:1", 60)).toThrow(
+      /not available on this KV store/,
+    );
+    expect(calls).toEqual([]);
+  });
 });

@@ -115,12 +115,17 @@ describe("passkey registration", () => {
     const { resolveUser, afterVerification } = passkeyOptions().registration;
     const provisional = await resolveUser();
     const created: unknown[] = [];
+    const sources: unknown[] = [];
     const sessions: string[] = [];
     const ctx = {
       context: {
         internalAdapter: {
-          createUser: async (row: { name: string; email: string }) => {
+          createUser: async (
+            row: { name: string; email: string },
+            source: unknown,
+          ) => {
             created.push(row);
+            sources.push(source);
             return { id: "user-real", ...row };
           },
           createSession: async (userId: string) => {
@@ -142,6 +147,10 @@ describe("passkey registration", () => {
         emailVerified: false,
       },
     ]);
+    // Required since 1.7, and positional: dropped, `createUser` throws rather
+    // than defaulting, so registration would fail closed. Passkeys are the
+    // only way an account is ever created here.
+    expect(sources).toEqual([{ method: "passkey" }]);
     expect(sessions).toEqual(["user-real"]);
     // Without the cookie, signing up would need a second biometric prompt
     // immediately afterwards.
