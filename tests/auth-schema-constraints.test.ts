@@ -130,14 +130,23 @@ const generated = [["pg"], ["sqlite"]] as const satisfies ReadonlyArray<
  * `getTableConfig` that can read it come from the same dialect, and picking one
  * without the other is how a `pg` table reaches the SQLite reader.
  *
- * Projected to two fields rather than returned as the union of both configs.
+ * Projected to three fields rather than returned as the union of both configs.
  * The two are structurally different, so a caller reaching for anything else
  * would need a cast to compile - and the cast, not the difference, is what
  * would decide whether it worked. Adding a field here is a deliberate act with
  * a type error on each side if the dialects disagree about it.
  */
 interface TableShape {
-  columns: ReadonlyArray<{ name: string; isUnique: boolean }>;
+  columns: ReadonlyArray<{
+    name: string;
+    isUnique: boolean;
+    notNull: boolean;
+  }>;
+  indexes: ReadonlyArray<{
+    name: string | undefined;
+    unique: boolean;
+    columns: ReadonlyArray<string | null>;
+  }>;
   foreignKeys: ReadonlyArray<{
     reference: () => {
       columns: ReadonlyArray<{ name: string }>;
@@ -155,6 +164,34 @@ interface TableShape {
 const pgTables = { ...pgSchema };
 const sqliteTables = { ...sqliteSchema };
 
+/**
+ * Index configs, projected to the three things these tests read.
+ *
+ * Both dialects type an index column as a column *or* a SQL expression, and an
+ * expression has no name. None of the generated auth indexes uses one, so the
+ * `null` is unreachable rather than tolerated - and it reads as a mismatch if
+ * the generator ever emits one, instead of comparing equal to a real column.
+ */
+function projectIndexes(
+  indexes: ReadonlyArray<{
+    config: {
+      name?: string | undefined;
+      unique: boolean;
+      columns: readonly unknown[];
+    };
+  }>,
+): TableShape["indexes"] {
+  return indexes.map((index) => ({
+    name: index.config.name,
+    unique: index.config.unique,
+    columns: index.config.columns.map((column) =>
+      typeof column === "object" && column !== null && "name" in column
+        ? String(column.name)
+        : null,
+    ),
+  }));
+}
+
 function tableOf(dialect: Dialect, name: string): TableShape {
   /*
    * Two branches rather than one ternary. The schema and its reader have to be
@@ -169,12 +206,20 @@ function tableOf(dialect: Dialect, name: string): TableShape {
     // config as `undefined` and fail somewhere inside Drizzle, naming nothing.
     if (table === undefined) throw missing();
     const config = pgTableConfig(table);
-    return { columns: config.columns, foreignKeys: config.foreignKeys };
+    return {
+      columns: config.columns,
+      indexes: projectIndexes(config.indexes),
+      foreignKeys: config.foreignKeys,
+    };
   }
   const table = sqliteTables[name as "session"];
   if (table === undefined) throw missing();
   const config = sqliteTableConfig(table);
-  return { columns: config.columns, foreignKeys: config.foreignKeys };
+  return {
+    columns: config.columns,
+    indexes: projectIndexes(config.indexes),
+    foreignKeys: config.foreignKeys,
+  };
 }
 
 /**
@@ -238,12 +283,33 @@ describe.each(generated)("every %s auth table", (dialect) => {
       true,
     );
   });
+
+  test("an account is keyed by the issuer that vouched for it", () => {
+    const { columns, indexes } = tableOf(dialect, "account");
+
+    // Better Auth 1.7 recognises an external account by the `(issuer,
+    // accountId)` pair rather than by `providerId`. A nullable issuer would
+    // leave that key ambiguous, and the unique index is what stops two
+    // providers claiming one identity.
+    expect(columns.find((column) => column.name === "issuer")?.notNull).toBe(
+      true,
+    );
+    // The whole list of unique indexes, not merely containing it: a second one
+    // added here is another identity rule nobody described.
+    expect(indexes.filter((index) => index.unique)).toEqual([
+      {
+        name: "account_issuer_accountId_uidx",
+        unique: true,
+        columns: ["issuer", "account_id"],
+      },
+    ]);
+  });
 });
 
 /**
  * The relational graph, which is not decoration here.
  *
- * `buildAuthOptions` turns on `experimental.joins`, so Better Auth issues
+ * `buildAuthOptions` turns on `advanced.database.joins`, so Better Auth issues
  * relational queries rather than separate lookups - and drizzle resolves those
  * through exactly these declarations. A `fields`/`references` pair pointing at
  * the wrong column is a join that silently returns the wrong rows, which no
@@ -258,7 +324,7 @@ describe.each(generated)("the %s relational graph", (dialect) => {
    *
    * `declared.config` and `declared.table` are Relations v1 internals. Drizzle
    * exposes no public way to read a declaration back, and the alternative -
-   * not testing the graph - leaves `experimental.joins` resolving against
+   * not testing the graph - leaves `advanced.database.joins` resolving against
    * whatever the generator last emitted. The exposure is bounded rather than
    * removed: `drizzle-orm` is `^0.45.2`, which for a `0.x` version admits
    * patches only, so a v2 adapter cannot arrive without a deliberate bump.

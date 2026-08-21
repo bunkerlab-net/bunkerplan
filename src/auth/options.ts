@@ -71,13 +71,19 @@ function passkeyPlugin(input: AuthOptionsInput) {
       afterVerification: async ({ ctx, user }) => {
         if (!user.id.startsWith(PENDING)) return;
         const handle = user.name;
-        const created = await ctx.context.internalAdapter.createUser({
-          name: handle,
-          // RFC 2606 reserved TLD: a synthetic address that can never resolve
-          // or be mailed.
-          email: handleEmail(handle),
-          emailVerified: false,
-        });
+        const created = await ctx.context.internalAdapter.createUser(
+          {
+            name: handle,
+            // RFC 2606 reserved TLD: a synthetic address that can never resolve
+            // or be mailed.
+            email: handleEmail(handle),
+            emailVerified: false,
+          },
+          // The provisioning origin, required since 1.7. `ValidateUserInfoMethod`
+          // keeps an open `string` arm for plugins; this deployment only ever
+          // creates a user from an attested passkey.
+          { method: "passkey" },
+        );
         // Registration signs the user straight in. Without this the browser
         // would need a second WebAuthn ceremony immediately afterwards - two
         // biometric prompts to sign up.
@@ -187,6 +193,81 @@ const DISABLED_PATHS = [
 ];
 
 /**
+ * KV is a cache; the database is the source of truth. `findSession` reads KV
+ * first and falls back to the DB, so a KV miss or cross-region lag degrades to
+ * a DB read instead of logging the user out.
+ */
+const SESSION = { storeSessionInDatabase: true };
+
+/**
+ * `enabled` is explicit because the default resolves it from NODE_ENV.
+ *
+ * Counters go to the database, not KV: Workers KV throttles one write per
+ * second per key, takes up to 60s to propagate, and cannot increment atomically
+ * for Better Auth's `consume`. The database path decides inside one conditional
+ * UPDATE, so the count stays exact under concurrency. This is also what keeps
+ * `SecondaryStorage.increment` out of reach - see src/kv/secondary-storage.ts.
+ */
+const RATE_LIMIT = {
+  enabled: true,
+  storage: "database",
+  window: 60,
+  max: 100,
+} as const;
+
+/**
+ * Consume the WebAuthn challenge in the database rather than in KV.
+ *
+ * Better Auth 1.7 consumes a secondary-storage-only verification through
+ * `SecondaryStorage.getAndDelete`. Valkey could serve that atomically with
+ * `GETDEL`, but the shared `KvStore` seam exposes no such call and Workers KV
+ * has no equivalent, so the adapter cannot offer it uniformly across both
+ * drivers. The database path can: on pg and sqlite the adapter's `consumeOne`
+ * is a single `DELETE ... RETURNING`, so exactly one caller carries the row
+ * away and a challenge cannot be redeemed twice. Better Auth also takes a
+ * lock around that, but it is an in-process promise map - it reduces
+ * contention within one isolate and guarantees nothing across them, so the
+ * single statement is what the claim rests on. Same reasoning as `SESSION`
+ * above.
+ */
+const VERIFICATION = { storeInDatabase: true };
+
+/**
+ * Refuses an account deletion that does not name the account it authenticated
+ * as, then runs the caller's cleanup.
+ *
+ * This is the only place the intended account can be confirmed safely. Better
+ * Auth resolves the session and calls this inside one request, so `user` is
+ * who the request authenticated as and the header is who the caller meant -
+ * nothing can swap the session between them, the way it can between a client's
+ * own check and the request that follows it. See src/http/expected-account.ts.
+ *
+ * Required, not merely honoured when present: a check a caller can skip is one
+ * a client regression silently drops, and what it guards is the deletion of
+ * the wrong account.
+ *
+ * The cleanup runs second because it needs the rows that are about to go.
+ * Throwing from either half aborts the deletion.
+ */
+async function refuseUnlessExpected(
+  user: { id: string },
+  request: Request | undefined,
+  cleanUp: ((userId: string) => Promise<void>) | undefined,
+) {
+  const expected = request?.headers.get(EXPECTED_ACCOUNT_HEADER);
+  if (expected !== user.id) {
+    throw new APIError("BAD_REQUEST", {
+      code: WRONG_ACCOUNT_CODE,
+      message:
+        expected == null
+          ? `deleting an account requires the ${EXPECTED_ACCOUNT_HEADER} header`
+          : "this session is not the account you meant to delete",
+    });
+  }
+  await cleanUp?.(user.id);
+}
+
+/**
  * Deliberately un-annotated: `betterAuth()` infers its plugin API surface (e.g.
  * `auth.api.verifyApiKey`) from the literal `plugins` tuple. Annotating this as
  * `BetterAuthOptions` would widen it away. `satisfies` keeps the check.
@@ -202,71 +283,36 @@ export function buildAuthOptions(input: AuthOptionsInput) {
       : {}),
     ...loggerOption(input.logger),
 
-    // KV is a cache; the database is the source of truth. `findSession` reads
-    // KV first and falls back to the DB, so a KV miss or cross-region lag
-    // degrades to a DB read instead of logging the user out.
-    session: { storeSessionInDatabase: true },
+    session: SESSION,
+    rateLimit: RATE_LIMIT,
+    disabledPaths: DISABLED_PATHS,
+    verification: VERIFICATION,
 
     // Without this the default `x-forwarded-for` resolves nothing on Workers,
     // every caller shares one bucket per path, and `session.ipAddress` is null.
-    advanced: { ipAddress: { ipAddressHeaders: [input.clientIpHeader] } },
-
-    // `enabled` is explicit because the default resolves it from NODE_ENV.
-    // Counters go to the database, not KV: Workers KV throttles one write per
-    // second per key, takes up to 60s to propagate, and exposes no `increment`
-    // for Better Auth's atomic `consume`. The database path decides inside one
-    // conditional UPDATE, so the count stays exact under concurrency.
-    rateLimit: { enabled: true, storage: "database", window: 60, max: 100 },
-
-    // `emailAndPassword` already defaults to disabled; this makes the router
-    // 404 those routes, and the identity-mutating ones, outright.
-    disabledPaths: DISABLED_PATHS,
-
-    experimental: { joins: true },
+    // `database.joins` left `experimental` in 1.7; the relations it reads are
+    // the generated ones, so regenerate both dialects with
+    // `bun run auth:generate:pg` and `:sqlite` after touching it.
+    advanced: {
+      ipAddress: { ipAddressHeaders: [input.clientIpHeader] },
+      database: { joins: true },
+    },
 
     user: {
       deleteUser: {
         enabled: true,
         /*
-         * `sendDeleteAccountVerification` is deliberately absent, and adding it
-         * would open a path around the check below. That flow deletes on a link
-         * followed from an inbox, in a request that carries no
+         * `sendDeleteAccountVerification` is deliberately absent, and adding
+         * it would open a path around `refuseUnlessExpected`. That flow deletes
+         * on a link followed from an inbox, in a request that carries no
          * `x-expected-account` and cannot - so the hook would have nothing to
          * compare and would refuse every one of them, or would have to be
          * loosened to let them through. Addresses here are synthetic
          * (`…@passkey.invalid`) and receive no mail, so the flow buys nothing
          * either way.
          */
-        /*
-         * Two jobs, in this order.
-         *
-         * The first is the only place the intended account can be confirmed
-         * safely. Better Auth resolves the session and calls this inside one
-         * request, so `user` is who this request authenticated as and the
-         * header is who the caller meant - nothing can swap the session
-         * between them, the way it can between a client's own check and the
-         * request that follows it. See src/http/expected-account.ts.
-         *
-         * Required, not merely honoured when present: a check that a caller
-         * can skip is one a client regression silently drops, and what it is
-         * guarding is the deletion of the wrong account.
-         *
-         * The second job is the caller's cleanup, which needs the rows that
-         * are about to go. Throwing from either aborts the deletion.
-         */
-        beforeDelete: async (user: { id: string }, request?: Request) => {
-          const expected = request?.headers.get(EXPECTED_ACCOUNT_HEADER);
-          if (expected !== user.id) {
-            throw new APIError("BAD_REQUEST", {
-              code: WRONG_ACCOUNT_CODE,
-              message:
-                expected == null
-                  ? `deleting an account requires the ${EXPECTED_ACCOUNT_HEADER} header`
-                  : "this session is not the account you meant to delete",
-            });
-          }
-          await input.onBeforeDeleteUser?.(user.id);
-        },
+        beforeDelete: (user: { id: string }, request?: Request) =>
+          refuseUnlessExpected(user, request, input.onBeforeDeleteUser),
       },
     },
 
