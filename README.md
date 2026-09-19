@@ -35,7 +35,7 @@ bun run dev
 | `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it   |
 | `bun run test`                         | Builds, then runs the whole suite with coverage. Partial by default: the container-backed suites run only when their `TEST_*` variables are set - see Tests |
-| `bun run test:backends`                | Starts Postgres, Valkey, and MinIO on localhost; set the `TEST_*` variables to reach them               |
+| `bun run test:backends`                | Starts Postgres, Valkey, and RustFS on localhost; set the `TEST_*` variables to reach them               |
 | `bun run check`                        | Biome lint and format                                                                                   |
 | `bun run typecheck`                    | Builds, then `tsc --noEmit`                                                                             |
 
@@ -64,7 +64,7 @@ There is no HMR. Save a file and `bun run dev` rebuilds; reload the tab.
 
 ## Tests
 
-Six stores ship: D1, R2, and Workers KV on Cloudflare; Postgres, MinIO, and
+Six stores ship: D1, R2, and Workers KV on Cloudflare; Postgres, RustFS, and
 Valkey when self-hosted. `tests/drivers/` holds one conformance suite per
 interface and runs it against every implementation, so a difference between
 two backends fails an assertion instead of surfacing on one deployment and not
@@ -77,7 +77,7 @@ checkout with no Docker still passes - having exercised rather less than it
 looks. To run everything:
 
 ```sh
-bun run test:backends   # postgres, valkey, minio, published on localhost
+bun run test:backends   # postgres, valkey, rustfs, published on localhost
 TEST_DATABASE_URL=postgres://bunkerplan:bunkerplan@127.0.0.1:5432/bunkerplan \
 TEST_VALKEY_URL=redis://127.0.0.1:6379 \
 TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
@@ -88,10 +88,10 @@ bun run test:backends:down
 Or uncomment the same variables in your local environment file - `bun test`
 reads it - and `bun run test` alone runs the full matrix. `.env.example`
 documents all five, including the two S3 credentials that default to the
-compose MinIO.
+compose RustFS.
 
 CI sets them, so a pull request always runs the full matrix - across two steps
-rather than one: the main step carries Postgres and MinIO, and Valkey gets a
+rather than one: the main step carries Postgres and RustFS, and Valkey gets a
 step of its own for the reason below. It brings the same images up as native
 service containers rather than through Compose, so the runner waits on their
 health gates instead of a script polling ports.
@@ -99,8 +99,8 @@ health gates instead of a script polling ports.
 Locally, nothing here can reach data you care about: `test:backends` runs
 under its own Compose project (`bunkerplan-test`), separate from the
 self-hosting stack below, so `test:backends:down -v` cannot take your local
-Postgres, Valkey, or MinIO volumes with it. Either way Postgres works in a
-scratch schema and MinIO in a bucket created for the run, both dropped
+Postgres, Valkey, or RustFS volumes with it. Either way Postgres works in a
+scratch schema and RustFS in a bucket created for the run, both dropped
 afterwards.
 
 One command, `bun run test`. It builds first, because the suite serves the
@@ -179,7 +179,7 @@ until the evidence says otherwise.
 See [docs/self-hosting.md](docs/self-hosting.md) for the environment contract,
 the driver swap matrices, AWS credential guidance, and the operational warnings.
 `docker compose up --build -d` brings up the whole stack against Postgres,
-Valkey, and MinIO.
+Valkey, and RustFS.
 
 ## API
 

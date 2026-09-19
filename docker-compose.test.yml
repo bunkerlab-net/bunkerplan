@@ -6,12 +6,19 @@
 # otherwise, which is the same project `docker compose up --build -d` uses for
 # the real self-hosting stack - and `down -v` there deletes the named volumes,
 # so tearing the test backends down would take a developer's local Postgres,
-# Valkey, and MinIO data with them. `-p` gives this set its own containers,
+# Valkey, and RustFS data with them. `-p` gives this set its own containers,
 # network, and volumes, and `bun run test:backends` passes it for you:
 #
 #   BETTER_AUTH_SECRET=unused docker compose -p bunkerplan-test \
 #     -f docker-compose.yml -f docker-compose.test.yml \
-#     up -d --wait postgres valkey minio
+#     up -d --wait postgres valkey rustfs
+#
+# then the same prefix again with `run --rm rustfs-init`, which creates the
+# bucket.
+#
+# `rustfs-init` is a second command, not a fourth name on the first. It exits
+# once the bucket is there, and `--wait` counts an exited container as a
+# failed one even when it exited 0.
 #
 # The secret is needed even though the `app` service is never started: Compose
 # interpolates the whole file before it selects which services to bring up, so
@@ -32,6 +39,6 @@ services:
     ports:
       - "127.0.0.1:6379:6379"
 
-  minio:
+  rustfs:
     ports:
       - "127.0.0.1:9000:9000"
