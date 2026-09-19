@@ -36,7 +36,7 @@ import { type SQL, sql } from "drizzle-orm";
 import { drizzle as drizzleBunSqlite } from "drizzle-orm/bun-sqlite";
 import { drizzle as drizzleD1 } from "drizzle-orm/d1";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
-import { Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import pg from "pg";
 import { loadConfig } from "../../src/config.ts";
 import type { Dialect } from "../../src/db/dialect.ts";
@@ -198,13 +198,21 @@ function migrations(
 const INERT =
   "export default { fetch: () => new Response(null,{status:404}) };";
 
+/**
+ * Miniflare 5 takes a wrangler-shaped config: one `workers` array, bindings
+ * under `config.env`, and modules in a manifest. `convertV4MiniflareOptions`
+ * is the package's own bridge from the flat options, and it keeps these two
+ * fixtures readable - building that manifest by hand does not.
+ */
 function miniflare(): Miniflare {
-  return new Miniflare({
-    modules: true,
-    script: INERT,
-    kvNamespaces: ["KV"],
-    d1Databases: ["DB"],
-  });
+  return new Miniflare(
+    convertV4MiniflareOptions({
+      modules: true,
+      script: INERT,
+      kvNamespaces: ["KV"],
+      d1Databases: ["DB"],
+    }),
+  );
 }
 
 /**
@@ -227,11 +235,13 @@ async function r2Worker(): Promise<string> {
 }
 
 export async function r2Storage(): Promise<StorageFixture> {
-  const mf = new Miniflare({
-    modules: true,
-    script: await r2Worker(),
-    r2Buckets: ["BUCKET"],
-  });
+  const mf = new Miniflare(
+    convertV4MiniflareOptions({
+      modules: true,
+      script: await r2Worker(),
+      r2Buckets: ["BUCKET"],
+    }),
+  );
   const bucket = await mf.getR2Bucket("BUCKET");
 
   /** Rethrows a driver failure rather than letting it read as a miss. */

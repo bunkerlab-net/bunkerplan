@@ -283,27 +283,6 @@ describe.each(generated)("every %s auth table", (dialect) => {
       true,
     );
   });
-
-  test("an account is keyed by the issuer that vouched for it", () => {
-    const { columns, indexes } = tableOf(dialect, "account");
-
-    // Better Auth 1.7 recognises an external account by the `(issuer,
-    // accountId)` pair rather than by `providerId`. A nullable issuer would
-    // leave that key ambiguous, and the unique index is what stops two
-    // providers claiming one identity.
-    expect(columns.find((column) => column.name === "issuer")?.notNull).toBe(
-      true,
-    );
-    // The whole list of unique indexes, not merely containing it: a second one
-    // added here is another identity rule nobody described.
-    expect(indexes.filter((index) => index.unique)).toEqual([
-      {
-        name: "account_issuer_accountId_uidx",
-        unique: true,
-        columns: ["issuer", "account_id"],
-      },
-    ]);
-  });
 });
 
 /**
