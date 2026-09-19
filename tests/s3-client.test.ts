@@ -7,11 +7,11 @@ import { type Arm, armWhileFileRuns } from "./armed-mock.ts";
  * The S3 driver's construction, and how it reads a failure.
  *
  * tests/drivers/plan-storage.s3.test.ts runs the storage contract against a
- * real MinIO and stays the authority on behaviour. What a live bucket cannot
+ * real RustFS and stays the authority on behaviour. What a live bucket cannot
  * reach is here: the credential decision - omitted entirely unless BOTH keys
  * were configured, or the SDK's provider chain (env vars, SSO, IRSA, task
  * roles, IMDS) never runs - and the error shapes a miss arrives in, one of
- * which MinIO never produces.
+ * which RustFS never produces.
  *
  * The SDK is stubbed rather than reached. Each command class records the input
  * it was built with, so what is asserted is the request the driver composed.
@@ -38,7 +38,7 @@ const arm: Arm = { on: false };
 /**
  * Captured before the registration below.
  *
- * The MinIO contract suite in tests/drivers needs the genuine client, and
+ * The S3 contract suite in tests/drivers needs the genuine client, and
  * `mock.module` cannot be unregistered - so unarmed, every export here hands
  * back the real one. Without this, running the suite in a single process
  * replaced the SDK inside those integration tests and they talked to an array
@@ -68,7 +68,7 @@ mock.module("@aws-sdk/client-s3", () => ({
   ...realSdk,
   // Unarmed, this is the real client - `config`, `middlewareStack` and every
   // method included - because the trap forwards construction untouched. The
-  // MinIO contract suite depends on exactly that.
+  // S3 contract suite depends on exactly that.
   S3Client: new Proxy(realSdk.S3Client, {
     construct: (Target, args: [Record<string, unknown>]) => {
       if (!arm.on) return new Target(...(args as unknown as [never]));

@@ -6,7 +6,7 @@ npm.package_manager = "bun"
 [tools]
 bun = "1"
 gh = "2"
-hk = "1.53.0"
+hk = "2.0.1"
 node = "24"
 pkl = "0.32"
 usage = "latest"

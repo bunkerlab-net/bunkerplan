@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach } from "bun:test";
  * runs once - so under a plain `bun test`, where every file shares one module
  * registry, a stub installed by one file stands in for every file after it.
  * That is not hypothetical: a mocked `@aws-sdk/client-s3` replaced the real
- * client inside the MinIO contract suite, and the integration tests went on
+ * client inside the S3 contract suite, and the integration tests went on
  * "passing" against an in-memory array until their assertions caught it.
  *
  * `--isolate` hides the problem by giving each file its own registry. Relying

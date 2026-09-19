@@ -542,16 +542,16 @@ select {
   position: relative;
 }
 
-.table-scroll table {
-  /* Without this the table would shrink to the container instead of
-     scrolling, and every column would collapse into unreadable wrapping. */
-  min-width: max-content;
-}
-
 table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 24px;
+}
+
+.table-scroll table {
+  /* Without this the table would shrink to the container instead of
+     scrolling, and every column would collapse into unreadable wrapping. */
+  min-width: max-content;
 }
 
 th,

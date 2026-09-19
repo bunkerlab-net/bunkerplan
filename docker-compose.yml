@@ -1,4 +1,4 @@
-# Exercises every non-Cloudflare driver at once: Postgres + Valkey + MinIO.
+# Exercises every non-Cloudflare driver at once: Postgres + Valkey + RustFS.
 # Passing here means the same code that runs on Workers also runs self-hosted.
 services:
   postgres:
@@ -28,36 +28,44 @@ services:
       timeout: 5s
       retries: 10
 
-  minio:
-    # Pinned like postgres and valkey above. MinIO publishes no moving
-    # major-version tag, only dated releases, so this is the tag to bump.
-    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: ["server", "/data", "--console-address", ":9001"]
+  rustfs:
+    # Pinned like postgres and valkey above. Keep this tag and the one in
+    # .github/workflows/check.yaml on the same release.
+    image: docker.io/rustfs/rustfs:1.0.0
+    # No command: the image starts the server and defaults RUSTFS_VOLUMES
+    # to /data.
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      # Console on http://localhost:9001/rustfs/console/
+      RUSTFS_CONSOLE_ENABLE: "true"
     ports:
       - "9001:9001"
     volumes:
-      - minio-data:/data
+      - rustfs-data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # `/health/ready`, not `/health`: it reports write quorum, so
+      # rustfs-init cannot create a bucket before the server can store one.
+      # `curl` is in the image.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health/ready"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  minio-init:
-    # Pinned like the server above. `mc` releases on its own cadence, so this
-    # tag does not track the `minio` one and is bumped separately.
-    image: docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+  rustfs-init:
+    # `rc` is RustFS's client and versions separately from the server.
+    image: docker.io/rustfs/rc:v0.1.36
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/bunkerplan
-      "
+    # The entrypoint is `rc` itself, so two commands need a shell. `-e` stops
+    # the run if the alias fails.
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |-
+        rc alias set local http://rustfs:9000 rustfsadmin rustfsadmin
+        rc bucket create --ignore-existing local/bunkerplan
 
   migrate:
     build:
@@ -76,7 +84,7 @@ services:
         condition: service_completed_successfully
       valkey:
         condition: service_healthy
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
     ports:
       - "3000:3000"
@@ -95,17 +103,17 @@ services:
       VALKEY_URL: redis://valkey:6379
       STORAGE_DRIVER: s3
       S3_BUCKET: bunkerplan
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: http://rustfs:9000
       S3_REGION: us-east-1
       S3_FORCE_PATH_STYLE: "true"
-      # MinIO has no credential provider chain, so explicit keys are correct
+      # RustFS has no credential provider chain, so explicit keys are correct
       # HERE ONLY. A real AWS deployment MUST omit S3_ACCESS_KEY_ID,
       # S3_SECRET_ACCESS_KEY, and S3_ENDPOINT and attach an IAM role instead -
       # the SDK then resolves and rotates credentials automatically.
-      S3_ACCESS_KEY_ID: minioadmin
-      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_ACCESS_KEY_ID: rustfsadmin
+      S3_SECRET_ACCESS_KEY: rustfsadmin
 
 volumes:
   postgres-data:
   valkey-data:
-  minio-data:
+  rustfs-data:

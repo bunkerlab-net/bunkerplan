@@ -15,8 +15,8 @@ const KEY_PREFIX = "plans/";
  * two stores. R2 treats a key as opaque bytes, so `plans/../secret` addresses
  * a key with that literal name and finds nothing. The S3 SDK builds a URL from
  * the key, and the HTTP layer collapses dot segments in a path: `../secret`
- * escapes the bucket outright (MinIO answers `SignatureDoesNotMatch`, because
- * SigV4 signed the path before it was rewritten), and `./x` quietly resolves
+ * escapes the bucket outright (RustFS answers `InvalidArgument`, because the
+ * signed path is not the path that arrives), and `./x` quietly resolves
  * onto the object belonging to the plan whose id is `x`.
  *
  * So the shape is refused rather than prefixed. `isPlanId` is the generator's

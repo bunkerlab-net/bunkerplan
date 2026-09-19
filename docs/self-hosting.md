@@ -14,7 +14,7 @@ Every backing service is selected at runtime, so the same image serves both.
 ## Quick start with Docker Compose
 
 The provided stack exercises all three swaps at once (Postgres + Valkey +
-MinIO):
+RustFS):
 
 ```sh
 git clone https://github.com/bunkerlab-net/bunkerplan.git && cd bunkerplan
@@ -69,7 +69,7 @@ These names are the API. They are not renamed across releases.
 | `LOG_LEVEL`              | no              | `info`                        | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent` |
 | `LOG_COLOR`              | no              | `false`                       | colourises `LOG_FORMAT=plain` only                                       |
 | `STORAGE_DRIVER`         | no on Workers   | `r2` on Workers               | `r2` \| `s3`                                                             |
-| `S3_ENDPOINT`            | no              | -                             | **omit for real AWS S3**; set for MinIO / R2 / GCS                       |
+| `S3_ENDPOINT`            | no              | -                             | **omit for real AWS S3**; set for RustFS / MinIO / R2 / GCS              |
 | `S3_BUCKET`              | if `s3`         | -                             |                                                                          |
 | `S3_ACCESS_KEY_ID`       | no              | -                             | **omit on AWS** - see below                                              |
 | `S3_SECRET_ACCESS_KEY`   | no              | -                             | must be set together with the key id                                     |
@@ -196,10 +196,10 @@ S3_FORCE_PATH_STYLE=false
 Set static keys **only** for stores that have no credential chain:
 
 ```sh
-# MinIO
+# RustFS
 STORAGE_DRIVER=s3
 S3_BUCKET=bunkerplan
-S3_ENDPOINT=http://minio:9000
+S3_ENDPOINT=http://rustfs:9000
 S3_REGION=us-east-1
 S3_FORCE_PATH_STYLE=true
 S3_ACCESS_KEY_ID=...

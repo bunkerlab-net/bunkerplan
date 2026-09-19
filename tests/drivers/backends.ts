@@ -1,7 +1,7 @@
 /**
  * Live backends for the driver conformance suites.
  *
- * Six stores ship: D1, R2, and Workers KV on Cloudflare; Postgres, MinIO/S3,
+ * Six stores ship: D1, R2, and Workers KV on Cloudflare; Postgres, RustFS/S3,
  * and Valkey when self-hosted. Every one of them is reached here through the
  * same driver the application uses, against a real server - Miniflare's
  * workerd for the Cloudflare three, containers for the rest. Nothing below
@@ -15,7 +15,7 @@
  * the suite rather than quietly reporting success against nothing.
  *
  *   docker compose -f docker-compose.yml -f docker-compose.test.yml \
- *     up -d --wait postgres valkey minio
+ *     up -d --wait postgres valkey rustfs
  *   TEST_DATABASE_URL=postgres://bunkerplan:bunkerplan@127.0.0.1:5432/bunkerplan \
  *   TEST_VALKEY_URL=redis://127.0.0.1:6379 \
  *   TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
@@ -36,7 +36,7 @@ import { type SQL, sql } from "drizzle-orm";
 import { drizzle as drizzleBunSqlite } from "drizzle-orm/bun-sqlite";
 import { drizzle as drizzleD1 } from "drizzle-orm/d1";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
-import { Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import pg from "pg";
 import { loadConfig } from "../../src/config.ts";
 import type { Dialect } from "../../src/db/dialect.ts";
@@ -70,8 +70,8 @@ const read = (name: string) => process.env[name]?.trim() || undefined;
 export const DATABASE_URL = read("TEST_DATABASE_URL");
 export const VALKEY_URL = read("TEST_VALKEY_URL");
 export const S3_ENDPOINT = read("TEST_S3_ENDPOINT");
-const S3_ACCESS_KEY_ID = read("TEST_S3_ACCESS_KEY_ID") ?? "minioadmin";
-const S3_SECRET_ACCESS_KEY = read("TEST_S3_SECRET_ACCESS_KEY") ?? "minioadmin";
+const S3_ACCESS_KEY_ID = read("TEST_S3_ACCESS_KEY_ID") ?? "rustfsadmin";
+const S3_SECRET_ACCESS_KEY = read("TEST_S3_SECRET_ACCESS_KEY") ?? "rustfsadmin";
 
 const PG_CONNECT_TIMEOUT_MS = 5_000;
 
@@ -91,7 +91,7 @@ export const FIXTURE_TIMEOUT_MS = 120_000;
 /**
  * A store under test plus the teardown that releases it. `unique` prefixes
  * ids so suites sharing one server cannot collide: Miniflare and bun:sqlite
- * get a fresh instance each time, but Postgres, Valkey, and MinIO are one
+ * get a fresh instance each time, but Postgres, Valkey, and RustFS are one
  * long-lived server per run.
  */
 export interface Fixture<T> {
@@ -198,13 +198,21 @@ function migrations(
 const INERT =
   "export default { fetch: () => new Response(null,{status:404}) };";
 
+/**
+ * Miniflare 5 takes a wrangler-shaped config: one `workers` array, bindings
+ * under `config.env`, and modules in a manifest. `convertV4MiniflareOptions`
+ * is the package's own bridge from the flat options, and it keeps these two
+ * fixtures readable - building that manifest by hand does not.
+ */
 function miniflare(): Miniflare {
-  return new Miniflare({
-    modules: true,
-    script: INERT,
-    kvNamespaces: ["KV"],
-    d1Databases: ["DB"],
-  });
+  return new Miniflare(
+    convertV4MiniflareOptions({
+      modules: true,
+      script: INERT,
+      kvNamespaces: ["KV"],
+      d1Databases: ["DB"],
+    }),
+  );
 }
 
 /**
@@ -227,11 +235,13 @@ async function r2Worker(): Promise<string> {
 }
 
 export async function r2Storage(): Promise<StorageFixture> {
-  const mf = new Miniflare({
-    modules: true,
-    script: await r2Worker(),
-    r2Buckets: ["BUCKET"],
-  });
+  const mf = new Miniflare(
+    convertV4MiniflareOptions({
+      modules: true,
+      script: await r2Worker(),
+      r2Buckets: ["BUCKET"],
+    }),
+  );
   const bucket = await mf.getR2Bucket("BUCKET");
 
   /** Rethrows a driver failure rather than letting it read as a miss. */
@@ -314,7 +324,7 @@ export async function d1Db(): Promise<DbFixture> {
 }
 
 // ---------------------------------------------------------------------------
-// Self-hosted: bun:sqlite, Postgres, Valkey, MinIO.
+// Self-hosted: bun:sqlite, Postgres, Valkey, RustFS.
 // ---------------------------------------------------------------------------
 
 /**
@@ -654,7 +664,7 @@ export async function valkeyKv(): Promise<Fixture<ValkeyKv>> {
 }
 
 /**
- * MinIO through the same `createS3Storage` a self-hosted deployment gets,
+ * RustFS through the same `createS3Storage` a self-hosted deployment gets,
  * configured through `loadConfig` so the environment contract in
  * docs/self-hosting.md is what is exercised rather than a hand-built object.
  *
