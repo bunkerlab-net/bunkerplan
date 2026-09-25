@@ -10,7 +10,7 @@ permissions: {}
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     # Service containers rather than the Docker Compose stack. Compose is how a
