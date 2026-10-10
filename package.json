@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
-    "@cloudflare/workers-types": "^5.20261008.1",
+    "@cloudflare/workers-types": "^5.20261009.1",
     "@happy-dom/global-registrator": "^20.14.6",
     "@scalar/api-reference": "^1.73.1",
     "@scalar/openapi-parser": "^0.29.12",
