@@ -32,3 +32,8 @@ updates:
       time: "08:00"
     cooldown:
       default-days: 1
+    # Miniflare 5.20261006.1-alpha breaks `dispatchFetch()` under Bun.
+    # Wrangler bundles Miniflare, so hold both.
+    ignore:
+      - dependency-name: miniflare
+      - dependency-name: wrangler
