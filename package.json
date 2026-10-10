@@ -56,9 +56,9 @@
     "@types/pg": "^8.23.1",
     "auth": "^1.7.7",
     "drizzle-kit": "^0.31.11",
-    "miniflare": "^5.20261006.1-alpha",
+    "miniflare": "^5.20260915.0-alpha",
     "sort-package-json": "^4.0.0",
-    "wrangler": "^4.149.0"
+    "wrangler": "^4.132.0"
   },
   "peerDependencies": {
     "typescript": "^7.0.2"
