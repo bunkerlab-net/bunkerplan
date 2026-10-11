@@ -37,7 +37,7 @@ bun run dev
 | `bun run test`                         | Builds, then runs the whole suite with coverage. Partial by default: the container-backed suites run only when their `TEST_*` variables are set - see Tests |
 | `bun run test:backends`                | Starts Postgres, Valkey, and RustFS on localhost; set the `TEST_*` variables to reach them               |
 | `bun run check`                        | Biome lint and format                                                                                   |
-| `bun run typecheck`                    | Builds, then `tsc --noEmit`                                                                             |
+| `bun run typecheck`                    | Builds, then `bun --check`                                                                              |
 
 `build` comes first in three of those because it writes
 `src/server/manifest.generated.ts` - the hashed filenames of the browser
@@ -186,9 +186,9 @@ Valkey, and RustFS.
 Browse it at `/api/docs` - a [Scalar](https://scalar.com) reference over
 `/api/openapi.json`. The document is built from the Zod schemas the handlers
 answer with (`src/api/schemas.ts`), so a response shape that drifts from the
-published spec fails `tsc`, and `tests/openapi.test.ts` fails a route that
-ships undescribed. `servers` and the upload cap come from the running
-deployment, not from this repository's defaults.
+published spec fails the type check, and `tests/openapi.test.ts` fails a
+route that ships undescribed. `servers` and the upload cap come from the
+running deployment, not from this repository's defaults.
 
 It describes what an API key can call - upload, replace, rename, list, delete,
 and read - plus the operations that need no credential: redeeming a share code,
