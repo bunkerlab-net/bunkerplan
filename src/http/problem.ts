@@ -3,7 +3,7 @@ import type { ErrorBody } from "../api/schemas.ts";
 /**
  * The one shape a failing plan-API response carries, typed against the schema
  * the published document is built from, so a handler cannot invent a second
- * error shape without failing `tsc`.
+ * error shape without failing the type check.
  *
  * Two routes outside that set answer differently on purpose. `/api/auth/*`
  * belongs to Better Auth, which shapes its own failures (`{ message, code }`)
@@ -27,7 +27,7 @@ export function problem(
  *
  * Shares `ErrorBody` with `problem` rather than assembling its own object, for
  * the reason above: one schema, so neither can drift from the published
- * document without failing `tsc`.
+ * document without failing the type check.
  */
 export function problems(
   status: number,

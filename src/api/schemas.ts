@@ -8,9 +8,9 @@
  * describes is typed against a schema here at the point it is built - with
  * `satisfies` on a literal, or an explicit annotation where the body is
  * assembled first, as in `/healthz` and `problem()` - so one that stops
- * matching the published shape fails `tsc`. The `text/html` bodies on
- * `/p/{id}` are the exception: a stored plan and the site's 404 page are raw
- * `Response`s, described inline in src/api/openapi.ts rather than from a
+ * matching the published shape fails the type check. The `text/html` bodies
+ * on `/p/{id}` are the exception: a stored plan and the site's 404 page are
+ * raw `Response`s, described inline in src/api/openapi.ts rather than from a
  * schema here.
  *
  * REQUESTS are description only. Nothing here parses an incoming body or
@@ -247,8 +247,8 @@ export const ErrorBody = component(
 /**
  * The body types the handlers write. Each shares its schema's name - a value
  * and a type may, and here should: `Response.json(body satisfies PlanCreated)`
- * is what makes a handler that drifts from the published document fail `tsc`
- * instead of shipping a spec that lies.
+ * is what makes a handler that drifts from the published document fail the
+ * type check instead of shipping a spec that lies.
  */
 export type ErrorBody = z.infer<typeof ErrorBody>;
 

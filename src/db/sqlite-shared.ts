@@ -92,7 +92,7 @@ export function sqliteDialect(db: SqliteDb): Dialect {
  * src/db/bun-sqlite.ts import it as a type and name it in their return types,
  * and src/auth/instance.ts unions it into `AuthDb`; those are type-only
  * imports across module boundaries, which cannot collide with anything.
- * `tsc --noEmit` is the arbiter and it is clean - a duplicate identifier is a
- * compile error, not a style opinion.
+ * `bun run typecheck` is the arbiter and it is clean - a duplicate identifier
+ * is a compile error, not a style opinion.
  */
 export type SqliteAuthHandle = { adapter: SqliteDb; provider: "sqlite" };
