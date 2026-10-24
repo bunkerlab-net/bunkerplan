@@ -388,12 +388,16 @@ describe("plan lifecycle over HTTP", () => {
  * arbitrary `Host` produced Open Graph tags pointing at whatever hostname the
  * caller supplied - a link preview on the attacker's domain, attributed to
  * this site.
+ *
+ * The attacker's host goes in the URL rather than a `Host` header. The Workers
+ * runtime derives the request URL from `Host`, so the Worker sees the same
+ * request either way, and Miniflare's platform proxy refuses a foreign `Host`.
  */
 describe("server-rendered document head", () => {
   const ATTACKER = "evil.example";
 
   test("builds absolute URLs from the configured origin", async () => {
-    const response = await app.fetch("/", { headers: { host: ATTACKER } });
+    const response = await app.fetch(`http://${ATTACKER}/`);
     const body = await response.text();
 
     expect(response.status).toBe(200);
@@ -414,9 +418,7 @@ describe("server-rendered document head", () => {
   });
 
   test("still reflects the path so per-page tags stay correct", async () => {
-    const body = await (
-      await app.fetch("/dashboard", { headers: { host: ATTACKER } })
-    ).text();
+    const body = await (await app.fetch(`http://${ATTACKER}/dashboard`)).text();
 
     expect(body).toContain(`content="${PUBLIC_BASE_URL}/dashboard"`);
     expect(body).not.toContain(ATTACKER);
@@ -828,10 +830,11 @@ describe("gated sharing", () => {
     expect(granted.status).toBe(200);
 
     // The gate authorises the user behind a credential, not a credential type.
-    for (const headers of [
+    const credentials: Record<string, string>[] = [
       { "x-api-key": guest.key },
       { cookie: guest.cookie },
-    ]) {
+    ];
+    for (const headers of credentials) {
       expect((await app.fetch(`/p/${created.id}`, { headers })).status).toBe(
         200,
       );
@@ -843,10 +846,7 @@ describe("gated sharing", () => {
     );
     expect(revoked.status).toBe(204);
 
-    for (const headers of [
-      { "x-api-key": guest.key },
-      { cookie: guest.cookie },
-    ]) {
+    for (const headers of credentials) {
       expect((await app.fetch(`/p/${created.id}`, { headers })).status).toBe(
         401,
       );
