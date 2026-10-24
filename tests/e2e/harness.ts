@@ -1,6 +1,7 @@
 import { defaultKeyHasher } from "@better-auth/api-key";
+import type { RequestInit, Response } from "@cloudflare/workers-types";
 import { makeSignature } from "better-auth/crypto";
-import { createTestHarness, type TestHarness } from "wrangler";
+import { createTestHarness } from "wrangler";
 import { handleEmail } from "../../src/ids.ts";
 import { migrationFiles } from "../migration-files.ts";
 
@@ -55,13 +56,16 @@ export const PUBLIC_BASE_URL = "http://localhost";
 const AUTH_SECRET = "e2e-0123456789abcdef0123456789abcdef";
 
 /**
- * The dispatch signature is taken from the harness rather than restated: the
- * ambient `RequestInit`/`Response` here are the Workers ones, which are not
- * the types Miniflare dispatches with.
+ * Requests go through the Worker's default export rather than `worker.fetch()`
+ * or the URL from `listen()`: under Bun, Wrangler refuses both, because Bun's
+ * `fetch()` ignores the undici dispatcher Miniflare routes them through
+ * (https://github.com/oven-sh/bun/issues/39247). `getExport()` still works.
+ *
+ * The stub is a Workers `Fetcher`, so requests and responses use the Workers
+ * types, not Bun's.
  */
-type Dispatch = TestHarness["fetch"];
-export type FetchInit = Parameters<Dispatch>[1];
-export type FetchResponse = Awaited<ReturnType<Dispatch>>;
+export type FetchInit = RequestInit;
+export type FetchResponse = Response;
 
 export interface Harness {
   /** Paths resolve against the worker's own origin. */
@@ -151,6 +155,7 @@ export async function startWorker(): Promise<Harness> {
   await server.listen();
   const worker = server.getWorker<Env>();
   const { DB, BUCKET } = await worker.getEnv();
+  const entry = await worker.getExport();
   await migrate(DB);
 
   let seeded = 0;
@@ -212,7 +217,7 @@ export async function startWorker(): Promise<Harness> {
   };
 
   return {
-    fetch: (path, init) => worker.fetch(path, init),
+    fetch: (path, init) => entry.fetch(new URL(path, PUBLIC_BASE_URL), init),
     db: DB,
     bucket: BUCKET,
     account: async () => (await accountWithSession()).key,

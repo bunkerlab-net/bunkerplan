@@ -41,7 +41,6 @@ interesting class: a plan reaching the app origin, another user's session, or
 another account's plans.
 
 Known and accepted, so please do not report these as new:
-
 - **A plan can still cause an outbound request by navigating.** CSP has no
   deployable `navigate-to`, and the top-navigation sandbox tokens govern only
   embedded documents, so script in a plan can assign `location` or open a
@@ -74,7 +73,7 @@ Known and accepted, so please do not report these as new:
   be handed to HTML the reader did not write.
 
   The `?code=` parameter on `/p/{id}` is kept for a client that can only fetch
-  a URL. No client *sends* a fragment - HTTP requests carry the path and query
+  a URL. No client _sends_ a fragment - HTTP requests carry the path and query
   only, which is what makes the share link safe - so using one is a two-step:
   read the code out of the URL you were given, then
   `POST /api/plans/{id}/unlock` with it in the JSON body and keep the cookie.
