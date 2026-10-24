@@ -1,7 +1,6 @@
 # BunkerPlan
 
 Upload a standalone HTML document, get a URL at `https://{host}/p/{id}`.
-
 - **Private by default.** A plan is readable by its owner alone until it is
   shared - with anyone holding the URL, with a share code, or with named
   accounts. A code keeps working until it is regenerated or removed; only its
@@ -26,18 +25,18 @@ bunx wrangler d1 migrations apply bunkerplan --local
 bun run dev
 ```
 
-| Script                                 | What it does                                                                                            |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `bun run dev`                          | `wrangler dev` on the Workers runtime, plus a client rebuild-on-save watcher                            |
-| `bun run dev:node`                     | The same, against the self-hosted Bun entry instead                                                     |
-| `bun run build`                        | Bundles the browser entry, the asset manifest, and the self-hosted server into `dist/`                  |
-| `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)               |
-| `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                              |
-| `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it   |
+| Script                                 | What it does                                                                                                                                                |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run dev`                          | `wrangler dev` on the Workers runtime, plus a client rebuild-on-save watcher                                                                                |
+| `bun run dev:node`                     | The same, against the self-hosted Bun entry instead                                                                                                         |
+| `bun run build`                        | Bundles the browser entry, the asset manifest, and the self-hosted server into `dist/`                                                                      |
+| `bun run deploy`                       | Build and `wrangler deploy` (refuses while `wrangler.jsonc` still holds dev placeholders)                                                                   |
+| `bun run db:generate`                  | Regenerate migration SQL for both dialects                                                                                                                  |
+| `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it                                                      |
 | `bun run test`                         | Builds, then runs the whole suite with coverage. Partial by default: the container-backed suites run only when their `TEST_*` variables are set - see Tests |
-| `bun run test:backends`                | Starts Postgres, Valkey, and RustFS on localhost; set the `TEST_*` variables to reach them               |
-| `bun run check`                        | Biome lint and format                                                                                   |
-| `bun run typecheck`                    | Builds, then `bun --check`                                                                              |
+| `bun run test:backends`                | Starts Postgres, Valkey, and RustFS on localhost; set the `TEST_*` variables to reach them                                                                  |
+| `bun run check`                        | Biome lint and format                                                                                                                                       |
+| `bun run typecheck`                    | Builds, then `bun --check`                                                                                                                                  |
 
 `build` comes first in three of those because it writes
 `src/server/manifest.generated.ts` - the hashed filenames of the browser
@@ -131,7 +130,7 @@ nothing else failed in any of them. The same file in its own process passed
 five runs out of five. The server is not the slow part - it sat at
 0.3% CPU with an empty slowlog and `timeout 0` throughout, and a standalone
 script that opens one client, waits out a ttl and reads it back did 40 rounds
-without a hang. What is *not* established is why sharing the process does it:
+without a hang. What is _not_ established is why sharing the process does it:
 the backend fixtures each dispose of their handles in `afterAll`, so "the
 process is holding everything at once" is a description of the topology and
 not a diagnosis. Nobody has isolated the interaction.

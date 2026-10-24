@@ -58,7 +58,7 @@
     "drizzle-kit": "^0.31.11",
     "miniflare": "^5.20260915.0-alpha",
     "sort-package-json": "^4.1.0",
-    "wrangler": "^4.132.0"
+    "wrangler": "^4.152.0"
   },
   "peerDependencies": {
     "typescript": "^7.0.2"

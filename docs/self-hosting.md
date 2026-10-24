@@ -1,7 +1,6 @@
 # Self-hosting BunkerPlan
 
 BunkerPlan runs from one source tree on two targets:
-
 - **Cloudflare Workers** - R2 (objects), D1 (database and rate-limit counters),
   Workers KV (session cache). Built with `bun run build`.
 - **Bun** - any S3-compatible store, Postgres or SQLite, Valkey. Built with
@@ -50,36 +49,36 @@ production deploy cannot silently ship the localhost WebAuthn origin.
 
 These names are the API. They are not renamed across releases.
 
-| Var                      | Required        | Default                       | Notes                                                                    |
-| ------------------------ | --------------- | ----------------------------- | ------------------------------------------------------------------------ |
-| `BETTER_AUTH_SECRET`     | yes             | -                             | rejected if under 32 characters                                          |
-| `PUBLIC_BASE_URL`        | yes             | -                             | e.g. `https://plans.example.com`; also used as the Better Auth base URL  |
-| `RP_ID`                  | no              | hostname of `PUBLIC_BASE_URL` | WebAuthn relying-party id; must equal that hostname or be a parent of it |
-| `RP_NAME`                | no              | `BunkerPlan`                  | shown in the passkey prompt                                              |
-| `CLIENT_IP_HEADER`       | **off Workers** | `cf-connecting-ip` on Workers | single header your proxy **overwrites** with the client IP               |
-| `MAX_UPLOAD_BYTES`       | no              | `2097152` (2 MiB)             |                                                                          |
+| Var                      | Required        | Default                       | Notes                                                                                        |
+| ------------------------ | --------------- | ----------------------------- | -------------------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`     | yes             | -                             | rejected if under 32 characters                                                              |
+| `PUBLIC_BASE_URL`        | yes             | -                             | e.g. `https://plans.example.com`; also used as the Better Auth base URL                      |
+| `RP_ID`                  | no              | hostname of `PUBLIC_BASE_URL` | WebAuthn relying-party id; must equal that hostname or be a parent of it                     |
+| `RP_NAME`                | no              | `BunkerPlan`                  | shown in the passkey prompt                                                                  |
+| `CLIENT_IP_HEADER`       | **off Workers** | `cf-connecting-ip` on Workers | single header your proxy **overwrites** with the client IP                                   |
+| `MAX_UPLOAD_BYTES`       | no              | `2097152` (2 MiB)             |                                                                                              |
 | `MAX_PLANS_PER_USER`     | no              | `250`                         | stored plans per account; bounds total storage with `MAX_UPLOAD_BYTES`; max `400` on Workers |
-| `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                               |
-| `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | minimum 60; a shorter window multiplies the sustained rate               |
-| `UNLOCK_RATE_MAX`        | no              | `30`                          | share-code redemptions per window per client address                     |
-| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | minimum 1; no 60s floor, because a redemption stores nothing to guard    |
-| `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                 |
-| `SHARE_CODE_LENGTH`      | no              | `16`                          | characters in a share code; mixed-case alphanumeric, 16 to 64            |
-| `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                    |
-| `LOG_LEVEL`              | no              | `info`                        | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent` |
-| `LOG_COLOR`              | no              | `false`                       | colourises `LOG_FORMAT=plain` only                                       |
-| `STORAGE_DRIVER`         | no on Workers   | `r2` on Workers               | `r2` \| `s3`                                                             |
-| `S3_ENDPOINT`            | no              | -                             | **omit for real AWS S3**; set for RustFS / MinIO / R2 / GCS              |
-| `S3_BUCKET`              | if `s3`         | -                             |                                                                          |
-| `S3_ACCESS_KEY_ID`       | no              | -                             | **omit on AWS** - see below                                              |
-| `S3_SECRET_ACCESS_KEY`   | no              | -                             | must be set together with the key id                                     |
-| `S3_REGION`              | no              | `us-east-1`                   | use `auto` for R2                                                        |
-| `S3_FORCE_PATH_STYLE`    | no              | `true`                        | set `false` for real AWS S3                                              |
-| `DB_DRIVER`              | no on Workers   | `d1` on Workers               | `d1` \| `sqlite` \| `postgres`                                           |
-| `SQLITE_PATH`            | if `sqlite`     | `./data/bunkerplan.db`        |                                                                          |
-| `DATABASE_URL`           | if `postgres`   | -                             |                                                                          |
-| `KV_DRIVER`              | no on Workers   | `kv` on Workers               | `kv` \| `valkey`                                                         |
-| `VALKEY_URL`             | if `valkey`     | -                             | e.g. `redis://valkey:6379`                                               |
+| `UPLOAD_RATE_MAX`        | no              | `30`                          | writes per window per user                                                                   |
+| `UPLOAD_RATE_WINDOW_SEC` | no              | `60`                          | minimum 60; a shorter window multiplies the sustained rate                                   |
+| `UNLOCK_RATE_MAX`        | no              | `30`                          | share-code redemptions per window per client address                                         |
+| `UNLOCK_RATE_WINDOW_SEC` | no              | `60`                          | minimum 1; no 60s floor, because a redemption stores nothing to guard                        |
+| `PLAN_ID_LENGTH`         | no              | `16`                          | characters in a plan id; lowercase alphanumeric, 8 to 63                                     |
+| `SHARE_CODE_LENGTH`      | no              | `16`                          | characters in a share code; mixed-case alphanumeric, 16 to 64                                |
+| `LOG_FORMAT`             | no              | `json`                        | `json` (ECS) \| `plain` (pino-pretty)                                                        |
+| `LOG_LEVEL`              | no              | `info`                        | `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` \| `silent`                     |
+| `LOG_COLOR`              | no              | `false`                       | colourises `LOG_FORMAT=plain` only                                                           |
+| `STORAGE_DRIVER`         | no on Workers   | `r2` on Workers               | `r2` \| `s3`                                                                                 |
+| `S3_ENDPOINT`            | no              | -                             | **omit for real AWS S3**; set for RustFS / MinIO / R2 / GCS                                  |
+| `S3_BUCKET`              | if `s3`         | -                             |                                                                                              |
+| `S3_ACCESS_KEY_ID`       | no              | -                             | **omit on AWS** - see below                                                                  |
+| `S3_SECRET_ACCESS_KEY`   | no              | -                             | must be set together with the key id                                                         |
+| `S3_REGION`              | no              | `us-east-1`                   | use `auto` for R2                                                                            |
+| `S3_FORCE_PATH_STYLE`    | no              | `true`                        | set `false` for real AWS S3                                                                  |
+| `DB_DRIVER`              | no on Workers   | `d1` on Workers               | `d1` \| `sqlite` \| `postgres`                                                               |
+| `SQLITE_PATH`            | if `sqlite`     | `./data/bunkerplan.db`        |                                                                                              |
+| `DATABASE_URL`           | if `postgres`   | -                             |                                                                                              |
+| `KV_DRIVER`              | no on Workers   | `kv` on Workers               | `kv` \| `valkey`                                                                             |
+| `VALKEY_URL`             | if `valkey`     | -                             | e.g. `redis://valkey:6379`                                                                   |
 
 A misconfigured deployment fails at boot with every problem listed at once, not
 on the first request.
@@ -300,7 +299,7 @@ confusing 403 much later.
   `POST /api/plans/{id}/share-code`, which replaces it, or `DELETE`, which drops
   it; both invalidate every unlock cookie issued under the old digest, and
   `DELETE` works whatever the plan's visibility. A public plan still cannot be
-  given a *new* code (409), because a new one would gate nothing. Grants behave
+  given a _new_ code (409), because a new one would gate nothing. Grants behave
   the same way: they name accounts the owner chose, and each is revocable on its
   own.
 - **Security headers are applied in `src/http/security-headers.ts`**, reached
@@ -312,7 +311,7 @@ confusing 403 much later.
   `frame-ancestors 'none'`. All of them, `APP_CSP` included, are set only when
   absent, so a route that already chose a header keeps it. The exception is
   the plan route: a successful `/p/{id}` response - `200` or `304` - has its
-  CSP *replaced* with `PLAN_CSP`, whatever it already carried. That overwrite
+  CSP _replaced_ with `PLAN_CSP`, whatever it already carried. That overwrite
   is the point of the split: a `304` legitimately carries almost no headers,
   and backfilling would let it take the app policy instead, whose lack of
   `sandbox` reads as permission to script the real origin.
@@ -398,14 +397,14 @@ existing one.
 The full session-only sharing-management set, all of which the dashboard drives
 and none of which an API key may call:
 
-| Request | Body | Reply |
-| --- | --- | --- |
-| `GET /api/plans/{id}/sharing` | - | `{"visibility":...,"hasShareCode":...,"grants":["handle",...]}` |
-| `PUT /api/plans/{id}/sharing` | `{"visibility":"public"\|"private"}` | the same shape |
-| `POST /api/plans/{id}/share-code` | - | `201 {"code":"..."}`, shown once; `409` while the plan is public |
-| `DELETE /api/plans/{id}/share-code` | - | `204` |
-| `POST /api/plans/{id}/grants` | `{"accounts":"a,b"}` or `{"accounts":["a","b"]}` | `{"granted":[...],"unknown":[...],"failed":[...]}` |
-| `DELETE /api/plans/{id}/grants/{handle}` | - | `204`; `404` when that handle held no grant |
+| Request                                  | Body                                             | Reply                                                            |
+| ---------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
+| `GET /api/plans/{id}/sharing`            | -                                                | `{"visibility":...,"hasShareCode":...,"grants":["handle",...]}`  |
+| `PUT /api/plans/{id}/sharing`            | `{"visibility":"public"\|"private"}`             | the same shape                                                   |
+| `POST /api/plans/{id}/share-code`        | -                                                | `201 {"code":"..."}`, shown once; `409` while the plan is public |
+| `DELETE /api/plans/{id}/share-code`      | -                                                | `204`                                                            |
+| `POST /api/plans/{id}/grants`            | `{"accounts":"a,b"}` or `{"accounts":["a","b"]}` | `{"granted":[...],"unknown":[...],"failed":[...]}`               |
+| `DELETE /api/plans/{id}/grants/{handle}` | -                                                | `204`; `404` when that handle held no grant                      |
 
 Every one answers `401` without a session and `404` for a plan the session does
 not own - never `403`, so an id belonging to someone else is never confirmed.
@@ -580,7 +579,7 @@ may still need subsetting first.
 
 **Ask for a weight range when you need several weights.** `wght@400..700`
 returns one file per script subset and declares `font-weight: 400 700`.
-`wght@400;500;600;700` returns the *same seven files* across 28 `@font-face`
+`wght@400;500;600;700` returns the _same seven files_ across 28 `@font-face`
 rules, one per weight, because the face is variable and every weight resolves to
 the same bytes. Embed from the list form and you paste four identical base64
 blobs into the document for no benefit.
@@ -628,11 +627,11 @@ Declare the range you asked for, so one blob serves every weight in it:
 and a latin subset is tens of kilobytes to begin with. Measured on a real
 three-family document:
 
-| family                        | latin files    | raw    |
-| ----------------------------- | -------------- | ------ |
-| IBM Plex Sans 400-700         | 1 (variable)   | 40,240 |
-| Inter 400-700                 | 1 (variable)   | 48,432 |
-| IBM Plex Mono 400 / 500 / 600 | 3 (static)     | 30,232 |
+| family                        | latin files  | raw    |
+| ----------------------------- | ------------ | ------ |
+| IBM Plex Sans 400-700         | 1 (variable) | 40,240 |
+| Inter 400-700                 | 1 (variable) | 48,432 |
+| IBM Plex Mono 400 / 500 / 600 | 3 (static)   | 30,232 |
 
 Five files and 119 KB raw finished as a 202 KB document - under 10% of the
 default 2 MB `MAX_UPLOAD_BYTES`. Note the two variable families collapsing four
@@ -663,7 +662,6 @@ rather than in this repo.
 
 Logs are sanitised on the way out. Every line passes through two filters before
 it leaves the process:
-
 - pino's `redact` censors values at known credential key paths (`password`,
   `secret`, `apiKey`, `authorization`, `connectionString`, `accessKeyId`,
   `secretAccessKey`, and the same names one level deep).
