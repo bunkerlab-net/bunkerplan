@@ -18,8 +18,10 @@ Upload a standalone HTML document, get a URL at `https://{host}/p/{id}`.
 
 ## Develop
 
-Use **Bun 1.4.4**, pinned in `mise.toml`, `package.json`, and the Docker image.
-`mise install` installs the development tools; CI uses the same pins.
+Use **Bun 1.4.4 or newer in the 1.x series** for the built-in formatter.
+`mise.toml` follows `bun@1`; `mise install` installs the development tools and
+CI uses the same configuration. The package-manager declaration and Docker
+image use Bun 1.4.4.
 
 ```sh
 git clone https://github.com/bunkerlab-net/bunkerplan.git && cd bunkerplan
@@ -45,9 +47,11 @@ bun run dev
 Formatting is built into Bun: `bun run format` writes changes and
 `bun run format:check` checks without writing. `bun run lint:fix` applies
 Oxlint's safe fixes. `hk check --all` runs the complete local/CI gate, including
-Pkl, whitespace, and private-key checks; the pre-commit hook checks staged files.
-Bun also organizes imports and sorts `package.json`, so no separate formatter
-or package-sorting dependency is needed. Vendored skills, generated migrations,
+Pkl, mise formatting, package.json ordering, whitespace, and private-key checks;
+the pre-commit hook checks staged files. Bun also organizes imports.
+`sort-package-json` retains the existing ordering of nested scripts and dependency
+maps; `mise fmt` owns `mise.toml`, which Bun formatting excludes.
+Vendored skills, generated migrations,
 the generated asset manifest, and Cloudflare types are excluded from formatting.
 Oxlint checks correctness, TypeScript, and JSX accessibility; warnings fail the
 checks. Its function-length rule counts physical lines differently from Biome,

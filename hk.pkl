@@ -45,14 +45,16 @@ local linters = new Mapping<String, Step> {
         "*.md",
         "*.mdx",
       )
-    exclude = List(".vscode/**", ".zed/**") + vendored + generated
-    depends = "oxlint"
+    exclude = List(".vscode/**", ".zed/**", "mise.toml") + vendored + generated
+    depends = List("oxlint", "sort_package_json")
     check = "bun fmt --check {{ files }}"
     fix = "bun fmt {{ files }}"
   }
   // Detect accidentally committed private keys. Deliberately NOT excluded
   // from `.agents/skills` - vendored content still gets scanned.
   ["detect_private_key"] = Builtins.detect_private_key
+  // Preserve mise's own configuration formatter.
+  ["mise"] = Builtins.mise
   // Ensure all files end with LF (*nix) not CRLF (DOS)
   ["mixed_line_ending"] = (Builtins.mixed_line_ending) {
     exclude = vendored
@@ -65,6 +67,11 @@ local linters = new Mapping<String, Step> {
   ["pkl_format"] = Builtins.pkl_format
   // Lint Pickle files
   ["pkl_lint"] = Builtins.pkl
+  // Sort package.json keys, including nested scripts and dependency maps.
+  ["sort_package_json"] = (Builtins.sort_package_json) {
+    check = "bun sort-package-json --check {{ files }}"
+    fix = "bun sort-package-json {{ files }}"
+  }
   // No trailing whitespace allowed
   ["trailing_whitespace"] = (Builtins.trailing_whitespace) {
     exclude = vendored

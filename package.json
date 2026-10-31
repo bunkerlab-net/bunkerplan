@@ -21,9 +21,9 @@
     "dev:node": "bun run scripts/dev.ts node",
     "format": "bun fmt",
     "format:check": "bun fmt --check",
+    "postinstall": "bun run scripts/vendor-scalar.ts",
     "lint": "oxlint --deny-warnings",
     "lint:fix": "oxlint --fix --deny-warnings",
-    "postinstall": "bun run scripts/vendor-scalar.ts",
     "start": "bun dist/server/index.js",
     "test": "bun run build && bun run test:only",
     "test:backends": "BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml up -d --wait postgres valkey rustfs && BETTER_AUTH_SECRET=unused-the-app-service-is-never-started docker compose -p bunkerplan-test -f docker-compose.yml -f docker-compose.test.yml run --rm rustfs-init",
@@ -61,13 +61,14 @@
     "drizzle-kit": "^0.31.11",
     "miniflare": "^5.20260915.0-alpha",
     "oxlint": "^1.90.0",
+    "sort-package-json": "^4.1.0",
     "wrangler": "^4.156.0"
   },
   "peerDependencies": {
     "typescript": "^7.0.2"
   },
+  "packageManager": "bun@1.4.4",
   "engines": {
-    "bun": "1.4.4"
-  },
-  "packageManager": "bun@1.4.4"
+    "bun": ">=1.4.4 <2"
+  }
 }
