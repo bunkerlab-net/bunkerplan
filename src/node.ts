@@ -1,4 +1,5 @@
 import { serveStatic } from "hono/bun";
+
 import { createApp } from "./app.ts";
 import { getServices, runtime } from "./runtime/node.ts";
 import { ASSETS, CLIENT_DIR } from "./server/manifest.generated.ts";

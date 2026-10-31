@@ -1,4 +1,5 @@
 import { bigint, index, integer, pgTable, text } from "drizzle-orm/pg-core";
+
 import { user } from "./auth.pg.ts";
 
 /**

@@ -1,9 +1,11 @@
 import "./dom-env.ts";
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+
 import * as realApiKey from "@better-auth/api-key/client";
 import * as realPasskey from "@better-auth/passkey/client";
 import * as realClient from "better-auth/client";
 import { useState } from "hono/jsx";
+
 import { type Arm, armWhileFileRuns } from "../armed-mock.ts";
 
 /**

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+
 import { createAuth } from "../auth/instance.ts";
 import { loadConfig } from "../config.ts";
 import { createD1Db } from "../db/d1.ts";

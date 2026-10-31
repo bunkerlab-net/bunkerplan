@@ -121,7 +121,7 @@ function CurlSnippet({ origin }: { origin: string }) {
     // code" rather than leaning on the styling to imply it.
     <section
       className="snippet"
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be reachable by keyboard (WCAG 2.1.1).
       tabIndex={0}
       aria-label="Example upload command"
     >

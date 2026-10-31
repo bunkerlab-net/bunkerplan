@@ -1,6 +1,7 @@
 # BunkerPlan
 
 Upload a standalone HTML document, get a URL at `https://{host}/p/{id}`.
+
 - **Private by default.** A plan is readable by its owner alone until it is
   shared - with anyone holding the URL, with a share code, or with named
   accounts. A code keeps working until it is regenerated or removed; only its
@@ -16,6 +17,9 @@ Upload a standalone HTML document, get a URL at `https://{host}/p/{id}`.
   Workers, any S3-compatible store + Postgres/SQLite + Valkey when self-hosted.
 
 ## Develop
+
+Use **Bun 1.4.4**, pinned in `mise.toml`, `package.json`, and the Docker image.
+`mise install` installs the development tools; CI uses the same pins.
 
 ```sh
 git clone https://github.com/bunkerlab-net/bunkerplan.git && cd bunkerplan
@@ -35,8 +39,19 @@ bun run dev
 | `bun run auth:generate:sqlite` / `:pg` | Regenerate the Better Auth schema - overwrites the file wholesale, so nothing hand-written survives it                                                      |
 | `bun run test`                         | Builds, then runs the whole suite with coverage. Partial by default: the container-backed suites run only when their `TEST_*` variables are set - see Tests |
 | `bun run test:backends`                | Starts Postgres, Valkey, and RustFS on localhost; set the `TEST_*` variables to reach them                                                                  |
-| `bun run check`                        | Biome lint and format                                                                                                                                       |
+| `bun run check`                        | Oxlint lint and Bun format checks                                                                                                                           |
 | `bun run typecheck`                    | Builds, then `bun --check`                                                                                                                                  |
+
+Formatting is built into Bun: `bun run format` writes changes and
+`bun run format:check` checks without writing. `bun run lint:fix` applies
+Oxlint's safe fixes. `hk check --all` runs the complete local/CI gate, including
+Pkl, whitespace, and private-key checks; the pre-commit hook checks staged files.
+Bun also organizes imports and sorts `package.json`, so no separate formatter
+or package-sorting dependency is needed. Vendored skills, generated migrations,
+the generated asset manifest, and Cloudflare types are excluded from formatting.
+Oxlint checks correctness, TypeScript, and JSX accessibility; warnings fail the
+checks. Its function-length rule counts physical lines differently from Biome,
+so the limit is 75 nonblank, noncomment lines (test functions remain exempt).
 
 `build` comes first in three of those because it writes
 `src/server/manifest.generated.ts` - the hashed filenames of the browser
@@ -72,8 +87,9 @@ via Miniflare, the rest against containers.
 
 The Cloudflare half needs nothing installed. The other three are opt-in by
 environment variable and **skip** when it is absent, so `bun run test` on a
-checkout with no Docker still passes - having exercised rather less than it
-looks. To run everything:
+checkout with no Docker runs only a partial suite. Bun 1.4.4 enforces the 90%
+coverage threshold per file, so skipped backend adapters can make the command
+exit nonzero even when every executed test passes. To run everything:
 
 ```sh
 bun run test:backends   # postgres, valkey, rustfs, published on localhost

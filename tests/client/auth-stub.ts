@@ -1,5 +1,6 @@
 import "./dom-env.ts";
 import { mock } from "bun:test";
+
 import * as real from "../../src/client/auth.ts";
 import { type Arm, armWhileFileRuns } from "../armed-mock.ts";
 

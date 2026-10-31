@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["unicorn", "typescript", "oxc", "jsx-a11y"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "max-lines-per-function": [
+      "error",
+      {
+        "max": 75,
+        "IIFEs": true,
+        "skipBlankLines": true,
+        "skipComments": true
+      }
+    ],
+    "typescript/no-explicit-any": "error",
+    "no-unused-vars": [
+      "error",
+      {
+        "ignoreRestSiblings": true
+      }
+    ]
+  },
+  "ignorePatterns": [
+    ".agents/**",
+    ".claude/**",
+    "dist/**",
+    "coverage/**",
+    ".wrangler/**",
+    "drizzle/**",
+    "worker-configuration.d.ts",
+    "src/server/manifest.generated.ts",
+    "public/scalar/**"
+  ],
+  "overrides": [
+    {
+      "files": ["**/tests/**"],
+      "rules": {
+        "max-lines-per-function": "off"
+      }
+    }
+  ]
+}

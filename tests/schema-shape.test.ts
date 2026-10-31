@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import {
   createTableRelationsHelpers,
   getTableName,
@@ -9,15 +10,16 @@ import {
   type Table,
 } from "drizzle-orm";
 import {
+  getTableConfig as pgTableConfig,
   PgDialect,
   PgTable,
-  getTableConfig as pgTableConfig,
 } from "drizzle-orm/pg-core";
 import {
+  getTableConfig as sqliteTableConfig,
   SQLiteSyncDialect,
   SQLiteTable,
-  getTableConfig as sqliteTableConfig,
 } from "drizzle-orm/sqlite-core";
+
 import * as pgAccountClosing from "../src/db/schema/account-closing.pg.ts";
 import * as sqliteAccountClosing from "../src/db/schema/account-closing.sqlite.ts";
 import * as pgAuth from "../src/db/schema/auth.pg.ts";

@@ -1,4 +1,5 @@
 import { bigint, index, pgTable, text } from "drizzle-orm/pg-core";
+
 import { user } from "./auth.pg.ts";
 
 /** See the note on the SQLite table; this is the same marker for Postgres. */

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { loadConfig } from "../src/config.ts";
 import { createLogger, redactSecrets } from "../src/log.ts";
 

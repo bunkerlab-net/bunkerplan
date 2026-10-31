@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+
 import { validate } from "@scalar/openapi-parser";
+
 import { openApiDocument } from "../src/api/openapi.ts";
 import { createApp } from "../src/app.ts";
 

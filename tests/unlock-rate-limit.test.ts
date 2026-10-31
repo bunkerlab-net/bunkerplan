@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+
 import { unlockPlan } from "../src/client/api.ts";
 import { hashShareCode } from "../src/http/share-auth.ts";
-import { createUnlockRoute } from "../src/http/unlock.ts";
 import {
   refundUnlockAttempt,
   reserveUnlockAttempt,
   type UnlockRateConfig,
 } from "../src/http/unlock-rate-limit.ts";
+import { createUnlockRoute } from "../src/http/unlock.ts";
 import type { Logger } from "../src/log.ts";
 import type { PlanRepo, RateLimitRepo } from "../src/services/types.ts";
 import { memoryPlans, storedPlan } from "./fakes.ts";

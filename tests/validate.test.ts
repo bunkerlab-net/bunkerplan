@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+
 import type { DefaultTreeAdapterTypes } from "parse5";
 import { parse } from "parse5";
+
 import { validateStandaloneHtml } from "../src/html/validate.ts";
 
 const encode = (html: string) => new TextEncoder().encode(html);

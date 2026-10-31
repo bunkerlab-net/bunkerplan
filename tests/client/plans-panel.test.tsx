@@ -1,6 +1,8 @@
 import "./dom-env.ts";
 import { beforeEach, describe, expect, test } from "bun:test";
+
 import { useState } from "hono/jsx";
+
 import type { PlanSummary } from "../../src/client/api.ts";
 import { PlansPanel } from "../../src/client/PlansPanel.tsx";
 import { MAX_PLAN_LABEL_LENGTH } from "../../src/limits.ts";

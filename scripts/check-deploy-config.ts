@@ -60,7 +60,7 @@ export function isLoopback(hostname: string): boolean {
     host === "::1" ||
     host === "::" ||
     host === "0.0.0.0" ||
-    /^127\./.test(host) ||
+    host.startsWith("127.") ||
     /^::ffff:7f/i.test(host)
   );
 }

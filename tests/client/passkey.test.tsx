@@ -1,5 +1,6 @@
 import "./dom-env.ts";
 import { describe, expect, test } from "bun:test";
+
 import { samePathOnly, usePasskeyAction } from "../../src/client/passkey.ts";
 import {
   client,

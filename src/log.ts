@@ -1,6 +1,7 @@
 import ecsFormat from "@elastic/ecs-pino-format";
 import { type Logger, pino } from "pino";
 import { prettyFactory } from "pino-pretty";
+
 import type { Config } from "./config.ts";
 
 export type { Logger };

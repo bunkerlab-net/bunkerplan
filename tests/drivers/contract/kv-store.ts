@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+
 import type { KvStore } from "../../../src/services/types.ts";
-import { FIXTURE_TIMEOUT_MS, type Fixture } from "../backends.ts";
+import { type Fixture, FIXTURE_TIMEOUT_MS } from "../backends.ts";
 
 /**
  * The `KvStore` contract, run against Workers KV and Valkey.

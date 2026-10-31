@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
+
 import { authClient } from "./auth.ts";
 import { controlValue } from "./dom.ts";
 import { EmptyOrLoading } from "./EmptyOrLoading.tsx";
@@ -264,7 +265,7 @@ function KeysTable(props: {
      */
     <section
       className="table-scroll"
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be reachable by keyboard (WCAG 2.1.1).
       tabIndex={0}
       aria-label="API keys"
     >
@@ -274,7 +275,7 @@ function KeysTable(props: {
             <th>Name</th>
             <th>Key</th>
             <th>Expires</th>
-            <th />
+            <th aria-label="Actions" />
           </tr>
         </thead>
         <tbody>

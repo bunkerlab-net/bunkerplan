@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
+
 import { loadConfig, MIN_RATE_WINDOW_SEC } from "../src/config.ts";
 import { WORKERS_MAX_PLANS_PER_USER } from "../src/limits.ts";
 import {
   CLIENT_IP_HEADER,
-  SELF_HOSTED as DRIVERS,
   REQUIRED as MINIMUM,
+  SELF_HOSTED as DRIVERS,
 } from "./config-env.ts";
 
 /**

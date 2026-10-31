@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
+
 import { Redis } from "ioredis";
+
 import { MIN_TTL_SECONDS } from "../../src/kv/min-ttl.ts";
 import { VALKEY_URL, valkeyKv } from "./backends.ts";
 import { describeKvStore } from "./contract/kv-store.ts";

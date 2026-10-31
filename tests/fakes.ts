@@ -1,4 +1,5 @@
 import { pino } from "pino";
+
 import type { AppAuth } from "../src/auth/instance.ts";
 import type { PlanVisibility } from "../src/limits.ts";
 import type { Logger } from "../src/log.ts";

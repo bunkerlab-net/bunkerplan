@@ -1,5 +1,6 @@
 import "./dom-env.ts";
 import { afterEach, beforeEach } from "bun:test";
+
 import type { Child } from "hono/jsx";
 import { createRoot } from "hono/jsx/dom/client";
 

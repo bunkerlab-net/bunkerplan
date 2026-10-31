@@ -4,6 +4,7 @@ import { passkey } from "@better-auth/passkey";
 import type { BetterAuthOptions } from "better-auth";
 import { APIError } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
+
 import {
   EXPECTED_ACCOUNT_HEADER,
   WRONG_ACCOUNT_CODE,

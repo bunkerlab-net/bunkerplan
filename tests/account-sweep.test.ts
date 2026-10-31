@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { sweepAccountObjects } from "../src/auth/instance.ts";
 import { PLAN_PAGE_SIZE, WORKERS_MAX_PLANS_PER_USER } from "../src/limits.ts";
 import type { Logger } from "../src/log.ts";
@@ -9,8 +10,8 @@ import type {
 } from "../src/services/types.ts";
 import {
   type MemoryAccountClosing,
-  type MemoryPlans,
   memoryAccountClosing,
+  type MemoryPlans,
   memoryPlans,
   type StoredPlan,
   storedPlan,

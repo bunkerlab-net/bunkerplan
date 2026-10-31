@@ -1,15 +1,16 @@
 import { useEffect } from "hono/jsx";
+
 import { useSession } from "./auth.ts";
 import { SiteFrame } from "./Chrome.tsx";
 import { Dashboard } from "./Dashboard.tsx";
 import { Landing } from "./Landing.tsx";
-import { PlanGate } from "./PlanGate.tsx";
 import type {
   DashboardProps,
   LandingPageProps,
   PageProps,
 } from "./page-props.ts";
 import { usePasskeyAction } from "./passkey.ts";
+import { PlanGate } from "./PlanGate.tsx";
 
 /**
  * The landing page is the root for everyone. A signed-in visitor is not

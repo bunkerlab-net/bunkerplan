@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+
 import { validate } from "@scalar/openapi-parser";
+
 import { DOCS_PAGE, SCALAR_SCRIPT_PATH } from "../../src/api/docs-page.ts";
 import {
   ErrorBody,
@@ -17,8 +19,8 @@ import {
   PUBLIC_BASE_URL,
   SHARE_CODE_LENGTH,
   startWorker,
-  UPLOAD_RATE_MAX,
   upload,
+  UPLOAD_RATE_MAX,
 } from "./harness.ts";
 
 let app: Harness;
@@ -1427,12 +1429,12 @@ describe("gated sharing", () => {
       // The owner's own key, which every other plan route accepts. These six
       // are what `SESSION_ONLY` in tests/openapi.test.ts leaves out of the
       // published document, so the document is only honest while they refuse.
-      const keyed = { ...(init.headers ?? {}), "x-api-key": owner.key };
+      const keyed = { ...init.headers, "x-api-key": owner.key };
       expect((await app.fetch(path, { ...init, headers: keyed })).status).toBe(
         401,
       );
 
-      const headers = { ...(init.headers ?? {}), cookie: stranger.cookie };
+      const headers = { ...init.headers, cookie: stranger.cookie };
       const outsider = await app.fetch(path, { ...init, headers });
       // Not 403: never confirm that someone else's plan id exists.
       expect(outsider.status).toBe(404);

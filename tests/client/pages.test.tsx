@@ -1,5 +1,6 @@
 import "./dom-env.ts";
 import { describe, expect, test } from "bun:test";
+
 import { NotFound } from "../../src/client/NotFound.tsx";
 import { Page } from "../../src/client/pages.tsx";
 import { api, useApiStub } from "./api-stub.ts";
@@ -10,8 +11,8 @@ import {
   PENDING,
   refuse,
   replacements,
-  SIGNED_OUT,
   setSession,
+  SIGNED_OUT,
   signedIn,
   useAuthStub,
 } from "./auth-stub.ts";

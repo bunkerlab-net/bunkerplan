@@ -1,5 +1,6 @@
 import "./dom-env.ts";
 import { beforeEach, describe, expect, test } from "bun:test";
+
 import { PasskeysPanel } from "../../src/client/PasskeysPanel.tsx";
 import { client, explode, ok, refuse, useAuthStub } from "./auth-stub.ts";
 import type { Mounted } from "./harness.tsx";

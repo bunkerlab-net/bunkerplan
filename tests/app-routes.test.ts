@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { PAGE_PROPS_ID } from "../src/client/mount.ts";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
 import { PLAN_PAGE_SIZE } from "../src/limits.ts";
@@ -20,8 +21,8 @@ import {
   memoryPlans,
   OWNER,
   PLAN_ID,
-  STRANGER,
   storedPlan,
+  STRANGER,
 } from "./fakes.ts";
 
 /**

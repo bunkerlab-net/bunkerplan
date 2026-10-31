@@ -1,4 +1,5 @@
 import type { Child } from "hono/jsx";
+
 import { authClient } from "./auth.ts";
 
 interface NavProps {

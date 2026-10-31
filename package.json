@@ -5,13 +5,13 @@
   "type": "module",
   "module": "src/node.ts",
   "scripts": {
-    "auth:generate:pg": "bun run auth generate --config src/db/gen/auth.pg.ts --output src/db/schema/auth.pg.ts --yes && biome check --write src/db/schema/auth.pg.ts",
-    "auth:generate:sqlite": "bun run auth generate --config src/db/gen/auth.sqlite.ts --output src/db/schema/auth.sqlite.ts --yes && biome check --write src/db/schema/auth.sqlite.ts",
+    "auth:generate:pg": "bun run auth generate --config src/db/gen/auth.pg.ts --output src/db/schema/auth.pg.ts --yes && oxlint --fix --deny-warnings src/db/schema/auth.pg.ts && bun fmt src/db/schema/auth.pg.ts",
+    "auth:generate:sqlite": "bun run auth generate --config src/db/gen/auth.sqlite.ts --output src/db/schema/auth.sqlite.ts --yes && oxlint --fix --deny-warnings src/db/schema/auth.sqlite.ts && bun fmt src/db/schema/auth.sqlite.ts",
     "build": "bun run scripts/build.ts",
     "cf-typegen": "wrangler types",
-    "check": "biome check",
+    "check": "bun run lint && bun run format:check",
     "clean": "rm -rf .wrangler dist node_modules src/server/manifest.generated.ts",
-    "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts && biome check --write drizzle",
+    "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.pg.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply bunkerplan --local",
     "db:migrate:pg": "drizzle-kit migrate --config drizzle.pg.config.ts",
     "db:migrate:sqlite": "drizzle-kit migrate --config drizzle.sqlite.config.ts",
@@ -19,6 +19,10 @@
     "deploy:check": "bun run scripts/check-deploy-config.ts",
     "dev": "bun run scripts/dev.ts",
     "dev:node": "bun run scripts/dev.ts node",
+    "format": "bun fmt",
+    "format:check": "bun fmt --check",
+    "lint": "oxlint --deny-warnings",
+    "lint:fix": "oxlint --fix --deny-warnings",
     "postinstall": "bun run scripts/vendor-scalar.ts",
     "start": "bun dist/server/index.js",
     "test": "bun run build && bun run test:only",
@@ -47,7 +51,6 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.4",
     "@cloudflare/workers-types": "^5.20261030.1",
     "@happy-dom/global-registrator": "^21.0.4",
     "@scalar/api-reference": "^1.76.3",
@@ -57,11 +60,14 @@
     "auth": "^1.7.14",
     "drizzle-kit": "^0.31.11",
     "miniflare": "^5.20260915.0-alpha",
-    "sort-package-json": "^4.1.0",
+    "oxlint": "^1.90.0",
     "wrangler": "^4.156.0"
   },
   "peerDependencies": {
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "bun": "1.4.4"
   },
   "packageManager": "bun@1.4.4"
 }

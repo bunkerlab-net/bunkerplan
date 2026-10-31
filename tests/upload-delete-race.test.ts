@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { sweepAccountObjects } from "../src/auth/instance.ts";
 import { storeAndConfirm } from "../src/http/store-plan.ts";
 import type {
@@ -11,8 +12,8 @@ import {
   type MemoryAccountClosing,
   memoryAccountClosing,
   memoryPlans,
-  type StoredPlan,
   silentLogger,
+  type StoredPlan,
   storedPlan,
 } from "./fakes.ts";
 

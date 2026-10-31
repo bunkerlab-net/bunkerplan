@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { type ReplacePlanDeps, replacePlan } from "../src/http/replace-plan.ts";
+
+import { replacePlan, type ReplacePlanDeps } from "../src/http/replace-plan.ts";
 import type { PlanStorage } from "../src/services/types.ts";
 import { openAccounts, openRateLimits } from "./app-harness.ts";
 import {

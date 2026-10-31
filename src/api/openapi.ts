@@ -18,6 +18,7 @@
  * it by hand here is exactly the drift this module exists to avoid.
  */
 import type { ZodType } from "zod";
+
 import { type Config, MIN_SHARE_CODE_LENGTH } from "../config.ts";
 import { SHARE_CODE_ALPHABET_LENGTH } from "../ids.ts";
 import {
@@ -39,10 +40,10 @@ import {
   PlanRelabelled,
   PlanReplaced,
   PlanVisibilityQuery,
-  RelabelRequest,
   ref,
-  ShareCodeQuery,
+  RelabelRequest,
   shareCodeFormat,
+  ShareCodeQuery,
   UnlockRequest,
 } from "./schemas.ts";
 

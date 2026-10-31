@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import type { BetterAuthPluginDBSchema } from "@better-auth/core/db";
 import {
   createTableRelationsHelpers,
@@ -7,6 +8,7 @@ import {
 } from "drizzle-orm";
 import { getTableConfig as pgTableConfig } from "drizzle-orm/pg-core";
 import { getTableConfig as sqliteTableConfig } from "drizzle-orm/sqlite-core";
+
 import { buildAuthOptions } from "../src/auth/options.ts";
 import * as pgSchema from "../src/db/schema/auth.pg.ts";
 import * as sqliteSchema from "../src/db/schema/auth.sqlite.ts";
@@ -158,7 +160,7 @@ interface TableShape {
 
 /*
  * Copied out of the namespaces once. Indexing a module namespace by a computed
- * name defeats tree shaking, and biome says so - these are plain objects, and
+ * name defeats tree shaking - these are plain objects, and
  * the lookup below is the same one it always was.
  */
 const pgTables = { ...pgSchema };

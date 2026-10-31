@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "hono/jsx";
+
 import { authClient } from "./auth.ts";
 import { EmptyOrLoading } from "./EmptyOrLoading.tsx";
 import { messageOf } from "./errors.ts";
@@ -132,7 +133,7 @@ function PasskeysTable(props: {
      */
     <section
       className="table-scroll"
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be reachable by keyboard (WCAG 2.1.1).
       tabIndex={0}
       aria-label="Passkeys"
     >
@@ -141,7 +142,7 @@ function PasskeysTable(props: {
           <tr>
             <th>Name</th>
             <th>Added</th>
-            <th />
+            <th aria-label="Actions" />
           </tr>
         </thead>
         <tbody>
