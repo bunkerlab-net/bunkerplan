@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { buildAuthOptions } from "../src/auth/options.ts";
 import {
   EXPECTED_ACCOUNT_HEADER,

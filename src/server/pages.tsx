@@ -1,9 +1,10 @@
 import type { Child } from "hono/jsx";
+
 import { PAGE_PROPS_ID, ROOT_ID } from "../client/mount.ts";
 import { NotFound } from "../client/NotFound.tsx";
-import { PlanGate } from "../client/PlanGate.tsx";
 import type { PageProps } from "../client/page-props.ts";
 import { DashboardPage, LandingPage } from "../client/pages.tsx";
+import { PlanGate } from "../client/PlanGate.tsx";
 import type { AssetManifest } from "./assets.ts";
 
 const TITLE = "BunkerPlan";

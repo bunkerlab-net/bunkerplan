@@ -49,8 +49,7 @@ type Attribute = Token.Attribute;
  * dropped others.
  */
 export type ValidationResult =
-  | { ok: true }
-  | { ok: false; reasons: readonly string[]; truncated: boolean };
+  { ok: true } | { ok: false; reasons: readonly string[]; truncated: boolean };
 
 /**
  * Attributes whose value names an external resource. Most of them fetch it

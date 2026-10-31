@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import type { AppAuth } from "../src/auth/instance.ts";
 import {
   clearShareCode,
@@ -12,10 +13,10 @@ import { hashShareCode } from "../src/http/share-auth.ts";
 import { MAX_GRANTS_PER_REQUEST, type PlanVisibility } from "../src/limits.ts";
 import type { GrantOutcome, PlanRepo } from "../src/services/types.ts";
 import {
+  fakeAuth as sharedAuth,
   memoryPlans,
   OWNER,
   PLAN_ID as PLAN,
-  fakeAuth as sharedAuth,
   storedPlan,
 } from "./fakes.ts";
 
@@ -661,7 +662,7 @@ describe("every sharing handler refuses an API key", () => {
   ): Request =>
     new Request("https://plans.example.test/x", {
       ...init,
-      headers: { ...(init.headers ?? {}), "x-api-key": "bkp_valid" },
+      headers: { ...init.headers, "x-api-key": "bkp_valid" },
     });
   const keyedJson = (body: unknown): Request =>
     keyed({

@@ -10,8 +10,7 @@ import { MAX_PLAN_LABEL_LENGTH } from "../limits.ts";
  */
 
 export type PlanLabelResult =
-  | { ok: true; label: string | null }
-  | { ok: false; reason: string };
+  { ok: true; label: string | null } | { ok: false; reason: string };
 
 /**
  * Characters a label must not carry.

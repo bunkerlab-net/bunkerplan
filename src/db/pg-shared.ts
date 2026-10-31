@@ -1,5 +1,6 @@
 import { type SQL, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+
 import type { Dialect, SqlExecutor } from "./dialect.ts";
 import * as accountClosingSchema from "./schema/account-closing.pg.ts";
 import * as authSchema from "./schema/auth.pg.ts";

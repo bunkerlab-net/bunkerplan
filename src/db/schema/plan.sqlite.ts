@@ -7,6 +7,7 @@ import {
   sqliteTable,
   text,
 } from "drizzle-orm/sqlite-core";
+
 import type { PlanVisibility } from "../../limits.ts";
 import { user } from "./auth.sqlite.ts";
 import { PLAN_VISIBILITY_CHECK } from "./visibility-check.ts";

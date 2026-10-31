@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { MAX_SHARE_CODE_LENGTH } from "../src/config.ts";
 import {
   MAX_UNLOCK_BODY_BYTES,
@@ -18,8 +19,8 @@ import {
   memoryPlans,
   OWNER,
   PLAN_ID as PLAN,
-  STRANGER,
   storedPlan,
+  STRANGER,
 } from "./fakes.ts";
 
 const CODE = "sHaReCoDe1234567";

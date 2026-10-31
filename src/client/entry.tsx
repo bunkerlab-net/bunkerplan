@@ -1,4 +1,5 @@
 import { hydrateRoot } from "hono/jsx/dom/client";
+
 import { PAGE_PROPS_ID, ROOT_ID } from "./mount.ts";
 import type { PageProps } from "./page-props.ts";
 import { Page } from "./pages.tsx";

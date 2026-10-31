@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
+
 import * as sdk from "@aws-sdk/client-s3";
+
 import type { Config } from "../src/config.ts";
 import { type Arm, armWhileFileRuns } from "./armed-mock.ts";
 

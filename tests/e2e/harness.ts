@@ -2,6 +2,7 @@ import { defaultKeyHasher } from "@better-auth/api-key";
 import type { RequestInit, Response } from "@cloudflare/workers-types";
 import { makeSignature } from "better-auth/crypto";
 import { createTestHarness } from "wrangler";
+
 import { handleEmail } from "../../src/ids.ts";
 import { migrationFiles } from "../migration-files.ts";
 

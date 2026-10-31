@@ -41,6 +41,7 @@ interesting class: a plan reaching the app origin, another user's session, or
 another account's plans.
 
 Known and accepted, so please do not report these as new:
+
 - **A plan can still cause an outbound request by navigating.** CSP has no
   deployable `navigate-to`, and the top-navigation sandbox tokens govern only
   embedded documents, so script in a plan can assign `location` or open a

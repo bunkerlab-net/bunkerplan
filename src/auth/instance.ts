@@ -1,5 +1,6 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { betterAuth } from "better-auth";
+
 import type { Config } from "../config.ts";
 import type { PgAuthHandle } from "../db/pg-shared.ts";
 import type { SqliteAuthHandle } from "../db/sqlite-shared.ts";

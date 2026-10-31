@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, spyOn, test } from "bun:test";
+
 import { ErrorBody } from "../src/api/schemas.ts";
 import { createApp } from "../src/app.ts";
 

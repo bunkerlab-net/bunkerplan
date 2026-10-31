@@ -1,6 +1,8 @@
 import "./dom-env.ts";
 import { afterEach, describe, expect, test } from "bun:test";
+
 import { hydrateRoot } from "hono/jsx/dom/client";
+
 import { PAGE_PROPS_ID, ROOT_ID } from "../../src/client/mount.ts";
 import type { PageProps } from "../../src/client/page-props.ts";
 import { Page } from "../../src/client/pages.tsx";

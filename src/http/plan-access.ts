@@ -8,8 +8,8 @@ import { problem } from "./problem.ts";
 import { resolveUserId } from "./require-user.ts";
 import {
   mintShareCookie,
-  type ShareCookieConfig,
   shareCodeMatches,
+  type ShareCookieConfig,
   verifyShareCookie,
 } from "./share-auth.ts";
 

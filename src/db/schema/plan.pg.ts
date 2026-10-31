@@ -8,6 +8,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
+
 import type { PlanVisibility } from "../../limits.ts";
 import { user } from "./auth.pg.ts";
 import { PLAN_VISIBILITY_CHECK } from "./visibility-check.ts";

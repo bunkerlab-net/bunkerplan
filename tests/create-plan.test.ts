@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
+
 import type { Config } from "../src/config.ts";
 import { DatabaseUnavailable } from "../src/db/unavailable.ts";
-import { type CreatePlanDeps, createPlan } from "../src/http/create-plan.ts";
+import { createPlan, type CreatePlanDeps } from "../src/http/create-plan.ts";
 import type { PlanRepo, PlanStorage } from "../src/services/types.ts";
 import { at, fakeAuth, recordingLogger, silentLogger } from "./fakes.ts";
 import { basePlanRepoStub } from "./plan-repo-stub.ts";

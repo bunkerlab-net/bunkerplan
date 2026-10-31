@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { parsePlanLabel } from "../src/http/plan-label.ts";
 import { MAX_PLAN_LABEL_LENGTH } from "../src/limits.ts";
 

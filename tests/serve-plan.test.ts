@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { APP_CSP, PLAN_CSP } from "../src/http/security-headers.ts";
 import { hashShareCode, shareCookieName } from "../src/http/share-auth.ts";
 import {
@@ -12,8 +13,8 @@ import {
   memoryPlans,
   OWNER,
   PLAN_ID,
-  STRANGER,
   storedPlan,
+  STRANGER,
 } from "./fakes.ts";
 
 /**

@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
+
 import * as cookieModule from "better-auth/cookies";
+
 import { handleEmail } from "../src/ids.ts";
 import { type Arm, armWhileFileRuns } from "./armed-mock.ts";
 import { BASE } from "./auth-fixture.ts";

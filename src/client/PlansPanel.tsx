@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "hono/jsx";
+
 import { MAX_PLAN_LABEL_LENGTH, type PlanVisibility } from "../limits.ts";
 import {
   addGrants,
@@ -396,7 +397,7 @@ function ShareLink({
             none. The `code` stays inside it. */}
         <section
           className="snippet"
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+          // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be reachable by keyboard (WCAG 2.1.1).
           tabIndex={0}
           aria-label="Share link"
         >
@@ -972,7 +973,7 @@ function PlansTable(props: {
     <section
       ref={props.containerRef}
       className="table-scroll"
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard (WCAG 2.1.1).
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be reachable by keyboard (WCAG 2.1.1).
       tabIndex={0}
       aria-label="Plans"
     >
@@ -984,7 +985,7 @@ function PlansTable(props: {
             <th>Size</th>
             <th>Created</th>
             <th>Sharing</th>
-            <th />
+            <th aria-label="Actions" />
           </tr>
         </thead>
         <tbody>
@@ -1015,6 +1016,7 @@ function DropZone(props: {
   onFiles: (files: FileList | null) => void;
 }) {
   return (
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- Drag-and-drop supplements the keyboard-accessible file input linked by this label.
     <label
       className={props.dragging ? "dropzone is-dragging" : "dropzone"}
       htmlFor="plan-file"

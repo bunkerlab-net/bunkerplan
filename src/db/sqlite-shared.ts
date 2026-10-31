@@ -1,5 +1,6 @@
 import { type SQL, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+
 import type { Dialect, SqlExecutor } from "./dialect.ts";
 import * as accountClosingSchema from "./schema/account-closing.sqlite.ts";
 import * as authSchema from "./schema/auth.sqlite.ts";

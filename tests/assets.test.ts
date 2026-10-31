@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { isAssetManifest, MANIFEST_FILENAME } from "../src/server/assets.ts";
 import { ASSETS } from "../src/server/manifest.generated.ts";
 

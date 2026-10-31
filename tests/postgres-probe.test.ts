@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
+
 import realPg from "pg";
+
 import type { Logger } from "../src/log.ts";
 import { type Arm, armWhileFileRuns } from "./armed-mock.ts";
 

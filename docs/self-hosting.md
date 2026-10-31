@@ -1,6 +1,7 @@
 # Self-hosting BunkerPlan
 
 BunkerPlan runs from one source tree on two targets:
+
 - **Cloudflare Workers** - R2 (objects), D1 (database and rate-limit counters),
   Workers KV (session cache). Built with `bun run build`.
 - **Bun** - any S3-compatible store, Postgres or SQLite, Valkey. Built with
@@ -322,6 +323,7 @@ confusing 403 much later.
   `public/api-docs.js` for the same reason. `style-src` keeps `'unsafe-inline'`
   because the pages carry inline `style` attributes. Helmet is not used - it is
   Express middleware and cannot run on Workers.
+
 - **Account deletion is immediate and irreversible.** There is no email
   confirmation because addresses are synthetic (`…@passkey.invalid`) and cannot
   receive mail. Three safeguards stand in: Better Auth's session-freshness
@@ -662,6 +664,7 @@ rather than in this repo.
 
 Logs are sanitised on the way out. Every line passes through two filters before
 it leaves the process:
+
 - pino's `redact` censors values at known credential key paths (`password`,
   `secret`, `apiKey`, `authorization`, `connectionString`, `accessKeyId`,
   `secretAccessKey`, and the same names one level deep).

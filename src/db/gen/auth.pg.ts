@@ -8,6 +8,7 @@
  */
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { betterAuth } from "better-auth";
+
 import { buildAuthOptions } from "../../auth/options.ts";
 
 export const auth = betterAuth(
