@@ -20,8 +20,9 @@ Upload a standalone HTML document, get a URL at `https://{host}/p/{id}`.
 
 Use **Bun 1.4.4 or newer in the 1.x series** for the built-in formatter.
 `mise.toml` follows `bun@1`; `mise install` installs the development tools and
-CI uses the same configuration. The package-manager declaration and Docker
-image use Bun 1.4.4.
+CI uses the same configuration. The Docker image follows `oven/bun:1-alpine`;
+the package-manager declaration records Bun 1.4.4. If an existing mise install
+still resolves to an older 1.x, run `mise upgrade bun` before using the formatter.
 
 ```sh
 git clone https://github.com/bunkerlab-net/bunkerplan.git && cd bunkerplan

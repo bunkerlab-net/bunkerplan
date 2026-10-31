@@ -3,7 +3,7 @@
 # Bun is required at runtime regardless of driver: `dist/server/index.js` is
 # bundled with `bun build --target=bun`. `DB_DRIVER=sqlite` needs `bun:sqlite`
 # on top of that. Postgres is still the recommended self-host driver.
-FROM docker.io/oven/bun:1.4.4-alpine AS base
+FROM docker.io/oven/bun:1-alpine AS base
 WORKDIR /app
 ENV NODE_ENV=production
 

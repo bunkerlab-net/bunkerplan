@@ -39,6 +39,8 @@ jobs:
         with:
           install: true
           cache: true
+          # Discard pre-formatter caches that satisfy bun@1 with Bun 1.4.3.
+          cache_key_prefix: mise-bun-fmt-v1
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/cache
