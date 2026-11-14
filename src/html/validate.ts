@@ -857,21 +857,13 @@ class DocumentScanner extends SAXParser {
 }
 
 /**
- * The simulator's namespace no longer matches the document's.
+ * The supported foreign-root nesting is deliberately narrower than HTML's.
  *
- * It enters SVG on `<svg>` whether or not the tag closed itself, and it leaves
- * only when an end tag matches its innermost entry, where a browser pops until
- * one matches. So `<svg/>` leaves it in SVG for the rest of the document, and
- * `<svg><math></svg>` leaves it in MathML, and from there EVERYTHING downstream
- * is read wrong: raw-text elements are read as markup, `<image>` is not rewritten
- * to `img` so its `src` is never checked, SVG name and attribute adjustment is
- * applied to HTML.
- *
- * Each of those could be corrected one at a time; the list is the reason not to.
- * Where the parse has stopped describing the document, a verdict about the
- * document is not worth giving, so this says so instead. It costs nothing real:
- * the trigger is a self-closed `<svg/>` or `<math/>`, or foreign end tags that
- * cross, and both have a plain spelling that is not affected.
+ * SAX 8.0.0 left its namespace stale after self-closing roots and crossed end
+ * tags, so the namespace mismatch used to enforce this restriction implicitly.
+ * SAX 8.0.1 fixes those cases. Keep the documented upload contract explicit:
+ * refuse those shapes in StyleText, independently of the simulator's current
+ * behaviour. The namespace comparison below remains a fail-closed backstop.
  */
 const DIVERGED_NAMESPACE =
   "unsupported nesting: a self-closing <svg/> or <math/>, or crossed svg/math " +
@@ -957,6 +949,8 @@ class StyleText {
     private readonly onBlock: (css: string) => void,
     /** Called when an element inside an SVG `<style>` makes it unaccountable. */
     private readonly onUnaccountable: () => void,
+    /** Called for foreign-root shapes outside the supported nesting contract. */
+    private readonly onUnsupportedNesting: () => void,
   ) {}
 
   /**
@@ -979,7 +973,8 @@ class StyleText {
     if (unaccountable) this.onUnaccountable();
 
     if (tag.tagName === "svg" || tag.tagName === "math") {
-      if (!tag.selfClosing) this.pushRoot(tag.tagName);
+      if (tag.selfClosing) this.onUnsupportedNesting();
+      else this.pushRoot(tag.tagName);
       return;
     }
     if (tag.tagName !== "style") return;
@@ -1008,6 +1003,7 @@ class StyleText {
    */
   endTag(tagName: string): void {
     const closesRoot = this.opened(tagName);
+    if (closesRoot && tagName !== this.root) this.onUnsupportedNesting();
     const ambiguous = this.css !== null && tagName !== "style" && !closesRoot;
     this.end();
     if (ambiguous) this.onUnaccountable();
@@ -1091,6 +1087,10 @@ function scanDocument(text: string, found: Map<string, string>): void {
     () => {
       found.set(UNACCOUNTABLE_STYLE, UNACCOUNTABLE_STYLE);
       capped();
+    },
+    () => {
+      found.set(DIVERGED_NAMESPACE, DIVERGED_NAMESPACE);
+      parser.stop();
     },
   );
 

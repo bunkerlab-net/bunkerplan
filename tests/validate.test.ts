@@ -1251,14 +1251,16 @@ describe("validateStandaloneHtml - parser conformance", () => {
   ];
 
   /**
-   * The simulator enters SVG or MathML on the start tag whether or not it closed
-   * itself, and leaves only when an end tag matches its innermost entry, where a
-   * browser pops until one matches. Past either point the parse stops describing
-   * the document - raw text is read as markup, `<image>` is not rewritten to
-   * `img`, SVG name and attribute adjustment is applied to HTML - so the check
-   * says so rather than giving a verdict it cannot stand behind.
+   * Keep the documented nesting restriction independent of SAX's namespace
+   * bookkeeping. SAX 8.0.1 follows these shapes correctly; earlier releases
+   * left a stale namespace. Both must refuse the same unsupported inputs,
+   * whether or not anything after the root would fetch an external resource.
    */
   const DIVERGED = [
+    `<svg/>`,
+    `<math/>`,
+    `<svg><math></svg>`,
+    `<math><svg></math>`,
     `<svg/><style>@import url("${EXT}");</style>`,
     `<math/><style>@import url("${EXT}");</style>`,
     `<svg><math></svg><style>@import url("${EXT}");</style>`,
@@ -1379,7 +1381,7 @@ describe("validateStandaloneHtml - parser conformance", () => {
   );
 
   test.each(DIVERGED)(
-    "refuses a document whose parse it can no longer follow: %s",
+    "refuses unsupported foreign-root nesting: %s",
     (body) => {
       const result = check(DOC(body));
       expect(result.ok).toBe(false);
@@ -1407,9 +1409,8 @@ describe("validateStandaloneHtml - parser conformance", () => {
    * `parse5` builds the tree, and the answer is the CHILD text content of each
    * style element it holds. Two lists are deliberately excluded. `UNACCOUNTABLE`
    * is refused for its markup, so the gate makes no claim about the reference.
-   * `DIVERGED` is refused because the parse has stopped describing the document,
-   * so a tree built from the same bytes is exactly what the scanner can no longer
-   * follow, and the two would disagree there by design.
+   * `DIVERGED` is refused by the supported nesting contract, independently of
+   * whether this parser version could follow those particular bytes.
    * Cheap on fixtures this size; a tree is what the gate cannot afford on a 2 MiB
    * upload, which is why the scanner streams instead.
    */
