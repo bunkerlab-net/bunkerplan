@@ -31,5 +31,11 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": true
-  }
+  },
+  // Scalar is shipped as an already-built browser bundle, not TypeScript input.
+  "exclude": [
+    "node_modules",
+    "public/scalar/standalone.js",
+    "dist/client/scalar/standalone.js"
+  ]
 }
