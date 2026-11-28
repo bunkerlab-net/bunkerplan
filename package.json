@@ -33,15 +33,15 @@
     "typecheck:only": "bun --check"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1173.0",
-    "@better-auth/api-key": "^1.7.26",
-    "@better-auth/drizzle-adapter": "^1.7.26",
-    "@better-auth/passkey": "^1.7.26",
+    "@aws-sdk/client-s3": "^3.1178.0",
+    "@better-auth/api-key": "^1.7.28",
+    "@better-auth/drizzle-adapter": "^1.7.28",
+    "@better-auth/passkey": "^1.7.28",
     "@elastic/ecs-pino-format": "^1.5.0",
-    "better-auth": "^1.7.26",
+    "better-auth": "^1.7.28",
     "drizzle-orm": "^0.45.4",
-    "hono": "^4.13.19",
-    "ioredis": "^6.0.0",
+    "hono": "^4.13.23",
+    "ioredis": "^6.1.0",
     "nanoid": "^6.0.2",
     "parse5": "^8.1.1",
     "parse5-sax-parser": "^8.0.1",
@@ -51,18 +51,18 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261120.1",
+    "@cloudflare/workers-types": "^5.20261127.1",
     "@happy-dom/global-registrator": "^21.0.4",
-    "@scalar/api-reference": "^1.82.1",
-    "@scalar/openapi-parser": "^0.29.26",
+    "@scalar/api-reference": "^1.85.0",
+    "@scalar/openapi-parser": "^0.29.29",
     "@types/bun": "^1.4.5",
     "@types/pg": "^8.23.1",
-    "auth": "^1.7.26",
+    "auth": "^1.7.28",
     "drizzle-kit": "^0.31.11",
     "miniflare": "^5.20260915.0-alpha",
-    "oxlint": "^1.94.0",
+    "oxlint": "^1.95.0",
     "sort-package-json": "^4.1.0",
-    "wrangler": "^4.165.0"
+    "wrangler": "^4.168.0"
   },
   "peerDependencies": {
     "typescript": "^7.0.2"
